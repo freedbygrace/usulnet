@@ -32,6 +32,8 @@ services:
     volumes:
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock
+      # Application configuration
+      - ./config.yaml:/app/config/config.yaml:ro
       # Persistent data (backups, PKI certs, license, etc.)
       - usulnet_data:/app/data
     # Host terminal support (nsenter into host namespaces)
@@ -40,12 +42,6 @@ services:
       - SYS_PTRACE
       - SYS_ADMIN
     environment:
-      - USULNET_MODE=standalone
-      - USULNET_DATABASE_URL=postgres://${DB_USER:-usulnet}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-usulnet}?sslmode=disable
-      - USULNET_REDIS_URL=redis://redis:6379
-      - USULNET_NATS_URL=nats://nats:4222
-      - USULNET_JWT_SECRET=${JWT_SECRET}
-      - USULNET_ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - HOST_TERMINAL_ENABLED=${HOST_TERMINAL_ENABLED:-true}
       - HOST_TERMINAL_USER=${HOST_TERMINAL_USER:-nobody}
       - HOST_TERMINAL_SHELL=/bin/bash
