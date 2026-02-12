@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,21 @@ type ServiceConfig struct {
 	// PasswordMinLength minimum password length
 	PasswordMinLength int
 
+	// PasswordRequireUpper requires at least one uppercase letter
+	PasswordRequireUpper bool
+
+	// PasswordRequireNumber requires at least one digit
+	PasswordRequireNumber bool
+
+	// PasswordRequireSymbol requires at least one special character
+	PasswordRequireSymbol bool
+
+	// MaxFailedLogins before account lockout (0 = disabled)
+	MaxFailedLogins int
+
+	// LockoutDuration is how long to lock accounts after max failed logins
+	LockoutDuration time.Duration
+
 	// DefaultRole for new users
 	DefaultRole models.UserRole
 
@@ -37,16 +53,25 @@ type ServiceConfig struct {
 
 	// MaxAPIKeysPerUser limits API keys per user (0 = unlimited)
 	MaxAPIKeysPerUser int
+
+	// APIKeyLength is the length in bytes for generated API keys (default 32 → 64 hex chars)
+	APIKeyLength int
 }
 
 // DefaultServiceConfig returns default service configuration.
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
 		PasswordMinLength:        8,
+		PasswordRequireUpper:     true,
+		PasswordRequireNumber:    true,
+		PasswordRequireSymbol:    false,
+		MaxFailedLogins:          5,
+		LockoutDuration:          15 * time.Minute,
 		DefaultRole:              models.RoleViewer,
 		AllowSelfRegistration:    false,
 		RequireEmailVerification: false,
 		MaxAPIKeysPerUser:        10,
+		APIKeyLength:             32,
 	}
 }
 
@@ -56,12 +81,15 @@ type Service struct {
 	apiKeyRepo    *postgres.APIKeyRepository
 	config        ServiceConfig
 	logger        *logger.Logger
+	limitMu       sync.RWMutex
 	limitProvider license.LimitProvider
 }
 
 // SetLimitProvider sets the license limit provider for resource cap enforcement.
 func (s *Service) SetLimitProvider(lp license.LimitProvider) {
+	s.limitMu.Lock()
 	s.limitProvider = lp
+	s.limitMu.Unlock()
 }
 
 // NewService creates a new user service.
@@ -97,16 +125,20 @@ type CreateInput struct {
 
 // Create creates a new user.
 func (s *Service) Create(ctx context.Context, input CreateInput) (*models.User, error) {
-	// Enforce license user limit
-	if s.limitProvider != nil {
-		limit := s.limitProvider.GetLimits().MaxUsers
+	// Enforce license user limit (fail-closed: error on stats failure)
+	s.limitMu.RLock()
+	lp := s.limitProvider
+	s.limitMu.RUnlock()
+	if lp != nil {
+		limit := lp.GetLimits().MaxUsers
 		if limit > 0 {
 			stats, err := s.GetStats(ctx)
-			if err == nil {
-				current := int(stats.Total)
-				if current >= limit {
-					return nil, apperrors.LimitExceeded("users", current, limit)
-				}
+			if err != nil {
+				return nil, fmt.Errorf("check user limit: %w", err)
+			}
+			current := int(stats.Total)
+			if current >= limit {
+				return nil, apperrors.LimitExceeded("users", current, limit)
 			}
 		}
 	}
@@ -201,11 +233,64 @@ func (s *Service) validateCreateInput(input CreateInput) error {
 		return apperrors.InvalidInput(fmt.Sprintf("password must be at least %d characters", s.config.PasswordMinLength))
 	}
 
+	if err := s.validatePasswordPolicy(input.Password); err != nil {
+		return err
+	}
+
 	if input.Email != "" && !isValidEmail(input.Email) {
 		return apperrors.InvalidInput("invalid email format")
 	}
 
 	return nil
+}
+
+// validatePasswordPolicy enforces configured password complexity requirements.
+func (s *Service) validatePasswordPolicy(password string) error {
+	if s.config.PasswordRequireUpper {
+		hasUpper := false
+		for _, r := range password {
+			if r >= 'A' && r <= 'Z' {
+				hasUpper = true
+				break
+			}
+		}
+		if !hasUpper {
+			return apperrors.InvalidInput("password must contain at least one uppercase letter")
+		}
+	}
+
+	if s.config.PasswordRequireNumber {
+		hasDigit := false
+		for _, r := range password {
+			if r >= '0' && r <= '9' {
+				hasDigit = true
+				break
+			}
+		}
+		if !hasDigit {
+			return apperrors.InvalidInput("password must contain at least one digit")
+		}
+	}
+
+	if s.config.PasswordRequireSymbol {
+		hasSymbol := false
+		for _, r := range password {
+			if !isAlphaNumeric(r) {
+				hasSymbol = true
+				break
+			}
+		}
+		if !hasSymbol {
+			return apperrors.InvalidInput("password must contain at least one special character")
+		}
+	}
+
+	return nil
+}
+
+// isAlphaNumeric checks if a rune is a letter or digit.
+func isAlphaNumeric(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 // isValidUsernameChar checks if a character is valid for usernames.
@@ -446,11 +531,17 @@ func (s *Service) CreateAPIKey(ctx context.Context, userID uuid.UUID, name strin
 	}
 
 	// Check global API keys limit (license)
-	if s.limitProvider != nil {
-		limit := s.limitProvider.GetLimits().MaxAPIKeys
+	s.limitMu.RLock()
+	lp := s.limitProvider
+	s.limitMu.RUnlock()
+	if lp != nil {
+		limit := lp.GetLimits().MaxAPIKeys
 		if limit > 0 {
 			globalCount, err := s.apiKeyRepo.CountAll(ctx)
-			if err == nil && int(globalCount) >= limit {
+			if err != nil {
+				return nil, fmt.Errorf("count API keys: %w", err)
+			}
+			if int(globalCount) >= limit {
 				return nil, apperrors.NewWithStatus(apperrors.CodeLimitExceeded,
 					fmt.Sprintf("global API key limit reached (%d/%d), upgrade your license for more", globalCount, limit), 402)
 			}
@@ -478,7 +569,7 @@ func (s *Service) CreateAPIKey(ctx context.Context, userID uuid.UUID, name strin
 	}
 
 	// Generate API key
-	rawKey, err := generateAPIKey()
+	rawKey, err := generateAPIKey(s.config.APIKeyLength)
 	if err != nil {
 		return nil, fmt.Errorf("generate API key: %w", err)
 	}
@@ -510,10 +601,12 @@ func (s *Service) CreateAPIKey(ctx context.Context, userID uuid.UUID, name strin
 	}, nil
 }
 
-// generateAPIKey generates a new API key.
-func generateAPIKey() (string, error) {
-	// Generate 32 bytes of random data
-	token, err := crypto.GenerateKey()
+// generateAPIKey generates a new API key with configurable byte length.
+func generateAPIKey(length int) (string, error) {
+	if length <= 0 {
+		length = 32
+	}
+	token, err := crypto.RandomHex(length)
 	if err != nil {
 		return "", err
 	}

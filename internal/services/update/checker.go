@@ -467,10 +467,15 @@ func ExtractSourceRepo(labels map[string]string) string {
 // In-Memory Cache Implementation
 // ============================================================================
 
-// MemoryVersionCache is a simple in-memory cache for version information
+// maxVersionCacheSize is the maximum number of entries in the version cache.
+// When exceeded, the oldest expired entry is evicted; if none expired, the oldest entry is evicted.
+const maxVersionCacheSize = 1000
+
+// MemoryVersionCache is an in-memory cache for version information with LRU eviction.
 type MemoryVersionCache struct {
-	cache map[string]*cacheEntry
-	mu    sync.RWMutex
+	cache  map[string]*cacheEntry
+	mu     sync.RWMutex
+	maxSize int
 }
 
 type cacheEntry struct {
@@ -478,15 +483,16 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// NewMemoryVersionCache creates a new in-memory version cache
+// NewMemoryVersionCache creates a new in-memory version cache with LRU eviction.
 func NewMemoryVersionCache() *MemoryVersionCache {
 	c := &MemoryVersionCache{
-		cache: make(map[string]*cacheEntry),
+		cache:   make(map[string]*cacheEntry),
+		maxSize: maxVersionCacheSize,
 	}
-	
+
 	// Start cleanup goroutine
 	go c.cleanup()
-	
+
 	return c
 }
 
@@ -512,15 +518,41 @@ func (c *MemoryVersionCache) Get(ctx context.Context, image, tag string) (*model
 	return entry.version, true
 }
 
-// Set stores a version in the cache
+// Set stores a version in the cache, evicting the oldest entry if at capacity.
 func (c *MemoryVersionCache) Set(ctx context.Context, image, tag string, version *models.ImageVersion, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	key := c.cacheKey(image, tag)
+
+	// Evict if at capacity and this is a new key
+	if _, exists := c.cache[key]; !exists && len(c.cache) >= c.maxSize {
+		c.evictOldest()
+	}
+
 	c.cache[key] = &cacheEntry{
 		version:   version,
 		expiresAt: time.Now().Add(ttl),
+	}
+}
+
+// evictOldest removes the oldest (earliest expiry) entry from the cache.
+// Must be called with mu held.
+func (c *MemoryVersionCache) evictOldest() {
+	var oldestKey string
+	var oldestTime time.Time
+	first := true
+
+	for k, entry := range c.cache {
+		if first || entry.expiresAt.Before(oldestTime) {
+			oldestKey = k
+			oldestTime = entry.expiresAt
+			first = false
+		}
+	}
+
+	if oldestKey != "" {
+		delete(c.cache, oldestKey)
 	}
 }
 

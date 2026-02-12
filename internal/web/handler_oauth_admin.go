@@ -45,24 +45,9 @@ type Logger interface {
 	Warn(msg string, args ...interface{})
 }
 
-// SetOAuthConfigRepo sets the OAuth config repository.
-func (h *Handler) SetOAuthConfigRepo(repo OAuthConfigRepository) {
-	h.oauthConfigRepo = repo
-}
-
-// SetEncryptor sets the encryptor for secret encryption.
-func (h *Handler) SetEncryptor(enc Encryptor) {
-	h.encryptor = enc
-}
-
-// SetLogger sets the logger for the handler.
-func (h *Handler) SetLogger(log Logger) {
-	h.logger = log
-}
-
 // OAuthProvidersTempl renders the OAuth providers list page.
 func (h *Handler) OAuthProvidersTempl(w http.ResponseWriter, r *http.Request) {
-	pageData := h.preparePageData(r, "OAuth Providers", "settings")
+	pageData := h.preparePageData(r, "OAuth Providers", "oauth-providers")
 
 	providers, err := h.oauthConfigRepo.List(r.Context())
 	if err != nil {
@@ -106,7 +91,7 @@ func (h *Handler) OAuthProvidersTempl(w http.ResponseWriter, r *http.Request) {
 
 // OAuthProviderEditTempl renders the OAuth provider edit page.
 func (h *Handler) OAuthProviderEditTempl(w http.ResponseWriter, r *http.Request) {
-	pageData := h.preparePageData(r, "Edit OAuth Provider", "settings")
+	pageData := h.preparePageData(r, "Edit OAuth Provider", "oauth-providers")
 
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)

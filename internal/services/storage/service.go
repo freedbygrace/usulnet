@@ -33,6 +33,7 @@ type Service struct {
 	encryptor     Encryptor
 	config        Config
 	logger        *logger.Logger
+	limitMu       sync.RWMutex
 	limitProvider license.LimitProvider
 
 	mu      sync.RWMutex
@@ -40,8 +41,11 @@ type Service struct {
 }
 
 // SetLimitProvider sets the license limit provider for enforcing MaxS3Connections.
+// Thread-safe: may be called while goroutines read limitProvider.
 func (s *Service) SetLimitProvider(lp license.LimitProvider) {
+	s.limitMu.Lock()
 	s.limitProvider = lp
+	s.limitMu.Unlock()
 }
 
 // NewService creates a new storage service.
@@ -71,8 +75,11 @@ func NewService(
 // CreateConnection creates, encrypts credentials, and tests a storage connection.
 func (s *Service) CreateConnection(ctx context.Context, input models.CreateStorageConnectionInput, userID string) (*models.StorageConnection, error) {
 	// Enforce MaxS3Connections license limit
-	if s.limitProvider != nil {
-		limit := s.limitProvider.GetLimits().MaxS3Connections
+	s.limitMu.RLock()
+	lp := s.limitProvider
+	s.limitMu.RUnlock()
+	if lp != nil {
+		limit := lp.GetLimits().MaxS3Connections
 		if limit > 0 {
 			existing, err := s.connRepo.List(ctx, s.config.DefaultHostID)
 			if err == nil && len(existing) >= limit {

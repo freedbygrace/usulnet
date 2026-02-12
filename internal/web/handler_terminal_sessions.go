@@ -77,11 +77,6 @@ type TerminalSessionListOptions struct {
 	Offset     int
 }
 
-// SetTerminalSessionRepo sets the terminal session repository.
-func (h *Handler) SetTerminalSessionRepo(repo TerminalSessionRepository) {
-	h.terminalSessionRepo = repo
-}
-
 // ============================================================================
 // API Handlers for Terminal Session History
 // ============================================================================

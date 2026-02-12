@@ -220,7 +220,7 @@ templ JobList(data JobListData) {
 													<span class="text-xs text-green-400 w-8 text-right">100%</span>
 												</div>
 											} else {
-												<span class="text-xs text-gray-600">—</span>
+												<span class="text-xs text-gray-400">—</span>
 											}
 										</td>
 
@@ -233,7 +233,7 @@ templ JobList(data JobListData) {
 										<td class="px-4 py-3">
 											<span class="text-sm text-gray-400" title={ job.ScheduledAt }>{ job.ScheduledAt }</span>
 											if job.StartedAt != "" {
-												<p class="text-xs text-gray-600">Started: { job.StartedAt }</p>
+												<p class="text-xs text-gray-400">Started: { job.StartedAt }</p>
 											}
 										</td>
 
@@ -242,7 +242,7 @@ templ JobList(data JobListData) {
 											if job.Duration != "" {
 												<span class="text-sm text-gray-400">{ job.Duration }</span>
 											} else {
-												<span class="text-xs text-gray-600">—</span>
+												<span class="text-xs text-gray-400">—</span>
 											}
 										</td>
 

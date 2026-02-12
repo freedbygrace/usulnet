@@ -23,6 +23,8 @@ type RetentionService interface {
 	CleanupOldAuditLog(ctx context.Context, retentionDays int) (int64, error)
 	CleanupOldJobEvents(ctx context.Context, retentionDays int) (int64, error)
 	CleanupOldNotificationLogs(ctx context.Context, retentionDays int) (int64, error)
+	CleanupOldRuntimeSecurityEvents(ctx context.Context, retentionDays int) (int64, error)
+	CleanupOldAlertEvents(ctx context.Context, retentionDays int) (int64, error)
 	CleanupExpiredSessions(ctx context.Context) (int64, error)
 	CleanupExpiredPasswordResetTokens(ctx context.Context) (int64, error)
 }
@@ -37,12 +39,14 @@ type RetentionWorker struct {
 // RetentionPayload represents payload for retention job
 type RetentionPayload struct {
 	// Override default retention days per table (0 = use SQL function default)
-	MetricsDays          int `json:"metrics_days,omitempty"`
-	ContainerStatsDays   int `json:"container_stats_days,omitempty"`
-	HostMetricsDays      int `json:"host_metrics_days,omitempty"`
-	AuditLogDays         int `json:"audit_log_days,omitempty"`
-	JobEventsDays        int `json:"job_events_days,omitempty"`
-	NotificationLogsDays int `json:"notification_logs_days,omitempty"`
+	MetricsDays                 int `json:"metrics_days,omitempty"`
+	ContainerStatsDays          int `json:"container_stats_days,omitempty"`
+	HostMetricsDays             int `json:"host_metrics_days,omitempty"`
+	AuditLogDays                int `json:"audit_log_days,omitempty"`
+	JobEventsDays               int `json:"job_events_days,omitempty"`
+	NotificationLogsDays        int `json:"notification_logs_days,omitempty"`
+	RuntimeSecurityEventsDays   int `json:"runtime_security_events_days,omitempty"`
+	AlertEventsDays             int `json:"alert_events_days,omitempty"`
 }
 
 // RetentionResult holds the result of a retention cleanup
@@ -106,6 +110,8 @@ func (w *RetentionWorker) Execute(ctx context.Context, job *models.Job) (interfa
 		{"audit_log", payload.AuditLogDays, 90, w.retentionService.CleanupOldAuditLog},
 		{"job_events", payload.JobEventsDays, 7, w.retentionService.CleanupOldJobEvents},
 		{"notification_logs", payload.NotificationLogsDays, 30, w.retentionService.CleanupOldNotificationLogs},
+		{"runtime_security_events", payload.RuntimeSecurityEventsDays, 30, w.retentionService.CleanupOldRuntimeSecurityEvents},
+		{"alert_events", payload.AlertEventsDays, 90, w.retentionService.CleanupOldAlertEvents},
 	}
 
 	for i, task := range tasks {

@@ -96,7 +96,7 @@ func AnsibleInventory(data AnsibleInventoryData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Inventories) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"p-6 text-center text-gray-500\"><i class=\"fas fa-file-upload text-2xl mb-2\"></i><p class=\"text-sm\">No inventories loaded</p><p class=\"text-xs text-gray-600 mt-1\">Upload or paste an inventory file</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"p-6 text-center text-gray-500\"><i class=\"fas fa-file-upload text-2xl mb-2\"></i><p class=\"text-sm\">No inventories loaded</p><p class=\"text-xs text-gray-400 mt-1\">Upload or paste an inventory file</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -681,7 +681,7 @@ func AnsibleInventory(data AnsibleInventoryData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<!-- No Selection --> <div class=\"card p-12 text-center\"><i class=\"fab fa-ansible text-6xl text-gray-600 mb-4\"></i><h2 class=\"text-xl font-semibold text-white mb-2\">Ansible Inventory Browser</h2><p class=\"text-gray-400 mb-6\">Upload or select an inventory file to view hosts and groups</p><div class=\"flex justify-center gap-3\"><button onclick=\"document.getElementById('upload-modal').classList.remove('hidden')\" class=\"btn-secondary\"><i class=\"fas fa-upload mr-2\"></i>Upload File</button> <button onclick=\"document.getElementById('paste-modal').classList.remove('hidden')\" class=\"btn-primary\"><i class=\"fas fa-paste mr-2\"></i>Paste Content</button></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<!-- No Selection --> <div class=\"card p-12 text-center\"><i class=\"fab fa-ansible text-6xl text-gray-400 mb-4\"></i><h2 class=\"text-xl font-semibold text-white mb-2\">Ansible Inventory Browser</h2><p class=\"text-gray-400 mb-6\">Upload or select an inventory file to view hosts and groups</p><div class=\"flex justify-center gap-3\"><button onclick=\"document.getElementById('upload-modal').classList.remove('hidden')\" class=\"btn-secondary\"><i class=\"fas fa-upload mr-2\"></i>Upload File</button> <button onclick=\"document.getElementById('paste-modal').classList.remove('hidden')\" class=\"btn-primary\"><i class=\"fas fa-paste mr-2\"></i>Paste Content</button></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

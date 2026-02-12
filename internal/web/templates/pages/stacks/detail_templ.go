@@ -336,7 +336,7 @@ func Detail(data StackDetailData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Versions) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"card p-8 text-center\"><i class=\"fas fa-history text-4xl text-gray-600 mb-4\"></i><p class=\"text-gray-400\">No version history yet</p><p class=\"text-sm text-gray-500 mt-1\">Click \"Save Version\" to create a snapshot of the current compose file</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"card p-8 text-center\"><i class=\"fas fa-history text-4xl text-gray-400 mb-4\"></i><p class=\"text-gray-400\">No version history yet</p><p class=\"text-sm text-gray-500 mt-1\">Click \"Save Version\" to create a snapshot of the current compose file</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

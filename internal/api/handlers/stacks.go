@@ -118,24 +118,24 @@ type ScaleServiceRequest struct {
 
 // StackResponse represents a stack in API responses.
 type StackResponse struct {
-	ID             string                   `json:"id"`
-	HostID         string                   `json:"host_id"`
-	Name           string                   `json:"name"`
-	Type           string                   `json:"type"`
-	Status         string                   `json:"status"`
-	ProjectDir     string                   `json:"project_dir"`
-	EnvFile        string                   `json:"env_file,omitempty"`
-	Variables      map[string]string        `json:"variables,omitempty"`
-	Services       []StackServiceResponse   `json:"services,omitempty"`
-	ServiceCount   int                      `json:"service_count"`
-	RunningCount   int                      `json:"running_count"`
-	GitRepo        string                   `json:"git_repo,omitempty"`
-	GitBranch      string                   `json:"git_branch,omitempty"`
-	GitCommit      string                   `json:"git_commit,omitempty"`
-	LastDeployedAt string                   `json:"last_deployed_at,omitempty"`
-	LastDeployedBy string                   `json:"last_deployed_by,omitempty"`
-	CreatedAt      string                   `json:"created_at"`
-	UpdatedAt      string                   `json:"updated_at"`
+	ID             string                 `json:"id"`
+	HostID         string                 `json:"host_id"`
+	Name           string                 `json:"name"`
+	Type           string                 `json:"type"`
+	Status         string                 `json:"status"`
+	ProjectDir     string                 `json:"project_dir"`
+	EnvFile        string                 `json:"env_file,omitempty"`
+	Variables      map[string]string      `json:"variables,omitempty"`
+	Services       []StackServiceResponse `json:"services,omitempty"`
+	ServiceCount   int                    `json:"service_count"`
+	RunningCount   int                    `json:"running_count"`
+	GitRepo        string                 `json:"git_repo,omitempty"`
+	GitBranch      string                 `json:"git_branch,omitempty"`
+	GitCommit      string                 `json:"git_commit,omitempty"`
+	LastDeployedAt string                 `json:"last_deployed_at,omitempty"`
+	LastDeployedBy string                 `json:"last_deployed_by,omitempty"`
+	CreatedAt      string                 `json:"created_at"`
+	UpdatedAt      string                 `json:"updated_at"`
 }
 
 // StackServiceResponse represents a service in a stack.
@@ -793,11 +793,11 @@ type CreateVersionRequest struct {
 
 // DiffResponse represents a diff between versions.
 type DiffResponse struct {
-	FromVersion    int                       `json:"from_version"`
-	ToVersion      int                       `json:"to_version"`
-	ComposeChanges []DiffLineResponse        `json:"compose_changes"`
-	EnvChanges     []DiffLineResponse        `json:"env_changes,omitempty"`
-	Summary        DiffSummaryResponse       `json:"summary"`
+	FromVersion    int                 `json:"from_version"`
+	ToVersion      int                 `json:"to_version"`
+	ComposeChanges []DiffLineResponse  `json:"compose_changes"`
+	EnvChanges     []DiffLineResponse  `json:"env_changes,omitempty"`
+	Summary        DiffSummaryResponse `json:"summary"`
 }
 
 // DiffLineResponse represents a line in a diff.
@@ -861,8 +861,10 @@ func (h *StackHandler) CreateVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Get user ID from context
 	var userID *uuid.UUID
+	if uid, err := h.GetUserID(r); err == nil {
+		userID = &uid
+	}
 
 	version, err := h.stackService.CreateVersion(r.Context(), stackID, req.Comment, userID)
 	if err != nil {
@@ -942,8 +944,10 @@ func (h *StackHandler) RestoreVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Get user ID from context
 	var userID *uuid.UUID
+	if uid, err := h.GetUserID(r); err == nil {
+		userID = &uid
+	}
 
 	stack, err := h.stackService.RestoreVersion(r.Context(), stackID, versionNum, "Restored via API", userID)
 	if err != nil {

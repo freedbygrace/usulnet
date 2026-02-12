@@ -8,6 +8,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,12 +32,16 @@ type Service struct {
 	permRepo      *postgres.ResourcePermissionRepository
 	config        Config
 	logger        *logger.Logger
+	limitMu       sync.RWMutex
 	limitProvider license.LimitProvider
 }
 
 // SetLimitProvider sets the license limit provider for dynamic limit enforcement.
+// Thread-safe: may be called while goroutines read limitProvider.
 func (s *Service) SetLimitProvider(lp license.LimitProvider) {
+	s.limitMu.Lock()
 	s.limitProvider = lp
+	s.limitMu.Unlock()
 }
 
 // NewService creates a new team service.
@@ -65,8 +70,11 @@ func NewService(
 func (s *Service) CreateTeam(ctx context.Context, name, description string, createdBy uuid.UUID) (*models.Team, error) {
 	// Check team limit dynamically from license provider (defense in depth)
 	maxTeams := s.config.MaxTeams
-	if s.limitProvider != nil {
-		maxTeams = s.limitProvider.GetLimits().MaxTeams
+	s.limitMu.RLock()
+	lp := s.limitProvider
+	s.limitMu.RUnlock()
+	if lp != nil {
+		maxTeams = lp.GetLimits().MaxTeams
 	}
 	if maxTeams > 0 {
 		count, err := s.teamRepo.Count(ctx)

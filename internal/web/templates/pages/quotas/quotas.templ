@@ -1,0 +1,393 @@
+package quotas
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+// QuotasData holds all data for the resource quotas page.
+type QuotasData struct {
+	PageData layouts.PageData
+	Quotas   []QuotaView
+	Usage    ResourceUsageView
+	Alerts   []QuotaAlertView
+	Hosts    []HostBasic
+}
+
+// QuotaView represents a resource quota in the UI.
+type QuotaView struct {
+	ID           string
+	Name         string
+	Scope        string // host, global
+	ScopeID      string // host ID if scope=host
+	ScopeName    string // host name for display
+	ResourceType string // cpu, memory, containers, images, volumes, disk
+	Limit        int64
+	LimitHuman   string
+	CurrentUsage int64
+	UsageHuman   string
+	UsagePercent float64
+	IsEnabled    bool
+	AlertAt      int  // percentage threshold for alert (e.g., 80)
+	CreatedAt    string
+}
+
+// ResourceUsageView shows current aggregate usage.
+type ResourceUsageView struct {
+	// CPU
+	CPUCores       int
+	CPUUsedPercent float64
+	// Memory
+	MemoryTotal      string
+	MemoryUsed       string
+	MemoryPercent    float64
+	MemoryTotalBytes int64
+	MemoryUsedBytes  int64
+	// Containers
+	ContainersTotal   int
+	ContainersRunning int
+	ContainersStopped int
+	// Images
+	ImagesTotal  int
+	ImagesSize   string
+	// Volumes
+	VolumesTotal int
+	VolumesSize  string
+	VolumesInUse int
+	// Disk
+	DiskTotal     string
+	DiskUsed      string
+	DiskPercent   float64
+	DiskUsedBytes int64
+}
+
+// QuotaAlertView shows an active quota breach alert.
+type QuotaAlertView struct {
+	QuotaName    string
+	ResourceType string
+	ScopeName    string
+	CurrentUsage string
+	Limit        string
+	UsagePercent float64
+	Severity     string // warning (>80%), critical (>95%)
+	TriggeredAt  string
+}
+
+// HostBasic represents a host for the dropdown.
+type HostBasic struct {
+	ID   string
+	Name string
+}
+
+templ Quotas(data QuotasData) {
+	@layouts.Base(data.PageData) {
+		<div class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">Resource Quotas</h1>
+					<p class="text-gray-400 mt-1">Set and monitor resource limits per host</p>
+				</div>
+				<button
+					onclick="document.getElementById('createQuotaModal').classList.remove('hidden')"
+					class="btn-primary flex items-center gap-2"
+				>
+					<i class="fas fa-plus"></i>
+					New Quota
+				</button>
+			</div>
+
+			<!-- Active Alerts -->
+			if len(data.Alerts) > 0 {
+				<div class="card border-l-4 border-l-red-500 p-4">
+					<h3 class="text-sm font-medium text-red-400 mb-3">
+						<i class="fas fa-exclamation-circle mr-2"></i>Quota Alerts ({ fmt.Sprintf("%d", len(data.Alerts)) })
+					</h3>
+					<div class="space-y-2">
+						for _, alert := range data.Alerts {
+							<div class="flex items-center justify-between px-3 py-2 bg-dark-700 rounded-lg">
+								<div class="flex items-center gap-3">
+									if alert.Severity == "critical" {
+										<span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+									} else {
+										<span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+									}
+									<span class="text-sm text-white">{ alert.QuotaName }</span>
+									<span class="text-xs text-gray-400">({ alert.ScopeName })</span>
+								</div>
+								<div class="flex items-center gap-4">
+									<span class="text-sm text-gray-300">{ alert.CurrentUsage } / { alert.Limit }</span>
+									<span class={ "text-sm font-medium", alertColor(alert.Severity) }>{ fmt.Sprintf("%.0f%%", alert.UsagePercent) }</span>
+								</div>
+							</div>
+						}
+					</div>
+				</div>
+			}
+
+			<!-- Current Usage Overview -->
+			<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+				@usageCard("CPU", fmt.Sprintf("%d cores", data.Usage.CPUCores), data.Usage.CPUUsedPercent, "fas fa-microchip")
+				@usageCard("Memory", data.Usage.MemoryUsed + " / " + data.Usage.MemoryTotal, data.Usage.MemoryPercent, "fas fa-memory")
+				@usageCard("Containers", fmt.Sprintf("%d running", data.Usage.ContainersRunning), float64(data.Usage.ContainersRunning)/max(float64(data.Usage.ContainersTotal), 1)*100, "fas fa-cube")
+				@usageCard("Images", fmt.Sprintf("%d (%s)", data.Usage.ImagesTotal, data.Usage.ImagesSize), 0, "fas fa-layer-group")
+				@usageCard("Volumes", fmt.Sprintf("%d (%s)", data.Usage.VolumesTotal, data.Usage.VolumesSize), float64(data.Usage.VolumesInUse)/max(float64(data.Usage.VolumesTotal), 1)*100, "fas fa-database")
+				@usageCard("Disk", data.Usage.DiskUsed + " / " + data.Usage.DiskTotal, data.Usage.DiskPercent, "fas fa-hdd")
+			</div>
+
+			<!-- Quotas List -->
+			if len(data.Quotas) == 0 {
+				<div class="card p-12 text-center">
+					<i class="fas fa-tachometer-alt text-4xl text-gray-400 mb-4"></i>
+					<h3 class="text-lg font-medium text-white mb-2">No Resource Quotas</h3>
+					<p class="text-gray-400 mb-4">Set limits to prevent resource exhaustion on your Docker hosts</p>
+				</div>
+			} else {
+				<div class="space-y-3">
+					for _, quota := range data.Quotas {
+						@quotaCard(quota, data.PageData.CSRFToken)
+					}
+				</div>
+			}
+
+			<!-- Create Quota Modal -->
+			@createQuotaModal(data.PageData.CSRFToken, data.Hosts)
+		</div>
+	}
+}
+
+templ usageCard(label, value string, percent float64, icon string) {
+	<div class="card p-4">
+		<div class="flex items-center gap-2 mb-2">
+			<i class={ icon, "text-gray-400 text-sm" }></i>
+			<span class="text-xs text-gray-400">{ label }</span>
+		</div>
+		<p class="text-sm font-medium text-white mb-2">{ value }</p>
+		if percent > 0 {
+			<div class="w-full bg-dark-600 rounded-full h-1.5">
+				<div class={ "h-1.5 rounded-full", progressColor(percent) } style={ fmt.Sprintf("width: %.0f%%", min(percent, 100)) }></div>
+			</div>
+		}
+	</div>
+}
+
+templ quotaCard(quota QuotaView, csrfToken string) {
+	<div class="card p-4">
+		<div class="flex items-center justify-between">
+			<div class="flex items-center gap-4 flex-1">
+				<div class={ "w-10 h-10 rounded-lg flex items-center justify-center", resourceIconBg(quota.ResourceType) }>
+					<i class={ resourceIcon(quota.ResourceType), resourceIconColor(quota.ResourceType) }></i>
+				</div>
+				<div class="flex-1 min-w-0">
+					<div class="flex items-center gap-2">
+						<h3 class="font-medium text-white">{ quota.Name }</h3>
+						if quota.IsEnabled {
+							<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded">Active</span>
+						} else {
+							<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded">Disabled</span>
+						}
+						<span class="px-2 py-0.5 text-xs bg-dark-600 text-gray-300 rounded">{ quota.ScopeName }</span>
+					</div>
+					<div class="flex items-center gap-4 mt-2">
+						<div class="flex-1 max-w-md">
+							<div class="flex justify-between text-xs mb-1">
+								<span class="text-gray-400">{ quota.UsageHuman } / { quota.LimitHuman }</span>
+								<span class={ usageColor(quota.UsagePercent) }>{ fmt.Sprintf("%.1f%%", quota.UsagePercent) }</span>
+							</div>
+							<div class="w-full bg-dark-600 rounded-full h-2">
+								<div class={ "h-2 rounded-full transition-all", progressColor(quota.UsagePercent) } style={ fmt.Sprintf("width: %.0f%%", min(quota.UsagePercent, 100)) }></div>
+							</div>
+						</div>
+						if quota.AlertAt > 0 {
+							<span class="text-xs text-gray-500">Alert at { fmt.Sprintf("%d%%", quota.AlertAt) }</span>
+						}
+					</div>
+				</div>
+			</div>
+			<div class="flex items-center gap-2 ml-4">
+				<form method="POST" action={ templ.SafeURL("/quotas/" + quota.ID + "/toggle") }>
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
+					<button type="submit" class="p-2 text-gray-400 hover:text-yellow-400 transition-colors" title="Toggle">
+						if quota.IsEnabled {
+							<i class="fas fa-pause"></i>
+						} else {
+							<i class="fas fa-play"></i>
+						}
+					</button>
+				</form>
+				<form method="POST" action={ templ.SafeURL("/quotas/" + quota.ID + "/delete") } onsubmit="return confirm('Delete this quota?')">
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
+					<button type="submit" class="p-2 text-gray-400 hover:text-red-400 transition-colors" title="Delete">
+						<i class="fas fa-trash"></i>
+					</button>
+				</form>
+			</div>
+		</div>
+	</div>
+}
+
+templ createQuotaModal(csrfToken string, hosts []HostBasic) {
+	<div id="createQuotaModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+		<div class="bg-dark-800 rounded-xl shadow-xl border border-dark-600 w-full max-w-lg mx-4">
+			<div class="flex items-center justify-between p-6 border-b border-dark-600">
+				<h2 class="text-lg font-display font-bold text-white">Create Resource Quota</h2>
+				<button onclick="document.getElementById('createQuotaModal').classList.add('hidden')" class="text-gray-400 hover:text-white">
+					<i class="fas fa-times"></i>
+				</button>
+			</div>
+			<form method="POST" action="/quotas" class="p-6 space-y-4" x-data="{ resourceType: 'memory' }">
+				<input type="hidden" name="csrf_token" value={ csrfToken }/>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Quota Name</label>
+					<input type="text" name="name" required class="input w-full" placeholder="e.g., Production memory limit"/>
+				</div>
+
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Scope</label>
+						<select name="scope" class="input w-full">
+							<option value="global">Global (all hosts)</option>
+							for _, host := range hosts {
+								<option value={ host.ID }>{ host.Name }</option>
+							}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Resource Type</label>
+						<select name="resource_type" x-model="resourceType" class="input w-full">
+							<option value="memory">Memory</option>
+							<option value="cpu">CPU Cores</option>
+							<option value="containers">Containers</option>
+							<option value="images">Images</option>
+							<option value="volumes">Volumes</option>
+							<option value="disk">Disk Space</option>
+						</select>
+					</div>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">
+						Limit
+						<span class="text-xs text-gray-500 ml-1" x-text="resourceType === 'memory' || resourceType === 'disk' ? '(MB)' : resourceType === 'cpu' ? '(cores)' : '(count)'"></span>
+					</label>
+					<input type="number" name="limit_value" required min="1" class="input w-full" placeholder="Enter limit value"/>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Alert Threshold (%)</label>
+					<input type="number" name="alert_at" value="80" min="50" max="100" class="input w-full"/>
+					<p class="text-xs text-gray-500 mt-1">Trigger alert when usage exceeds this percentage</p>
+				</div>
+
+				<div class="flex justify-end gap-3 pt-4 border-t border-dark-600">
+					<button type="button" onclick="document.getElementById('createQuotaModal').classList.add('hidden')" class="btn-secondary">Cancel</button>
+					<button type="submit" class="btn-primary">
+						<i class="fas fa-plus mr-2"></i>Create Quota
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+}
+
+func alertColor(severity string) string {
+	if severity == "critical" {
+		return "text-red-400"
+	}
+	return "text-yellow-400"
+}
+
+func progressColor(percent float64) string {
+	if percent >= 95 {
+		return "bg-red-500"
+	}
+	if percent >= 80 {
+		return "bg-yellow-500"
+	}
+	if percent >= 60 {
+		return "bg-blue-500"
+	}
+	return "bg-green-500"
+}
+
+func usageColor(percent float64) string {
+	if percent >= 95 {
+		return "text-red-400"
+	}
+	if percent >= 80 {
+		return "text-yellow-400"
+	}
+	return "text-gray-300"
+}
+
+func resourceIcon(resourceType string) string {
+	switch resourceType {
+	case "cpu":
+		return "fas fa-microchip"
+	case "memory":
+		return "fas fa-memory"
+	case "containers":
+		return "fas fa-cube"
+	case "images":
+		return "fas fa-layer-group"
+	case "volumes":
+		return "fas fa-database"
+	case "disk":
+		return "fas fa-hdd"
+	default:
+		return "fas fa-tachometer-alt"
+	}
+}
+
+func resourceIconBg(resourceType string) string {
+	switch resourceType {
+	case "cpu":
+		return "bg-blue-500/20"
+	case "memory":
+		return "bg-purple-500/20"
+	case "containers":
+		return "bg-green-500/20"
+	case "images":
+		return "bg-cyan-500/20"
+	case "volumes":
+		return "bg-orange-500/20"
+	case "disk":
+		return "bg-red-500/20"
+	default:
+		return "bg-gray-500/20"
+	}
+}
+
+func resourceIconColor(resourceType string) string {
+	switch resourceType {
+	case "cpu":
+		return "text-blue-400"
+	case "memory":
+		return "text-purple-400"
+	case "containers":
+		return "text-green-400"
+	case "images":
+		return "text-cyan-400"
+	case "volumes":
+		return "text-orange-400"
+	case "disk":
+		return "text-red-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func min(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}

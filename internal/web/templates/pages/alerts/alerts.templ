@@ -175,7 +175,7 @@ templ List(data AlertsData) {
 			}
 
 			<!-- Create Rule Modal -->
-			@createRuleModal(data.Hosts)
+			@createRuleModal(data.Hosts, data.PageData.CSRFToken)
 		</div>
 	}
 }
@@ -524,7 +524,7 @@ templ silencesTab(data AlertsData) {
 // Create Rule Modal
 // ============================================================================
 
-templ createRuleModal(hosts []HostOption) {
+templ createRuleModal(hosts []HostOption, csrfToken string) {
 	<div id="create-rule-modal" class="hidden fixed inset-0 z-50 overflow-y-auto">
 		<div class="fixed inset-0 bg-black/50" onclick="document.getElementById('create-rule-modal').classList.add('hidden')"></div>
 		<div class="relative min-h-screen flex items-center justify-center p-4">
@@ -540,7 +540,7 @@ templ createRuleModal(hosts []HostOption) {
 				</div>
 
 				<form action="/alerts" method="POST" class="space-y-4">
-					<input type="hidden" name="csrf_token"/>
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
 
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div class="md:col-span-2">

@@ -27,7 +27,15 @@ import (
 	totppkg "github.com/fr4nsys/usulnet/internal/pkg/totp"
 	"github.com/fr4nsys/usulnet/internal/scheduler"
 	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
+	compliancesvc "github.com/fr4nsys/usulnet/internal/services/compliance"
+	ephemeralsvc "github.com/fr4nsys/usulnet/internal/services/ephemeral"
 	gitsvc "github.com/fr4nsys/usulnet/internal/services/git"
+	gitsyncsvc "github.com/fr4nsys/usulnet/internal/services/gitsync"
+	manifestsvc "github.com/fr4nsys/usulnet/internal/services/manifest"
+	imagesignsvc "github.com/fr4nsys/usulnet/internal/services/imagesign"
+	logaggsvc "github.com/fr4nsys/usulnet/internal/services/logagg"
+	opasvc "github.com/fr4nsys/usulnet/internal/services/opa"
+	runtimesvc "github.com/fr4nsys/usulnet/internal/services/runtime"
 	swarmsvc "github.com/fr4nsys/usulnet/internal/services/swarm"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/images"
@@ -203,6 +211,8 @@ type ConfigService interface {
 	UpdateVariable(ctx context.Context, v *ConfigVarView) error
 	DeleteVariable(ctx context.Context, id string) error
 	ListTemplates(ctx context.Context) ([]interface{}, error)
+	CreateTemplate(ctx context.Context, input models.CreateTemplateInput, userID *uuid.UUID) (*models.ConfigTemplate, error)
+	UpdateTemplate(ctx context.Context, id uuid.UUID, input models.UpdateTemplateInput, userID *uuid.UUID) (*models.ConfigTemplate, error)
 	GetAuditLogs(ctx context.Context, limit int) ([]interface{}, error)
 }
 
@@ -228,6 +238,10 @@ type UpdateService interface {
 	Apply(ctx context.Context, containerID string, backup bool, targetVersion string) error
 	Rollback(ctx context.Context, updateID string) error
 	GetHistory(ctx context.Context) ([]UpdateHistoryView, error)
+	// Policy management for auto-updates
+	ListPolicies(ctx context.Context) ([]UpdatePolicyView, error)
+	SetPolicy(ctx context.Context, policy UpdatePolicyView) error
+	DeletePolicy(ctx context.Context, id string) error
 }
 
 type HostService interface {
@@ -315,6 +329,8 @@ type ProxyService interface {
 	DeleteConnection(ctx context.Context, connID string) error
 	// IsConnected
 	IsConnected(ctx context.Context) bool
+	// Mode returns the proxy backend type: "caddy" or "npm"
+	Mode() string
 }
 
 // StorageService provides S3-compatible storage operations for the web layer.
@@ -547,19 +563,20 @@ type Handler struct {
 	sessionStore   SessionStore
 	totpSigningKey []byte
 	// Optional profile repositories (set via SetXxxRepo methods)
-	userRepo        UserRepository
-	prefsRepo       PreferencesRepository
-	sessionRepo     SessionRepository
-	snippetRepo     SnippetRepository
-	oauthConfigRepo OAuthConfigRepository
-	ldapConfigRepo  LDAPConfigRepository
-	roleRepo        RoleRepository
-	encryptor       Encryptor
-	logger           Logger
+	userRepo               UserRepository
+	prefsRepo              PreferencesRepository
+	sessionRepo            SessionRepository
+	snippetRepo            SnippetRepository
+	oauthConfigRepo        OAuthConfigRepository
+	ldapConfigRepo         LDAPConfigRepository
+	roleRepo               RoleRepository
+	encryptor              Encryptor
+	logger                 Logger
 	sshService             SSHService
 	shortcutsService       ShortcutsService
 	databaseService        DatabaseService
 	ldapBrowserService     LDAPBrowserService
+	rdpService             RDPService
 	terminalSessionRepo    TerminalSessionRepository
 	notificationConfigRepo NotificationConfigRepository
 	captureService         CaptureService
@@ -571,33 +588,145 @@ type Handler struct {
 	webhookRepo            WebhookRepo
 	runbookRepo            RunbookRepo
 	autoDeployRepo         AutoDeployRepo
+	complianceRepo         ComplianceRepo
+	managedSecretRepo      ManagedSecretRepo
+	lifecycleRepo          LifecycleRepo
+	maintenanceRepo        MaintenanceRepo
+	gitOpsRepo             GitOpsRepo
+	resourceQuotaRepo      ResourceQuotaRepo
+	containerTemplateRepo  ContainerTemplateRepo
+	trackedVulnRepo        TrackedVulnRepo
+	// Enterprise Phase 2 services
+	complianceFrameworkSvc *compliancesvc.Service
+	opaSvc                 *opasvc.Service
+	logAggSvc              *logaggsvc.Service
+	imageSignSvc           *imagesignsvc.Service
+	runtimeSecSvc          *runtimesvc.Service
+	// Phase 3: Market Expansion - GitOps
+	gitSyncSvc    *gitsyncsvc.Service
+	ephemeralSvc  *ephemeralsvc.Service
+	manifestSvc   *manifestsvc.Service
+	// Host terminal config (centralized from app config)
+	hostTerminalConfig HostTerminalConfig
+	// BaseURL is the external server URL for absolute link generation
+	baseURL string
 }
 
-// NewTemplHandler creates a new web handler using Templ templates.
-func NewTemplHandler(services Services, version string, sessionStore SessionStore) *Handler {
+// HandlerDeps holds all dependencies for Handler constructor injection.
+// Optional fields can be left nil if the corresponding feature is disabled.
+type HandlerDeps struct {
+	Services       Services
+	Version        string
+	SessionStore   SessionStore
+	TOTPSigningKey []byte
+	BaseURL        string
+	// Repositories (optional, nil-safe)
+	UserRepo               UserRepository
+	PrefsRepo              PreferencesRepository
+	SessionRepo            SessionRepository
+	SnippetRepo            SnippetRepository
+	OAuthConfigRepo        OAuthConfigRepository
+	LDAPConfigRepo         LDAPConfigRepository
+	RoleRepo               RoleRepository
+	TerminalSessionRepo    TerminalSessionRepository
+	NotificationConfigRepo NotificationConfigRepository
+	CustomLogUploadRepo    CustomLogUploadRepository
+	RegistryRepo           RegistryRepo
+	WebhookRepo            WebhookRepo
+	RunbookRepo            RunbookRepo
+	AutoDeployRepo         AutoDeployRepo
+	ComplianceRepo         ComplianceRepo
+	ManagedSecretRepo      ManagedSecretRepo
+	LifecycleRepo          LifecycleRepo
+	MaintenanceRepo        MaintenanceRepo
+	GitOpsRepo             GitOpsRepo
+	ResourceQuotaRepo      ResourceQuotaRepo
+	ContainerTemplateRepo  ContainerTemplateRepo
+	TrackedVulnRepo        TrackedVulnRepo
+	// Services (optional, nil-safe)
+	Encryptor          Encryptor
+	Logger             Logger
+	SSHService         SSHService
+	ShortcutsService   ShortcutsService
+	DatabaseService    DatabaseService
+	LDAPBrowserService LDAPBrowserService
+	RDPService         RDPService
+	CaptureService     CaptureService
+	DeployService      DeployService
+	SwarmService       *swarmsvc.Service
+	LicenseProvider    LicenseProviderWeb
+	// Enterprise Phase 2
+	ComplianceFrameworkSvc *compliancesvc.Service
+	OPASvc                 *opasvc.Service
+	LogAggSvc              *logaggsvc.Service
+	ImageSignSvc           *imagesignsvc.Service
+	RuntimeSecSvc          *runtimesvc.Service
+	// Phase 3: GitOps
+	GitSyncSvc   *gitsyncsvc.Service
+	EphemeralSvc *ephemeralsvc.Service
+	ManifestSvc  *manifestsvc.Service
+	// Host terminal config
+	TerminalEnabled bool
+	TerminalUser    string
+	TerminalShell   string
+}
+
+// NewTemplHandler creates a new web handler with all dependencies injected via HandlerDeps.
+func NewTemplHandler(deps HandlerDeps) *Handler {
 	return &Handler{
-		services:     services,
-		version:      version,
-		sessionStore: sessionStore,
+		services:               deps.Services,
+		version:                deps.Version,
+		sessionStore:           deps.SessionStore,
+		totpSigningKey:         deps.TOTPSigningKey,
+		baseURL:                deps.BaseURL,
+		userRepo:               deps.UserRepo,
+		prefsRepo:              deps.PrefsRepo,
+		sessionRepo:            deps.SessionRepo,
+		snippetRepo:            deps.SnippetRepo,
+		oauthConfigRepo:        deps.OAuthConfigRepo,
+		ldapConfigRepo:         deps.LDAPConfigRepo,
+		roleRepo:               deps.RoleRepo,
+		terminalSessionRepo:    deps.TerminalSessionRepo,
+		notificationConfigRepo: deps.NotificationConfigRepo,
+		customLogUploadRepo:    deps.CustomLogUploadRepo,
+		registryRepo:           deps.RegistryRepo,
+		webhookRepo:            deps.WebhookRepo,
+		runbookRepo:            deps.RunbookRepo,
+		autoDeployRepo:         deps.AutoDeployRepo,
+		complianceRepo:         deps.ComplianceRepo,
+		managedSecretRepo:      deps.ManagedSecretRepo,
+		lifecycleRepo:          deps.LifecycleRepo,
+		maintenanceRepo:        deps.MaintenanceRepo,
+		gitOpsRepo:             deps.GitOpsRepo,
+		resourceQuotaRepo:      deps.ResourceQuotaRepo,
+		containerTemplateRepo:  deps.ContainerTemplateRepo,
+		trackedVulnRepo:        deps.TrackedVulnRepo,
+		encryptor:              deps.Encryptor,
+		logger:                 deps.Logger,
+		sshService:             deps.SSHService,
+		shortcutsService:       deps.ShortcutsService,
+		databaseService:        deps.DatabaseService,
+		ldapBrowserService:     deps.LDAPBrowserService,
+		rdpService:             deps.RDPService,
+		captureService:         deps.CaptureService,
+		deployService:          deps.DeployService,
+		swarmService:           deps.SwarmService,
+		licenseProvider:        deps.LicenseProvider,
+		complianceFrameworkSvc: deps.ComplianceFrameworkSvc,
+		opaSvc:                 deps.OPASvc,
+		logAggSvc:              deps.LogAggSvc,
+		imageSignSvc:           deps.ImageSignSvc,
+		runtimeSecSvc:          deps.RuntimeSecSvc,
+		gitSyncSvc:             deps.GitSyncSvc,
+		ephemeralSvc:           deps.EphemeralSvc,
+		manifestSvc:            deps.ManifestSvc,
+		hostTerminalConfig: HostTerminalConfig{
+			Enabled: deps.TerminalEnabled,
+			User:    deps.TerminalUser,
+			Shell:   deps.TerminalShell,
+		},
 	}
 }
-
-// SetTOTPSigningKey sets the key used to sign TOTP pending tokens.
-func (h *Handler) SetTOTPSigningKey(key []byte) {
-	h.totpSigningKey = key
-}
-
-// SetUserRepo sets the optional user repository for profile operations.
-func (h *Handler) SetUserRepo(repo UserRepository) { h.userRepo = repo }
-
-// SetPrefsRepo sets the optional preferences repository for profile operations.
-func (h *Handler) SetPrefsRepo(repo PreferencesRepository) { h.prefsRepo = repo }
-
-// SetSessionRepo sets the optional session repository for profile operations.
-func (h *Handler) SetSessionRepo(repo SessionRepository) { h.sessionRepo = repo }
-
-// SetLicenseProvider sets the license provider for edition-aware rendering.
-func (h *Handler) SetLicenseProvider(lp LicenseProviderWeb) { h.licenseProvider = lp }
 
 // requireFeature returns Chi middleware that blocks requests when the current
 // edition does not include the given feature flag. Returns HTTP 402 for web
@@ -716,9 +845,10 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session := &Session{
-		UserID:   userCtx.ID,
-		Username: userCtx.Username,
-		Role:     userCtx.Role,
+		UserID:    userCtx.ID,
+		Username:  userCtx.Username,
+		Role:      userCtx.Role,
+		CSRFToken: GenerateCSRFToken(),
 	}
 
 	if err := h.sessionStore.Save(r, w, session); err != nil {
@@ -739,11 +869,15 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Get session to retrieve session ID for auth service logout
 	session, _ := h.sessionStore.Get(r, "usulnet_session")
 	if session != nil && session.ID != "" {
-		_ = h.services.Auth().Logout(r.Context(), session.ID)
+		if err := h.services.Auth().Logout(r.Context(), session.ID); err != nil {
+			h.logger.Warn("failed to logout session in auth service", "session_id", session.ID, "error", err)
+		}
 	}
 
 	// Delete session cookie
-	_ = h.sessionStore.Delete(r, w, "usulnet_session")
+	if err := h.sessionStore.Delete(r, w, "usulnet_session"); err != nil {
+		h.logger.Warn("failed to delete session cookie", "error", err)
+	}
 	h.redirect(w, r, "/login")
 }
 
@@ -1002,7 +1136,11 @@ func (h *Handler) sendBulkResultToast(w http.ResponseWriter, action string, resu
 		msg = fmt.Sprintf("%d containers %s successfully", results.Successful, action)
 		toastType = "success"
 	} else if results.Successful == 0 {
-		msg = fmt.Sprintf("Failed to %s %d containers", action[:len(action)-2], results.Failed)
+		verb := action
+		if len(verb) > 2 {
+			verb = verb[:len(verb)-2]
+		}
+		msg = fmt.Sprintf("Failed to %s %d containers", verb, results.Failed)
 		toastType = "error"
 	} else {
 		msg = fmt.Sprintf("%d containers %s, %d failed", results.Successful, action, results.Failed)
@@ -1103,7 +1241,11 @@ func (h *Handler) VolumeRemove(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) VolumesPrune(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	h.services.Volumes().Prune(ctx)
+	if _, err := h.services.Volumes().Prune(ctx); err != nil {
+		h.setFlash(w, r, "error", "Failed to prune volumes: "+err.Error())
+		http.Redirect(w, r, "/volumes", http.StatusSeeOther)
+		return
+	}
 	h.setFlash(w, r, "success", "Unused volumes pruned")
 	http.Redirect(w, r, "/volumes", http.StatusSeeOther)
 }
@@ -1220,7 +1362,11 @@ func (h *Handler) NetworkDisconnect(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) NetworksPrune(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	h.services.Networks().Prune(ctx)
+	if _, err := h.services.Networks().Prune(ctx); err != nil {
+		h.setFlash(w, r, "error", "Failed to prune networks: "+err.Error())
+		http.Redirect(w, r, "/networks", http.StatusSeeOther)
+		return
+	}
 	h.setFlash(w, r, "success", "Unused networks pruned")
 	http.Redirect(w, r, "/networks", http.StatusSeeOther)
 }
@@ -1245,43 +1391,66 @@ func (h *Handler) StackDeploy(w http.ResponseWriter, r *http.Request) {
 	composeFile := r.FormValue("compose")
 
 	if name == "" || composeFile == "" {
-		http.Error(w, "Name and compose content are required", http.StatusBadRequest)
+		h.setFlash(w, r, "error", "Name and compose content are required")
+		h.redirect(w, r, "/stacks/new")
 		return
 	}
 
 	if err := h.services.Stacks().Deploy(ctx, name, composeFile); err != nil {
 		slog.Error("stack deploy failed", "name", name, "error", err)
-		http.Error(w, "Error deploying stack: "+err.Error(), http.StatusInternalServerError)
+		h.setFlash(w, r, "error", "Failed to deploy stack: "+err.Error())
+		h.redirect(w, r, "/stacks/new")
 		return
 	}
+	h.setFlash(w, r, "success", "Stack '"+name+"' deployed successfully")
 	h.redirect(w, r, "/stacks/"+name)
 }
 
 func (h *Handler) StackStart(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := getNameParam(r)
-	h.services.Stacks().Start(ctx, name)
+	if err := h.services.Stacks().Start(ctx, name); err != nil {
+		h.setFlash(w, r, "error", "Failed to start stack: "+err.Error())
+		h.redirect(w, r, "/stacks/"+name)
+		return
+	}
+	h.setFlash(w, r, "success", "Stack '"+name+"' started")
 	h.redirect(w, r, "/stacks/"+name)
 }
 
 func (h *Handler) StackStop(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := getNameParam(r)
-	h.services.Stacks().Stop(ctx, name)
+	if err := h.services.Stacks().Stop(ctx, name); err != nil {
+		h.setFlash(w, r, "error", "Failed to stop stack: "+err.Error())
+		h.redirect(w, r, "/stacks/"+name)
+		return
+	}
+	h.setFlash(w, r, "success", "Stack '"+name+"' stopped")
 	h.redirect(w, r, "/stacks/"+name)
 }
 
 func (h *Handler) StackRestart(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := getNameParam(r)
-	h.services.Stacks().Restart(ctx, name)
+	if err := h.services.Stacks().Restart(ctx, name); err != nil {
+		h.setFlash(w, r, "error", "Failed to restart stack: "+err.Error())
+		h.redirect(w, r, "/stacks/"+name)
+		return
+	}
+	h.setFlash(w, r, "success", "Stack '"+name+"' restarted")
 	h.redirect(w, r, "/stacks/"+name)
 }
 
 func (h *Handler) StackRemove(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := getNameParam(r)
-	h.services.Stacks().Remove(ctx, name)
+	if err := h.services.Stacks().Remove(ctx, name); err != nil {
+		h.setFlash(w, r, "error", "Failed to remove stack: "+err.Error())
+		h.redirect(w, r, "/stacks/"+name)
+		return
+	}
+	h.setFlash(w, r, "success", "Stack '"+name+"' removed")
 	h.redirect(w, r, "/stacks")
 }
 
@@ -1291,28 +1460,48 @@ func (h *Handler) StackRemove(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SecurityScan(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	h.services.Security().ScanAll(ctx)
+	if err := h.services.Security().ScanAll(ctx); err != nil {
+		h.setFlash(w, r, "error", "Security scan failed: "+err.Error())
+		h.redirect(w, r, "/security")
+		return
+	}
+	h.setFlash(w, r, "success", "Security scan completed")
 	h.redirect(w, r, "/security")
 }
 
 func (h *Handler) SecurityScanContainer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
-	h.services.Security().Scan(ctx, id)
+	if _, err := h.services.Security().Scan(ctx, id); err != nil {
+		h.setFlash(w, r, "error", "Container scan failed: "+err.Error())
+		h.redirect(w, r, "/security")
+		return
+	}
+	h.setFlash(w, r, "success", "Container scan completed")
 	h.redirect(w, r, "/security")
 }
 
 func (h *Handler) SecurityIssueIgnore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
-	h.services.Security().IgnoreIssue(ctx, id)
+	if err := h.services.Security().IgnoreIssue(ctx, id); err != nil {
+		h.setFlash(w, r, "error", "Failed to ignore issue: "+err.Error())
+		h.redirect(w, r, "/security")
+		return
+	}
+	h.setFlash(w, r, "success", "Issue ignored")
 	h.redirect(w, r, "/security")
 }
 
 func (h *Handler) SecurityIssueResolve(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
-	h.services.Security().ResolveIssue(ctx, id)
+	if err := h.services.Security().ResolveIssue(ctx, id); err != nil {
+		h.setFlash(w, r, "error", "Failed to resolve issue: "+err.Error())
+		h.redirect(w, r, "/security")
+		return
+	}
+	h.setFlash(w, r, "success", "Issue resolved")
 	h.redirect(w, r, "/security")
 }
 
@@ -1329,6 +1518,45 @@ func (h *Handler) UpdateChangelog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateBatch(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	r.ParseForm()
+	containerIDs := r.Form["container_ids"]
+
+	if len(containerIDs) == 0 {
+		// If no specific containers selected, get all available updates
+		updates, err := h.services.Updates().ListAvailable(ctx)
+		if err != nil {
+			slog.Error("Failed to list available updates", "error", err)
+			h.setFlash(w, r, "error", "Failed to fetch available updates")
+			h.redirect(w, r, "/updates")
+			return
+		}
+		for _, u := range updates {
+			containerIDs = append(containerIDs, u.ContainerID)
+		}
+	}
+
+	if len(containerIDs) == 0 {
+		h.setFlash(w, r, "info", "No updates available")
+		h.redirect(w, r, "/updates")
+		return
+	}
+
+	var succeeded, failed int
+	for _, cid := range containerIDs {
+		if err := h.services.Updates().Apply(ctx, cid, true, ""); err != nil {
+			slog.Error("Failed to apply update", "container", cid, "error", err)
+			failed++
+		} else {
+			succeeded++
+		}
+	}
+
+	if failed > 0 {
+		h.setFlash(w, r, "warning", fmt.Sprintf("Updated %d containers, %d failed", succeeded, failed))
+	} else {
+		h.setFlash(w, r, "success", fmt.Sprintf("Successfully updated %d containers", succeeded))
+	}
 	h.redirect(w, r, "/updates")
 }
 
@@ -1623,23 +1851,190 @@ func (h *Handler) ConfigVarDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ConfigTemplateCreate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if err := r.ParseForm(); err != nil {
+		h.setFlash(w, r, "error", "Invalid form data")
+		h.redirect(w, r, "/config/templates")
+		return
+	}
+
+	name := r.FormValue("name")
+	if name == "" {
+		h.setFlash(w, r, "error", "Template name is required")
+		h.redirect(w, r, "/config/templates")
+		return
+	}
+
+	description := r.FormValue("description")
+	input := models.CreateTemplateInput{
+		Name: name,
+	}
+	if description != "" {
+		input.Description = &description
+	}
+
+	var userID *uuid.UUID
+	if user := GetUserFromContext(ctx); user != nil {
+		if uid, err := uuid.Parse(user.ID); err == nil {
+			userID = &uid
+		}
+	}
+
+	if _, err := h.services.Config().CreateTemplate(ctx, input, userID); err != nil {
+		h.logger.Error("failed to create config template", "error", err)
+		h.setFlash(w, r, "error", "Failed to create template: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Template created successfully")
+	}
 	h.redirect(w, r, "/config/templates")
 }
 
 func (h *Handler) ConfigTemplateUpdate(w http.ResponseWriter, r *http.Request) {
-	h.redirect(w, r, "/config/templates")
+	ctx := r.Context()
+	id := chi.URLParam(r, "id")
+	if err := r.ParseForm(); err != nil {
+		h.setFlash(w, r, "error", "Invalid form data")
+		h.redirect(w, r, "/config/templates")
+		return
+	}
+
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		h.setFlash(w, r, "error", "Invalid template ID")
+		h.redirect(w, r, "/config/templates")
+		return
+	}
+
+	input := models.UpdateTemplateInput{}
+	if name := r.FormValue("name"); name != "" {
+		input.Name = &name
+	}
+	if description := r.FormValue("description"); description != "" {
+		input.Description = &description
+	}
+
+	var userID *uuid.UUID
+	if user := GetUserFromContext(ctx); user != nil {
+		if uid, err := uuid.Parse(user.ID); err == nil {
+			userID = &uid
+		}
+	}
+
+	if _, err := h.services.Config().UpdateTemplate(ctx, uid, input, userID); err != nil {
+		h.logger.Error("failed to update config template", "error", err)
+		h.setFlash(w, r, "error", "Failed to update template: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Template updated successfully")
+	}
+	h.redirect(w, r, "/config/templates/"+id)
 }
 
 func (h *Handler) ConfigSync(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := chi.URLParam(r, "id")
+
+	// Re-deploy the variable value to associated containers/services
+	v, err := h.services.Config().GetVariable(ctx, id)
+	if err != nil || v == nil {
+		h.setFlash(w, r, "error", "Variable not found")
+		h.redirect(w, r, "/config")
+		return
+	}
+
+	// "Sync" means re-save the variable to ensure it's propagated
+	if err := h.services.Config().UpdateVariable(ctx, v); err != nil {
+		h.logger.Error("failed to sync config variable", "error", err)
+		h.setFlash(w, r, "error", "Failed to sync variable: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Variable '"+v.Name+"' synced successfully")
+	}
 	h.redirect(w, r, "/config")
 }
 
 func (h *Handler) ConfigExport(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	vars, err := h.services.Config().ListVariables(ctx, "", "")
+	if err != nil {
+		h.logger.Error("failed to export config variables", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{}"))
+		return
+	}
+
+	export := make(map[string]interface{})
+	for _, v := range vars {
+		if v.IsSecret {
+			continue // Don't export secrets
+		}
+		key := v.Scope + "/" + v.ScopeID + "/" + v.Name
+		export[key] = map[string]string{
+			"name":    v.Name,
+			"value":   v.Value,
+			"type":    v.VarType,
+			"scope":   v.Scope,
+			"scopeID": v.ScopeID,
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte("{}"))
+	w.Header().Set("Content-Disposition", "attachment; filename=\"usulnet-config-export.json\"")
+	json.NewEncoder(w).Encode(export)
 }
 
 func (h *Handler) ConfigImport(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
+		if err := r.ParseForm(); err != nil {
+			h.setFlash(w, r, "error", "Invalid form data")
+			h.redirect(w, r, "/config")
+			return
+		}
+	}
+
+	// Try to read JSON from form field or file upload
+	var importData map[string]map[string]string
+	jsonStr := r.FormValue("config_json")
+	if jsonStr != "" {
+		if err := json.Unmarshal([]byte(jsonStr), &importData); err != nil {
+			h.setFlash(w, r, "error", "Invalid JSON format")
+			h.redirect(w, r, "/config")
+			return
+		}
+	} else if file, _, err := r.FormFile("config_file"); err == nil {
+		defer file.Close()
+		if err := json.NewDecoder(file).Decode(&importData); err != nil {
+			h.setFlash(w, r, "error", "Invalid JSON file format")
+			h.redirect(w, r, "/config")
+			return
+		}
+	} else {
+		h.setFlash(w, r, "error", "No configuration data provided")
+		h.redirect(w, r, "/config")
+		return
+	}
+
+	var imported int
+	for _, varData := range importData {
+		v := &ConfigVarView{
+			Name:    varData["name"],
+			Value:   varData["value"],
+			VarType: varData["type"],
+			Scope:   varData["scope"],
+			ScopeID: varData["scopeID"],
+		}
+		if v.Name == "" || v.Value == "" {
+			continue
+		}
+		if err := h.services.Config().CreateVariable(ctx, v); err != nil {
+			h.logger.Error("failed to import config variable", "name", v.Name, "error", err)
+		} else {
+			imported++
+		}
+	}
+
+	h.setFlash(w, r, "success", fmt.Sprintf("Imported %d configuration variables", imported))
 	h.redirect(w, r, "/config")
 }
 
@@ -1676,6 +2071,7 @@ func (h *Handler) UserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if username == "" || password == "" || role == "" {
+		h.setFlash(w, r, "error", "Username, password, and role are required")
 		h.redirect(w, r, "/users/new")
 		return
 	}
@@ -1683,10 +2079,12 @@ func (h *Handler) UserCreate(w http.ResponseWriter, r *http.Request) {
 	_, err := h.services.Users().Create(ctx, username, email, password, role)
 	if err != nil {
 		slog.Error("Failed to create user", "username", username, "error", err)
+		h.setFlash(w, r, "error", "Failed to create user: "+err.Error())
 		h.redirect(w, r, "/users/new")
 		return
 	}
 
+	h.setFlash(w, r, "success", "User created successfully")
 	h.redirect(w, r, "/users")
 }
 
@@ -1715,6 +2113,7 @@ func (h *Handler) UserUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Users().Update(ctx, id, emailPtr, rolePtr, nil); err != nil {
 		slog.Error("Failed to update user", "id", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to update user: "+err.Error())
 		h.redirect(w, r, "/users/"+id)
 		return
 	}
@@ -1723,9 +2122,13 @@ func (h *Handler) UserUpdate(w http.ResponseWriter, r *http.Request) {
 	if password != "" {
 		if err := h.services.Users().ResetPassword(ctx, id, password); err != nil {
 			slog.Error("Failed to reset password", "id", id, "error", err)
+			h.setFlash(w, r, "error", "User updated but password reset failed: "+err.Error())
+			h.redirect(w, r, "/users")
+			return
 		}
 	}
 
+	h.setFlash(w, r, "success", "User updated successfully")
 	h.redirect(w, r, "/users")
 }
 
@@ -1735,8 +2138,12 @@ func (h *Handler) UserDelete(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Users().Delete(ctx, id); err != nil {
 		slog.Error("Failed to delete user", "id", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to delete user: "+err.Error())
+		h.redirect(w, r, "/users")
+		return
 	}
 
+	h.setFlash(w, r, "success", "User deleted successfully")
 	h.redirect(w, r, "/users")
 }
 
@@ -1746,8 +2153,12 @@ func (h *Handler) UserDisable(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Users().Disable(ctx, id); err != nil {
 		slog.Error("Failed to disable user", "id", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to disable user: "+err.Error())
+		h.redirect(w, r, "/users")
+		return
 	}
 
+	h.setFlash(w, r, "success", "User disabled")
 	h.redirect(w, r, "/users")
 }
 
@@ -1762,7 +2173,11 @@ func (h *Handler) UserEnable(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Users().Enable(ctx, id); err != nil {
 		slog.Error("Failed to enable user", "id", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to enable user: "+err.Error())
+		h.redirect(w, r, "/users")
+		return
 	}
 
+	h.setFlash(w, r, "success", "User enabled")
 	h.redirect(w, r, "/users")
 }

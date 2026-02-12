@@ -6,6 +6,7 @@ package web
 
 import (
 	"context"
+	"time"
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/google/uuid"
@@ -51,14 +52,111 @@ type AutoDeployRepo interface {
 	MatchRules(ctx context.Context, sourceType, sourceRepo string, branch *string) ([]*models.AutoDeployRule, error)
 }
 
-// SetRegistryRepo sets the registry repository.
-func (h *Handler) SetRegistryRepo(repo RegistryRepo) { h.registryRepo = repo }
+// ComplianceRepo defines the interface for compliance policy persistence.
+type ComplianceRepo interface {
+	CreatePolicy(ctx context.Context, p *CompliancePolicyRecord) error
+	GetPolicy(ctx context.Context, id uuid.UUID) (*CompliancePolicyRecord, error)
+	ListPolicies(ctx context.Context) ([]*CompliancePolicyRecord, error)
+	DeletePolicy(ctx context.Context, id uuid.UUID) error
+	TogglePolicy(ctx context.Context, id uuid.UUID) (bool, error)
+	UpdateLastCheck(ctx context.Context, id uuid.UUID, t time.Time) error
+	CreateViolation(ctx context.Context, v *ComplianceViolationRecord) error
+	ListViolations(ctx context.Context, status *string) ([]*ComplianceViolationRecord, error)
+	UpdateViolationStatus(ctx context.Context, id uuid.UUID, status string, resolvedBy *uuid.UUID) error
+	ViolationExistsForPolicy(ctx context.Context, policyID uuid.UUID, containerID string) (bool, error)
+	CountViolationsByPolicy(ctx context.Context, policyID uuid.UUID) (int, error)
+}
 
-// SetWebhookRepo sets the outgoing webhook repository.
-func (h *Handler) SetWebhookRepo(repo WebhookRepo) { h.webhookRepo = repo }
+// Type aliases pointing to shared models for DB record types.
+type CompliancePolicyRecord = models.CompliancePolicyRecord
+type ComplianceViolationRecord = models.ComplianceViolationRecord
 
-// SetRunbookRepo sets the runbook repository.
-func (h *Handler) SetRunbookRepo(repo RunbookRepo) { h.runbookRepo = repo }
+// ManagedSecretRepo defines the interface for managed secret persistence.
+type ManagedSecretRepo interface {
+	Create(ctx context.Context, s *ManagedSecretRecord) error
+	GetByID(ctx context.Context, id uuid.UUID) (*ManagedSecretRecord, error)
+	List(ctx context.Context) ([]*ManagedSecretRecord, error)
+	Update(ctx context.Context, s *ManagedSecretRecord) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
 
-// SetAutoDeployRepo sets the auto-deploy rule repository.
-func (h *Handler) SetAutoDeployRepo(repo AutoDeployRepo) { h.autoDeployRepo = repo }
+type ManagedSecretRecord = models.ManagedSecretRecord
+
+// LifecycleRepo defines the interface for lifecycle policy persistence.
+type LifecycleRepo interface {
+	CreatePolicy(ctx context.Context, p *LifecyclePolicyRecord) error
+	GetPolicy(ctx context.Context, id uuid.UUID) (*LifecyclePolicyRecord, error)
+	ListPolicies(ctx context.Context) ([]*LifecyclePolicyRecord, error)
+	DeletePolicy(ctx context.Context, id uuid.UUID) error
+	TogglePolicy(ctx context.Context, id uuid.UUID) (bool, error)
+	UpdateLastExecution(ctx context.Context, id uuid.UUID, executedAt time.Time, result string) error
+	CreateHistoryEntry(ctx context.Context, h *LifecycleHistoryRecord) error
+	ListHistory(ctx context.Context, limit int) ([]*LifecycleHistoryRecord, error)
+	TotalSpaceReclaimed(ctx context.Context) (int64, error)
+}
+
+type LifecyclePolicyRecord = models.LifecyclePolicyRecord
+type LifecycleHistoryRecord = models.LifecycleHistoryRecord
+
+// MaintenanceRepo defines the interface for maintenance window persistence.
+type MaintenanceRepo interface {
+	Create(ctx context.Context, mw *MaintenanceWindowRecord) error
+	GetByID(ctx context.Context, id uuid.UUID) (*MaintenanceWindowRecord, error)
+	List(ctx context.Context) ([]*MaintenanceWindowRecord, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	Toggle(ctx context.Context, id uuid.UUID) (bool, error)
+	SetActive(ctx context.Context, id uuid.UUID, active bool) error
+	UpdateLastRun(ctx context.Context, id uuid.UUID, runAt time.Time, status string) error
+}
+
+type MaintenanceWindowRecord = models.MaintenanceWindowRecord
+
+// GitOpsRepo defines the interface for GitOps pipeline persistence.
+type GitOpsRepo interface {
+	CreatePipeline(ctx context.Context, p *GitOpsPipelineRecord) error
+	GetPipeline(ctx context.Context, id uuid.UUID) (*GitOpsPipelineRecord, error)
+	ListPipelines(ctx context.Context) ([]*GitOpsPipelineRecord, error)
+	DeletePipeline(ctx context.Context, id uuid.UUID) error
+	TogglePipeline(ctx context.Context, id uuid.UUID) (bool, error)
+	IncrementDeployCount(ctx context.Context, id uuid.UUID, deployAt time.Time, status string) error
+	CreateDeployment(ctx context.Context, d *GitOpsDeploymentRecord) error
+	ListDeployments(ctx context.Context, limit int) ([]*GitOpsDeploymentRecord, error)
+}
+
+type GitOpsPipelineRecord = models.GitOpsPipelineRecord
+type GitOpsDeploymentRecord = models.GitOpsDeploymentRecord
+
+// ResourceQuotaRepo defines the interface for resource quota persistence.
+type ResourceQuotaRepo interface {
+	Create(ctx context.Context, q *ResourceQuotaRecord) error
+	List(ctx context.Context) ([]*ResourceQuotaRecord, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	Toggle(ctx context.Context, id uuid.UUID) (bool, error)
+}
+
+type ResourceQuotaRecord = models.ResourceQuotaRecord
+
+// ContainerTemplateRepo defines the interface for container template persistence.
+type ContainerTemplateRepo interface {
+	Create(ctx context.Context, t *ContainerTemplateRecord) error
+	GetByID(ctx context.Context, id uuid.UUID) (*ContainerTemplateRecord, error)
+	List(ctx context.Context) ([]*ContainerTemplateRecord, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	IncrementUsage(ctx context.Context, id uuid.UUID) error
+	GetCategories(ctx context.Context) ([]string, error)
+}
+
+type ContainerTemplateRecord = models.ContainerTemplateRecord
+
+// TrackedVulnRepo defines the interface for tracked vulnerability persistence.
+type TrackedVulnRepo interface {
+	Create(ctx context.Context, v *TrackedVulnRecord) error
+	List(ctx context.Context) ([]*TrackedVulnRecord, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	ExistsByCVE(ctx context.Context, cveID string) (bool, error)
+	CountSLABreached(ctx context.Context) (int, error)
+	CountResolvedSince(ctx context.Context, since time.Time) (int, error)
+}
+
+type TrackedVulnRecord = models.TrackedVulnRecord
+

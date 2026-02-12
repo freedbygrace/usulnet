@@ -165,59 +165,7 @@ func (s *Service) RecreateWithEnv(ctx context.Context, hostID uuid.UUID, contain
 		return nil, fmt.Errorf("get new container: %w", err)
 	}
 
-	return s.detailsToModel(newInspect, hostID), nil
-}
-
-// detailsToModel converts ContainerDetails to models.Container
-func (s *Service) detailsToModel(d *docker.ContainerDetails, hostID uuid.UUID) *models.Container {
-	imageID := d.ImageID
-	created := d.Created
-	c := &models.Container{
-		ID:              d.ID,
-		HostID:          hostID,
-		Name:            d.Name,
-		Image:           d.Image,
-		ImageID:         &imageID,
-		State:           models.ContainerState(d.State),
-		Status:          d.Status,
-		CreatedAtDocker: &created,
-	}
-
-	// Copy network attachments
-	for _, n := range d.Networks {
-		c.Networks = append(c.Networks, models.NetworkAttachment{
-			NetworkID:   n.NetworkID,
-			NetworkName: n.NetworkName,
-			IPAddress:   n.IPAddress,
-			Gateway:     n.Gateway,
-			MacAddress:  n.MacAddress,
-			Aliases:     n.Aliases,
-		})
-	}
-
-	// Copy port mappings
-	for _, p := range d.Ports {
-		c.Ports = append(c.Ports, models.PortMapping{
-			PrivatePort: p.PrivatePort,
-			PublicPort:  p.PublicPort,
-			Type:        p.Type,
-			IP:          p.IP,
-		})
-	}
-
-	// Copy mount points
-	for _, m := range d.Mounts {
-		c.Mounts = append(c.Mounts, models.MountPoint{
-			Type:        m.Type,
-			Source:      m.Source,
-			Destination: m.Destination,
-			Mode:        m.Mode,
-			RW:          m.RW,
-			Propagation: m.Propagation,
-		})
-	}
-
-	return c
+	return s.detailsToContainerModel(hostID, newInspect), nil
 }
 
 // mergeEnv merges environment variables.

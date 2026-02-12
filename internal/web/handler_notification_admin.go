@@ -26,14 +26,9 @@ type NotificationConfigRepository interface {
 	DeleteChannelConfig(ctx context.Context, name string) error
 }
 
-// SetNotificationConfigRepo sets the notification config repository.
-func (h *Handler) SetNotificationConfigRepo(repo NotificationConfigRepository) {
-	h.notificationConfigRepo = repo
-}
-
 // NotificationChannelsTempl renders the notification channels configuration page.
 func (h *Handler) NotificationChannelsTempl(w http.ResponseWriter, r *http.Request) {
-	pageData := h.prepareTemplPageData(r, "Notification Channels", "admin")
+	pageData := h.prepareTemplPageData(r, "Notification Channels", "notification-channels")
 
 	var channelViews []admin.ChannelView
 
@@ -81,7 +76,8 @@ func (h *Handler) NotificationChannelCreate(w http.ResponseWriter, r *http.Reque
 
 	channelType := strings.TrimSpace(r.FormValue("type"))
 	name := strings.TrimSpace(r.FormValue("name"))
-	enabled := r.FormValue("enabled") == "true"
+	enabledVal := r.FormValue("enabled")
+	enabled := enabledVal == "true" || enabledVal == "on"
 	minPriorityStr := r.FormValue("min_priority")
 
 	if channelType == "" || name == "" {

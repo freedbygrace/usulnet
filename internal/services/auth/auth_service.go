@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -89,9 +90,11 @@ type Service struct {
 	sessionSvc  *SessionService
 	config      AuthConfig
 	logger      *logger.Logger
-	auditSvc    AuditLogger
+	auditMu  sync.RWMutex
+	auditSvc AuditLogger
 
 	// Optional: JWT blacklist for immediate token revocation
+	blacklistMu  sync.RWMutex
 	jwtBlacklist JWTBlacklist
 
 	// Optional: LDAP and OAuth providers (injected separately)
@@ -160,12 +163,17 @@ func NewService(
 }
 
 // SetJWTBlacklist sets the JWT blacklist for immediate token revocation.
+// Thread-safe: may be called while goroutines check IsBlacklisted.
 func (s *Service) SetJWTBlacklist(blacklist JWTBlacklist) {
+	s.blacklistMu.Lock()
 	s.jwtBlacklist = blacklist
+	s.blacklistMu.Unlock()
 }
 
 // HasJWTBlacklist returns true if JWT blacklisting is enabled.
 func (s *Service) HasJWTBlacklist() bool {
+	s.blacklistMu.RLock()
+	defer s.blacklistMu.RUnlock()
 	return s.jwtBlacklist != nil
 }
 
@@ -739,8 +747,11 @@ func (s *Service) ChangePassword(ctx context.Context, input ChangePasswordInput)
 	s.logger.Info("password changed", "user_id", user.ID)
 
 	// Audit log
-	if s.auditSvc != nil {
-		s.auditSvc.LogPasswordChange(ctx, user.ID, user.Username, "", "", true)
+	s.auditMu.RLock()
+	audit := s.auditSvc
+	s.auditMu.RUnlock()
+	if audit != nil {
+		audit.LogPasswordChange(ctx, user.ID, user.Username, "", "", true)
 	}
 
 	return nil
@@ -780,8 +791,11 @@ func (s *Service) ResetPassword(ctx context.Context, userID uuid.UUID, newPasswo
 	s.logger.Info("password reset", "user_id", userID)
 
 	// Audit log (password reset by admin)
-	if s.auditSvc != nil {
-		s.auditSvc.LogPasswordChange(ctx, user.ID, user.Username, "", "", true)
+	s.auditMu.RLock()
+	audit := s.auditSvc
+	s.auditMu.RUnlock()
+	if audit != nil {
+		audit.LogPasswordChange(ctx, user.ID, user.Username, "", "", true)
 	}
 
 	return nil
@@ -894,8 +908,11 @@ func (s *Service) RegisterLDAPProvider(provider LDAPProvider) {
 }
 
 // SetAuditService sets the audit logger for the auth service.
+// Thread-safe: may be called while goroutines read auditSvc.
 func (s *Service) SetAuditService(auditSvc AuditLogger) {
+	s.auditMu.Lock()
 	s.auditSvc = auditSvc
+	s.auditMu.Unlock()
 }
 
 // ============================================================================
@@ -948,12 +965,15 @@ func (s *Service) logLoginAttempt(ctx context.Context, user *models.User, ip str
 	}
 
 	// Write to audit log
-	if s.auditSvc != nil {
+	s.auditMu.RLock()
+	audit := s.auditSvc
+	s.auditMu.RUnlock()
+	if audit != nil {
 		var errorMsg *string
 		if reason != "" {
 			errorMsg = &reason
 		}
-		s.auditSvc.LogLogin(ctx, &user.ID, user.Username, ip, "", success, errorMsg)
+		audit.LogLogin(ctx, &user.ID, user.Username, ip, "", success, errorMsg)
 	}
 }
 

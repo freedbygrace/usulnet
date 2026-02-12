@@ -77,6 +77,11 @@ type Scheduler struct {
 	wg           sync.WaitGroup
 	cronEntries  map[string]cron.EntryID
 	cronMu       sync.RWMutex
+
+	// lifecycleCtx is the context passed to Start(). Callbacks derive timeouts
+	// from it so they are cancelled during scheduler shutdown instead of using
+	// orphaned context.Background() instances.
+	lifecycleCtx context.Context
 }
 
 // Repository interface for job persistence
@@ -183,6 +188,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return errors.New(errors.CodeValidation, "scheduler already running")
 	}
 	s.running = true
+	s.lifecycleCtx = ctx
 	s.mu.Unlock()
 
 	s.logger.Info("starting scheduler",
@@ -673,8 +679,25 @@ func (s *Scheduler) processQueue(ctx context.Context) {
 	}
 }
 
+// callbackTimeout is the maximum time allowed for progress/completion callbacks
+// to update the database. Short enough to not block shutdown, long enough for
+// normal DB writes.
+const callbackTimeout = 30 * time.Second
+
+// callbackCtx derives a timeout context from the scheduler lifecycle context.
+// If the scheduler is shutting down (lifecycle cancelled), callbacks are
+// cancelled too — preventing orphaned context.Background() operations.
+func (s *Scheduler) callbackCtx() (context.Context, context.CancelFunc) {
+	parent := s.lifecycleCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, callbackTimeout)
+}
+
 func (s *Scheduler) handleProgress(jobID uuid.UUID, progress int, message string) {
-	ctx := context.Background()
+	ctx, cancel := s.callbackCtx()
+	defer cancel()
 
 	// Update queue
 	if err := s.queue.UpdateProgress(ctx, jobID, progress, message); err != nil {
@@ -704,7 +727,8 @@ func (s *Scheduler) handleProgress(jobID uuid.UUID, progress int, message string
 }
 
 func (s *Scheduler) handleComplete(jobID uuid.UUID, result interface{}, jobErr error) {
-	ctx := context.Background()
+	ctx, cancel := s.callbackCtx()
+	defer cancel()
 
 	if jobErr != nil {
 		// Mark as failed in queue (handles retry logic)

@@ -70,7 +70,7 @@ func (h *Handler) EditorHub(w http.ResponseWriter, r *http.Request) {
 					ID:         c.ID.String(),
 					Name:       c.Name,
 					URL:        c.URL,
-					Provider:   "gitea", // TODO: detect from connection type
+					Provider:   "gitea",
 					Status:     string(c.Status),
 					ReposCount: c.ReposCount,
 				})
@@ -262,7 +262,7 @@ func (h *Handler) EditorNvim(w http.ResponseWriter, r *http.Request) {
 		} else {
 			filePath = "scratch" // Default filename for scratch mode
 		}
-		
+
 		pageData := h.prepareTemplPageData(r, "Neovim Terminal", "editor")
 		pageData.FullScreen = true // Editor needs full height
 		data := editorpages.NvimData{

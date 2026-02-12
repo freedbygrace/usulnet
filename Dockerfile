@@ -3,6 +3,9 @@
 # Templ-based frontend (no Pongo2)
 # =============================================================================
 
+# Default BUILDPLATFORM for non-buildx environments (legacy Docker build)
+ARG BUILDPLATFORM=linux/amd64
+
 # Stage 1: Build Go binary with Templ compilation
 # --platform=$BUILDPLATFORM: run Go compiler natively (fast), cross-compile via GOARCH
 FROM --platform=$BUILDPLATFORM golang:1.25.7-alpine AS builder

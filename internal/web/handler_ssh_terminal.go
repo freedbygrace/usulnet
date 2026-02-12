@@ -507,11 +507,6 @@ type SSHService interface {
 	CreateSession(ctx context.Context, session *models.SSHSession) error
 }
 
-// SetSSHService sets the SSH service for terminal connections.
-func (h *Handler) SetSSHService(svc SSHService) {
-	h.sshService = svc
-}
-
 // buildSSHHostKeyCallback returns a TOFU (Trust On First Use) host key callback.
 // On first connection the server's key fingerprint is stored; on subsequent
 // connections the key is verified against the stored value.

@@ -1,0 +1,441 @@
+package compliance
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+// ComplianceData holds all data for the compliance policies page.
+type ComplianceData struct {
+	PageData   layouts.PageData
+	Policies   []CompliancePolicyView
+	Violations []ViolationView
+	Stats      ComplianceStats
+	ActiveTab  string
+}
+
+// CompliancePolicyView represents a compliance policy.
+type CompliancePolicyView struct {
+	ID          string
+	Name        string
+	Description string
+	Category    string // security, reliability, performance, best_practice
+	Severity    string // critical, high, medium, low
+	Rule        string // rule type identifier
+	RuleConfig  string // human-readable rule description
+	IsEnabled   bool
+	IsEnforced  bool   // block non-compliant containers
+	Violations  int
+	LastCheckAt string
+	CreatedAt   string
+}
+
+// ViolationView represents a policy violation.
+type ViolationView struct {
+	ID            string
+	PolicyID      string
+	PolicyName    string
+	ContainerID   string
+	ContainerName string
+	Severity      string
+	Message       string
+	Details       string
+	Status        string // open, acknowledged, resolved, exempted
+	DetectedAt    string
+}
+
+// ComplianceStats for the dashboard.
+type ComplianceStats struct {
+	TotalPolicies    int
+	EnabledPolicies  int
+	EnforcedPolicies int
+	TotalViolations  int
+	OpenViolations   int
+	ComplianceRate   string
+}
+
+templ Compliance(data ComplianceData) {
+	@layouts.Base(data.PageData) {
+		<div class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">Compliance Policies</h1>
+					<p class="text-gray-400 mt-1">Define and enforce security compliance rules across your containers</p>
+				</div>
+				<div class="flex items-center gap-2">
+					<form method="POST" action="/compliance/scan">
+						<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+						<button type="submit" class="btn-secondary flex items-center gap-2">
+							<i class="fas fa-search"></i>
+							Run Check
+						</button>
+					</form>
+					<button onclick="document.getElementById('createPolicyModal').classList.remove('hidden')" class="btn-primary flex items-center gap-2">
+						<i class="fas fa-plus"></i>
+						New Policy
+					</button>
+				</div>
+			</div>
+
+			<!-- Stats -->
+			<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+				@compStat("Policies", fmt.Sprintf("%d", data.Stats.TotalPolicies), "fas fa-shield-alt", "primary")
+				@compStat("Enabled", fmt.Sprintf("%d", data.Stats.EnabledPolicies), "fas fa-check-circle", "green")
+				@compStat("Enforced", fmt.Sprintf("%d", data.Stats.EnforcedPolicies), "fas fa-lock", "blue")
+				@compStat("Violations", fmt.Sprintf("%d", data.Stats.TotalViolations), "fas fa-exclamation-triangle", "red")
+				@compStat("Open", fmt.Sprintf("%d", data.Stats.OpenViolations), "fas fa-times-circle", "yellow")
+				@compStat("Compliance", data.Stats.ComplianceRate, "fas fa-chart-pie", "green")
+			</div>
+
+			<!-- Tabs -->
+			<div x-data={ fmt.Sprintf("{ tab: '%s' }", compActiveTab(data.ActiveTab)) } class="space-y-4">
+				<div class="flex gap-1 border-b border-dark-600">
+					<button @click="tab = 'policies'" :class="tab === 'policies' ? 'border-primary-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'" class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+						Policies ({ fmt.Sprintf("%d", len(data.Policies)) })
+					</button>
+					<button @click="tab = 'violations'" :class="tab === 'violations' ? 'border-primary-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'" class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+						Violations ({ fmt.Sprintf("%d", len(data.Violations)) })
+					</button>
+				</div>
+
+				<!-- Policies Tab -->
+				<div x-show="tab === 'policies'" x-cloak>
+					if len(data.Policies) == 0 {
+						<div class="card p-12 text-center">
+							<i class="fas fa-shield-alt text-4xl text-gray-400 mb-4"></i>
+							<h3 class="text-lg font-medium text-white mb-2">No Compliance Policies</h3>
+							<p class="text-gray-400 mb-4">Create policies to enforce security best practices across your containers</p>
+						</div>
+					} else {
+						<div class="space-y-3">
+							for _, policy := range data.Policies {
+								@policyCard(policy, data.PageData.CSRFToken)
+							}
+						</div>
+					}
+				</div>
+
+				<!-- Violations Tab -->
+				<div x-show="tab === 'violations'" x-cloak>
+					if len(data.Violations) == 0 {
+						<div class="card p-12 text-center">
+							<i class="fas fa-check-circle text-4xl text-green-600 mb-4"></i>
+							<h3 class="text-lg font-medium text-white mb-2">No Violations</h3>
+							<p class="text-gray-400">All containers are in compliance with defined policies</p>
+						</div>
+					} else {
+						<div class="card overflow-hidden">
+							<table class="w-full">
+								<thead>
+									<tr class="border-b border-dark-600">
+										<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Container</th>
+										<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Policy</th>
+										<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Severity</th>
+										<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Message</th>
+										<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Status</th>
+										<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Detected</th>
+										<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Actions</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-dark-700">
+									for _, v := range data.Violations {
+										<tr class="hover:bg-dark-700/50">
+											<td class="px-4 py-3">
+												<div class="text-sm text-white">{ v.ContainerName }</div>
+												<div class="text-xs text-gray-500 font-mono">{ v.ContainerID }</div>
+											</td>
+											<td class="px-4 py-3 text-sm text-gray-300">{ v.PolicyName }</td>
+											<td class="px-4 py-3">
+												@severityBadge(v.Severity)
+											</td>
+											<td class="px-4 py-3">
+												<div class="text-sm text-gray-300 max-w-[300px] truncate">{ v.Message }</div>
+											</td>
+											<td class="px-4 py-3">
+												@violationStatus(v.Status)
+											</td>
+											<td class="px-4 py-3 text-sm text-gray-400">{ v.DetectedAt }</td>
+											<td class="px-4 py-3">
+												<div class="flex items-center gap-1">
+													if v.Status == "open" {
+														<form method="POST" action={ templ.SafeURL("/compliance/violations/" + v.ID + "/acknowledge") }>
+															<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+															<button type="submit" class="p-1.5 text-gray-400 hover:text-yellow-400 transition-colors" title="Acknowledge">
+																<i class="fas fa-eye text-sm"></i>
+															</button>
+														</form>
+													}
+													<form method="POST" action={ templ.SafeURL("/compliance/violations/" + v.ID + "/resolve") }>
+														<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+														<button type="submit" class="p-1.5 text-gray-400 hover:text-green-400 transition-colors" title="Resolve">
+															<i class="fas fa-check text-sm"></i>
+														</button>
+													</form>
+													<form method="POST" action={ templ.SafeURL("/compliance/violations/" + v.ID + "/exempt") }>
+														<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+														<button type="submit" class="p-1.5 text-gray-400 hover:text-blue-400 transition-colors" title="Exempt">
+															<i class="fas fa-ban text-sm"></i>
+														</button>
+													</form>
+												</div>
+											</td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						</div>
+					}
+				</div>
+			</div>
+
+			<!-- Create Policy Modal -->
+			@createPolicyModal(data.PageData.CSRFToken)
+		</div>
+	}
+}
+
+templ compStat(label, value, icon, color string) {
+	<div class="card p-3 text-center">
+		<i class={ icon, compStatColor(color), "text-lg mb-1" }></i>
+		<p class="text-xl font-bold text-white">{ value }</p>
+		<p class="text-xs text-gray-400">{ label }</p>
+	</div>
+}
+
+templ policyCard(p CompliancePolicyView, csrfToken string) {
+	<div class="card p-4">
+		<div class="flex items-start justify-between">
+			<div class="flex items-start gap-3 flex-1">
+				<div class={ "w-10 h-10 rounded-lg flex items-center justify-center", policyCatBg(p.Category) }>
+					<i class={ policyCatIcon(p.Category), policyCatColor(p.Category) }></i>
+				</div>
+				<div class="flex-1 min-w-0">
+					<div class="flex items-center gap-2 flex-wrap">
+						<h3 class="font-medium text-white">{ p.Name }</h3>
+						@severityBadge(p.Severity)
+						if p.IsEnabled {
+							<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded">Active</span>
+						} else {
+							<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded">Disabled</span>
+						}
+						if p.IsEnforced {
+							<span class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded flex items-center gap-1"><i class="fas fa-lock text-[10px]"></i>Enforced</span>
+						}
+					</div>
+					if p.Description != "" {
+						<p class="text-sm text-gray-400 mt-1">{ p.Description }</p>
+					}
+					<div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
+						<span><i class="fas fa-tag mr-1"></i>{ p.Category }</span>
+						<span><i class="fas fa-cog mr-1"></i>{ p.RuleConfig }</span>
+						if p.Violations > 0 {
+							<span class="text-red-400"><i class="fas fa-exclamation-triangle mr-1"></i>{ fmt.Sprintf("%d violations", p.Violations) }</span>
+						} else {
+							<span class="text-green-400"><i class="fas fa-check mr-1"></i>Compliant</span>
+						}
+						if p.LastCheckAt != "" {
+							<span><i class="fas fa-clock mr-1"></i>Checked: { p.LastCheckAt }</span>
+						}
+					</div>
+				</div>
+			</div>
+			<div class="flex items-center gap-2 ml-4">
+				<form method="POST" action={ templ.SafeURL("/compliance/policies/" + p.ID + "/toggle") }>
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
+					<button type="submit" class="p-2 text-gray-400 hover:text-yellow-400 transition-colors" title="Toggle">
+						if p.IsEnabled {
+							<i class="fas fa-pause"></i>
+						} else {
+							<i class="fas fa-play"></i>
+						}
+					</button>
+				</form>
+				<form method="POST" action={ templ.SafeURL("/compliance/policies/" + p.ID + "/delete") } onsubmit="return confirm('Delete this policy?')">
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
+					<button type="submit" class="p-2 text-gray-400 hover:text-red-400 transition-colors" title="Delete">
+						<i class="fas fa-trash"></i>
+					</button>
+				</form>
+			</div>
+		</div>
+	</div>
+}
+
+templ severityBadge(severity string) {
+	switch severity {
+		case "critical":
+			<span class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded">Critical</span>
+		case "high":
+			<span class="px-2 py-0.5 text-xs bg-orange-500/20 text-orange-400 rounded">High</span>
+		case "medium":
+			<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded">Medium</span>
+		case "low":
+			<span class="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded">Low</span>
+		default:
+			<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded">{ severity }</span>
+	}
+}
+
+templ violationStatus(status string) {
+	switch status {
+		case "open":
+			<span class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>Open</span>
+		case "acknowledged":
+			<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>Acknowledged</span>
+		case "resolved":
+			<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>Resolved</span>
+		case "exempted":
+			<span class="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>Exempted</span>
+		default:
+			<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded">{ status }</span>
+	}
+}
+
+templ createPolicyModal(csrfToken string) {
+	<div id="createPolicyModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+		<div class="bg-dark-800 rounded-xl shadow-xl border border-dark-600 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+			<div class="flex items-center justify-between p-6 border-b border-dark-600 sticky top-0 bg-dark-800 z-10">
+				<h2 class="text-lg font-display font-bold text-white">Create Compliance Policy</h2>
+				<button onclick="document.getElementById('createPolicyModal').classList.add('hidden')" class="text-gray-400 hover:text-white">
+					<i class="fas fa-times"></i>
+				</button>
+			</div>
+			<form method="POST" action="/compliance/policies" class="p-6 space-y-4">
+				<input type="hidden" name="csrf_token" value={ csrfToken }/>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Policy Name</label>
+					<input type="text" name="name" required class="input w-full" placeholder="e.g., Require healthcheck on all containers"/>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Description</label>
+					<textarea name="description" rows="2" class="input w-full" placeholder="Describe what this policy enforces"></textarea>
+				</div>
+
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Category</label>
+						<select name="category" class="input w-full">
+							<option value="security">Security</option>
+							<option value="reliability">Reliability</option>
+							<option value="performance">Performance</option>
+							<option value="best_practice">Best Practice</option>
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Severity</label>
+						<select name="severity" class="input w-full">
+							<option value="critical">Critical</option>
+							<option value="high">High</option>
+							<option value="medium">Medium</option>
+							<option value="low">Low</option>
+						</select>
+					</div>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Rule</label>
+					<select name="rule" class="input w-full">
+						<option value="no_root">No Root User - Containers must not run as root</option>
+						<option value="require_healthcheck">Require Healthcheck - Containers must define a healthcheck</option>
+						<option value="no_privileged">No Privileged Mode - Containers cannot run in privileged mode</option>
+						<option value="require_memory_limit">Memory Limit - Containers must have memory limits set</option>
+						<option value="require_cpu_limit">CPU Limit - Containers must have CPU limits set</option>
+						<option value="no_host_network">No Host Network - Containers cannot use host network mode</option>
+						<option value="no_host_pid">No Host PID - Containers cannot use host PID namespace</option>
+						<option value="no_secrets_env">No Secrets in Env - Environment variables must not contain secrets</option>
+						<option value="require_readonly_fs">Read-Only Filesystem - Container root FS must be read-only</option>
+						<option value="no_cap_add">No Extra Capabilities - Containers cannot add Linux capabilities</option>
+						<option value="require_labels">Require Labels - Containers must have specific labels</option>
+						<option value="image_allowlist">Image Allowlist - Only approved images can be used</option>
+						<option value="no_latest_tag">No Latest Tag - Containers must use specific image tags</option>
+						<option value="require_restart_policy">Require Restart Policy - Containers must have restart policy</option>
+					</select>
+				</div>
+
+				<label class="flex items-center gap-2">
+					<input type="checkbox" name="is_enforced" value="on" class="form-checkbox rounded bg-dark-700 border-dark-500"/>
+					<span class="text-sm text-gray-300">Enforce policy (block non-compliant containers)</span>
+				</label>
+
+				<div class="flex justify-end gap-3 pt-4 border-t border-dark-600">
+					<button type="button" onclick="document.getElementById('createPolicyModal').classList.add('hidden')" class="btn-secondary">Cancel</button>
+					<button type="submit" class="btn-primary">
+						<i class="fas fa-plus mr-2"></i>Create Policy
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+}
+
+func compActiveTab(tab string) string {
+	if tab == "" {
+		return "policies"
+	}
+	return tab
+}
+
+func compStatColor(color string) string {
+	switch color {
+	case "primary":
+		return "text-primary-400"
+	case "green":
+		return "text-green-400"
+	case "blue":
+		return "text-blue-400"
+	case "red":
+		return "text-red-400"
+	case "yellow":
+		return "text-yellow-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func policyCatIcon(category string) string {
+	switch category {
+	case "security":
+		return "fas fa-shield-alt"
+	case "reliability":
+		return "fas fa-heartbeat"
+	case "performance":
+		return "fas fa-tachometer-alt"
+	case "best_practice":
+		return "fas fa-check-double"
+	default:
+		return "fas fa-clipboard-check"
+	}
+}
+
+func policyCatBg(category string) string {
+	switch category {
+	case "security":
+		return "bg-red-500/20"
+	case "reliability":
+		return "bg-green-500/20"
+	case "performance":
+		return "bg-yellow-500/20"
+	case "best_practice":
+		return "bg-blue-500/20"
+	default:
+		return "bg-gray-500/20"
+	}
+}
+
+func policyCatColor(category string) string {
+	switch category {
+	case "security":
+		return "text-red-400"
+	case "reliability":
+		return "text-green-400"
+	case "performance":
+		return "text-yellow-400"
+	case "best_practice":
+		return "text-blue-400"
+	default:
+		return "text-gray-400"
+	}
+}

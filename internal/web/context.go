@@ -168,33 +168,34 @@ func NewPagination(totalItems int64, currentPage, perPage int) *PaginationData {
 
 // ContainerView for container list/detail templates.
 type ContainerView struct {
-	ID            string            `json:"id"`
-	ShortID       string            `json:"short_id"`
-	HostID        string            `json:"host_id"`
-	Name          string            `json:"name"`
-	Image         string            `json:"image"`
-	ImageShort    string            `json:"image_short"`
-	State         string            `json:"state"`
-	Status        string            `json:"status"`
-	Health        string            `json:"health"`
-	Created       time.Time         `json:"created"`
-	CreatedHuman  string            `json:"created_human"`
-	Ports         []PortView        `json:"ports"`
-	Networks       []string               `json:"networks"`
-	NetworkDetails []NetworkAttachmentView `json:"network_details"`
-	Mounts         []MountView            `json:"mounts"`
-	Env           []EnvView         `json:"env"`
-	Labels        map[string]string `json:"labels"`
-	Stack         string            `json:"stack"`
-	RestartPolicy string            `json:"restart_policy"`
-	CPUPercent    float64           `json:"cpu_percent"`
-	MemoryUsage   int64             `json:"memory_usage"`
-	MemoryLimit   int64             `json:"memory_limit"`
-	MemoryHuman   string            `json:"memory_human"`
-	SecurityScore int               `json:"security_score"`
-	SecurityGrade string            `json:"security_grade"`
-	Command       string            `json:"command"`
-	Entrypoint    string            `json:"entrypoint"`
+	ID              string                  `json:"id"`
+	ShortID         string                  `json:"short_id"`
+	HostID          string                  `json:"host_id"`
+	Name            string                  `json:"name"`
+	Image           string                  `json:"image"`
+	ImageShort      string                  `json:"image_short"`
+	State           string                  `json:"state"`
+	Status          string                  `json:"status"`
+	Health          string                  `json:"health"`
+	Created         time.Time               `json:"created"`
+	CreatedHuman    string                  `json:"created_human"`
+	Ports           []PortView              `json:"ports"`
+	Networks        []string                `json:"networks"`
+	NetworkDetails  []NetworkAttachmentView `json:"network_details"`
+	Mounts          []MountView             `json:"mounts"`
+	Env             []EnvView               `json:"env"`
+	Labels          map[string]string       `json:"labels"`
+	Stack           string                  `json:"stack"`
+	RestartPolicy   string                  `json:"restart_policy"`
+	CPUPercent      float64                 `json:"cpu_percent"`
+	MemoryUsage     int64                   `json:"memory_usage"`
+	MemoryLimit     int64                   `json:"memory_limit"`
+	MemoryHuman     string                  `json:"memory_human"`
+	SecurityScore   int                     `json:"security_score"`
+	SecurityGrade   string                  `json:"security_grade"`
+	UpdateAvailable bool                    `json:"update_available"`
+	Command         string                  `json:"command"`
+	Entrypoint      string                  `json:"entrypoint"`
 }
 
 // ContainerCreateInput holds form data for creating a container.
@@ -310,33 +311,33 @@ type StackView struct {
 
 // StackServiceView represents a service within a stack for templates.
 type StackServiceView struct {
-	Name            string   `json:"name"`
-	Image           string   `json:"image"`
-	ContainerID     string   `json:"container_id"`
-	ContainerName   string   `json:"container_name"`
-	Status          string   `json:"status"`
-	State           string   `json:"state"`
-	Replicas        string   `json:"replicas"`
-	Ports           []string `json:"ports"`
+	Name          string   `json:"name"`
+	Image         string   `json:"image"`
+	ContainerID   string   `json:"container_id"`
+	ContainerName string   `json:"container_name"`
+	Status        string   `json:"status"`
+	State         string   `json:"state"`
+	Replicas      string   `json:"replicas"`
+	Ports         []string `json:"ports"`
 }
 
 // SecurityScanView for security scan results.
 type SecurityScanView struct {
-	ContainerID   string        `json:"container_id"`
-	ContainerName string        `json:"container_name"`
-	Image         string        `json:"image"`
-	Score         int           `json:"score"`
-	Grade         string        `json:"grade"`
-	Issues        []IssueView   `json:"issues"`
-	IssueCount    int           `json:"issue_count"`
-	CriticalCount int           `json:"critical_count"`
-	HighCount     int           `json:"high_count"`
-	MediumCount   int           `json:"medium_count"`
-	LowCount      int           `json:"low_count"`
-	ScannedAt     time.Time     `json:"scanned_at"`
-	ScannedHuman  string        `json:"scanned_human"`
-	CVECount      int           `json:"cve_count"`
-	IncludedCVE   bool          `json:"included_cve"`
+	ContainerID   string      `json:"container_id"`
+	ContainerName string      `json:"container_name"`
+	Image         string      `json:"image"`
+	Score         int         `json:"score"`
+	Grade         string      `json:"grade"`
+	Issues        []IssueView `json:"issues"`
+	IssueCount    int         `json:"issue_count"`
+	CriticalCount int         `json:"critical_count"`
+	HighCount     int         `json:"high_count"`
+	MediumCount   int         `json:"medium_count"`
+	LowCount      int         `json:"low_count"`
+	ScannedAt     time.Time   `json:"scanned_at"`
+	ScannedHuman  string      `json:"scanned_human"`
+	CVECount      int         `json:"cve_count"`
+	IncludedCVE   bool        `json:"included_cve"`
 }
 
 // ContainerSecurityView represents a container with its security scan status.
@@ -385,10 +386,10 @@ type SecurityOverviewData struct {
 
 // SecurityTrendsViewData for the trends page.
 type SecurityTrendsViewData struct {
-	Overview        SecurityOverviewData      `json:"overview"`
-	ScoreHistory    []TrendPointView          `json:"score_history"`
-	ContainerTrends []ContainerTrendViewData  `json:"container_trends"`
-	Days            int                       `json:"days"`
+	Overview        SecurityOverviewData     `json:"overview"`
+	ScoreHistory    []TrendPointView         `json:"score_history"`
+	ContainerTrends []ContainerTrendViewData `json:"container_trends"`
+	Days            int                      `json:"days"`
 }
 
 // TrendPointView represents a single point in a trends chart.
@@ -428,6 +429,24 @@ type UpdateHistoryView struct {
 	Status        string `json:"status"`
 	Duration      string `json:"duration"`
 	UpdatedAt     string `json:"updated_at"`
+	CanRollback   bool   `json:"can_rollback"`
+}
+
+// UpdatePolicyView for auto-update policy management.
+type UpdatePolicyView struct {
+	ID                string `json:"id"`
+	TargetType        string `json:"target_type"`
+	TargetID          string `json:"target_id"`
+	TargetName        string `json:"target_name"`
+	IsEnabled         bool   `json:"is_enabled"`
+	AutoUpdate        bool   `json:"auto_update"`
+	AutoBackup        bool   `json:"auto_backup"`
+	IncludePrerelease bool   `json:"include_prerelease"`
+	Schedule          string `json:"schedule"`
+	NotifyOnUpdate    bool   `json:"notify_on_update"`
+	NotifyOnFailure   bool   `json:"notify_on_failure"`
+	MaxRetries        int    `json:"max_retries"`
+	HealthCheckWait   int    `json:"health_check_wait"`
 }
 
 // BackupView for backup list/detail.
@@ -534,15 +553,15 @@ type ConfigVarView struct {
 
 // EventView for events list.
 type EventView struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	Action      string    `json:"action"`
-	ActorID     string    `json:"actor_id"`
-	ActorName   string    `json:"actor_name"`
-	ActorType   string    `json:"actor_type"`
-	Message     string    `json:"message"`
-	Timestamp   time.Time `json:"timestamp"`
-	TimeHuman   string    `json:"time_human"`
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Action    string    `json:"action"`
+	ActorID   string    `json:"actor_id"`
+	ActorName string    `json:"actor_name"`
+	ActorType string    `json:"actor_type"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+	TimeHuman string    `json:"time_human"`
 }
 
 // HostView for hosts list.
@@ -605,14 +624,28 @@ type PortAnalysisView struct {
 
 // ProxyHostView for NPM proxy hosts.
 type ProxyHostView struct {
-	ID          int      `json:"id"`
-	Domain      string   `json:"domain"`
-	ForwardHost string   `json:"forward_host"`
-	ForwardPort int      `json:"forward_port"`
-	SSLEnabled  bool     `json:"ssl_enabled"`
-	Enabled     bool     `json:"enabled"`
-	ContainerID string   `json:"container_id,omitempty"`
-	Container   string   `json:"container,omitempty"`
+	ID                    int      `json:"id"`
+	DomainNames           []string `json:"domain_names,omitempty"`
+	Domain                string   `json:"domain"`
+	ForwardScheme         string   `json:"forward_scheme"`
+	ForwardHost           string   `json:"forward_host"`
+	ForwardPort           int      `json:"forward_port"`
+	CertificateID         int      `json:"certificate_id,omitempty"`
+	SSLEnabled            bool     `json:"ssl_enabled"`
+	SSLForced             bool     `json:"ssl_forced"`
+	HSTSEnabled           bool     `json:"hsts_enabled"`
+	HSTSSubdomains        bool     `json:"hsts_subdomains"`
+	HTTP2Support          bool     `json:"http2_support"`
+	BlockExploits         bool     `json:"block_exploits"`
+	CachingEnabled        bool     `json:"caching_enabled"`
+	AllowWebsocketUpgrade bool     `json:"allow_websocket_upgrade"`
+	AccessListID          int      `json:"access_list_id,omitempty"`
+	AdvancedConfig        string   `json:"advanced_config,omitempty"`
+	Enabled               bool     `json:"enabled"`
+	ContainerID           string   `json:"container_id,omitempty"`
+	Container             string   `json:"container,omitempty"`
+	CreatedOn             string   `json:"created_on,omitempty"`
+	ModifiedOn            string   `json:"modified_on,omitempty"`
 }
 
 // RedirectionHostView for NPM redirections.

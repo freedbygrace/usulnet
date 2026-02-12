@@ -181,7 +181,7 @@ func List(data GiteaData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Connections) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-600 mb-3\"></i><p class=\"text-gray-400\">No Git connections configured</p><p class=\"text-sm text-gray-500 mt-1\">Add a connection to Gitea, GitHub, or GitLab to start syncing repositories</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-400 mb-3\"></i><p class=\"text-gray-400\">No Git connections configured</p><p class=\"text-sm text-gray-500 mt-1\">Add a connection to Gitea, GitHub, or GitLab to start syncing repositories</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -698,7 +698,7 @@ func repoRow(repo RepoItem) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</span> <span class=\"text-gray-600\">via ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</span> <span class=\"text-gray-400\">via ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

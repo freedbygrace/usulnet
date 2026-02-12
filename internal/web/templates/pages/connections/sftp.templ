@@ -82,7 +82,7 @@ templ SFTPBrowser(data SFTPBrowserData) {
 						</svg>
 					</a>
 					for i, bc := range data.Breadcrumbs {
-						<span class="text-gray-600">/</span>
+						<span class="text-gray-400">/</span>
 						if i == len(data.Breadcrumbs) - 1 {
 							<span class="text-white font-medium">{ bc.Name }</span>
 						} else {
@@ -198,7 +198,7 @@ templ SFTPBrowser(data SFTPBrowserData) {
 											</a>
 										}
 										<button
-											onclick={ showRenameModal(file.Name, file.Path) }
+											onclick={ showRenameModal(data.Connection.ID, file.Name, file.Path) }
 											class="p-1 text-gray-400 hover:text-white rounded transition-colors"
 											title="Rename"
 										>
@@ -247,7 +247,7 @@ templ SFTPBrowser(data SFTPBrowserData) {
 						id="drop-zone"
 						class="border-2 border-dashed border-dark-600 rounded-lg p-8 text-center hover:border-primary-500 transition-colors"
 					>
-						<svg class="w-12 h-12 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
 						</svg>
 						<p class="text-gray-400 mb-2">Drop files here or click to select</p>
@@ -360,11 +360,22 @@ script navigateTo(connID, path string) {
 	window.location.href = `/connections/ssh/${connID}/files?path=${encodeURIComponent(path)}`;
 }
 
-script showRenameModal(name, path string) {
+script showRenameModal(connID, name, path string) {
 	const newName = prompt(`Rename "${name}" to:`, name);
 	if (newName && newName !== name) {
-		// TODO: Implement rename API call
-		alert('Rename functionality coming soon');
+		const parentDir = path.substring(0, path.lastIndexOf('/') + 1);
+		const newPath = parentDir + newName;
+		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+		fetch(`/connections/ssh/${connID}/files/rename`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				'X-CSRF-Token': csrfToken
+			},
+			body: `old_path=${encodeURIComponent(path)}&new_path=${encodeURIComponent(newPath)}`
+		})
+		.then(r => { if (r.ok) location.reload(); else r.json().then(d => alert(d.error || 'Failed to rename')).catch(() => alert('Failed to rename')); })
+		.catch(e => alert('Error: ' + e));
 	}
 }
 

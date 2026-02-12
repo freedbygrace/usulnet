@@ -103,7 +103,7 @@ func Catalog(data CatalogData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Apps) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card p-12 text-center\"><i class=\"fas fa-store text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No applications available</h3><p class=\"text-gray-400\">The application catalog is empty.</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card p-12 text-center\"><i class=\"fas fa-store text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No applications available</h3><p class=\"text-gray-400\">The application catalog is empty.</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

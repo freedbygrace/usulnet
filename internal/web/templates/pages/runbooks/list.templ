@@ -112,9 +112,11 @@ templ runbooksGrid(data RunbooksData) {
 					</div>
 					<div class="bg-gray-50 dark:bg-gray-700/50 px-5 py-3 flex justify-between">
 						<form method="POST" action={ templ.SafeURL("/runbooks/" + rb.ID + "/execute") }>
+							<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 							<button type="submit" class="text-sm text-primary-600 hover:text-primary-500 dark:text-primary-400 font-medium">Run</button>
 						</form>
 						<form method="POST" action={ templ.SafeURL("/runbooks/" + rb.ID + "/delete") } onsubmit="return confirm('Delete this runbook?')">
+							<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 							<button type="submit" class="text-sm text-red-600 hover:text-red-500 dark:text-red-400">Delete</button>
 						</form>
 					</div>

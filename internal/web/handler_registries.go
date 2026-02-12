@@ -51,19 +51,28 @@ func (h *Handler) RegistriesTempl(w http.ResponseWriter, r *http.Request) {
 // RegistryCreate handles creation of a new registry.
 func (h *Handler) RegistryCreate(w http.ResponseWriter, r *http.Request) {
 	if h.registryRepo == nil {
+		h.setFlash(w, r, "error", "Registry service not configured")
 		h.redirect(w, r, "/registries")
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
-		slog.Error("Failed to parse form", "error", err)
+		h.setFlash(w, r, "error", "Invalid form data")
+		h.redirect(w, r, "/registries")
+		return
+	}
+
+	name := r.FormValue("name")
+	registryURL := r.FormValue("url")
+	if name == "" || registryURL == "" {
+		h.setFlash(w, r, "error", "Name and URL are required")
 		h.redirect(w, r, "/registries")
 		return
 	}
 
 	input := models.CreateRegistryInput{
-		Name:      r.FormValue("name"),
-		URL:       r.FormValue("url"),
+		Name:      name,
+		URL:       registryURL,
 		IsDefault: r.FormValue("is_default") == "on",
 	}
 
@@ -75,6 +84,11 @@ func (h *Handler) RegistryCreate(w http.ResponseWriter, r *http.Request) {
 			encrypted, err := h.encryptor.Encrypt(password)
 			if err == nil {
 				input.Password = &encrypted
+			} else {
+				slog.Error("Failed to encrypt registry password", "error", err)
+				h.setFlash(w, r, "error", "Failed to encrypt password")
+				h.redirect(w, r, "/registries")
+				return
 			}
 		} else {
 			input.Password = &password
@@ -84,8 +98,12 @@ func (h *Handler) RegistryCreate(w http.ResponseWriter, r *http.Request) {
 	_, err := h.registryRepo.Create(r.Context(), input)
 	if err != nil {
 		slog.Error("Failed to create registry", "name", input.Name, "error", err)
+		h.setFlash(w, r, "error", "Failed to create registry: "+err.Error())
+		h.redirect(w, r, "/registries")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Registry created successfully")
 	h.redirect(w, r, "/registries")
 }
 
@@ -99,19 +117,28 @@ func (h *Handler) RegistryUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.registryRepo == nil {
+		h.setFlash(w, r, "error", "Registry service not configured")
 		h.redirect(w, r, "/registries")
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
-		slog.Error("Failed to parse form", "error", err)
+		h.setFlash(w, r, "error", "Invalid form data")
+		h.redirect(w, r, "/registries")
+		return
+	}
+
+	name := r.FormValue("name")
+	registryURL := r.FormValue("url")
+	if name == "" || registryURL == "" {
+		h.setFlash(w, r, "error", "Name and URL are required")
 		h.redirect(w, r, "/registries")
 		return
 	}
 
 	input := models.CreateRegistryInput{
-		Name:      r.FormValue("name"),
-		URL:       r.FormValue("url"),
+		Name:      name,
+		URL:       registryURL,
 		IsDefault: r.FormValue("is_default") == "on",
 	}
 
@@ -123,6 +150,11 @@ func (h *Handler) RegistryUpdate(w http.ResponseWriter, r *http.Request) {
 			encrypted, err := h.encryptor.Encrypt(password)
 			if err == nil {
 				input.Password = &encrypted
+			} else {
+				slog.Error("Failed to encrypt registry password", "error", err)
+				h.setFlash(w, r, "error", "Failed to encrypt password")
+				h.redirect(w, r, "/registries")
+				return
 			}
 		} else {
 			input.Password = &password
@@ -132,8 +164,12 @@ func (h *Handler) RegistryUpdate(w http.ResponseWriter, r *http.Request) {
 	_, err = h.registryRepo.Update(r.Context(), id, input)
 	if err != nil {
 		slog.Error("Failed to update registry", "id", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to update registry: "+err.Error())
+		h.redirect(w, r, "/registries")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Registry updated successfully")
 	h.redirect(w, r, "/registries")
 }
 
@@ -149,8 +185,12 @@ func (h *Handler) RegistryDelete(w http.ResponseWriter, r *http.Request) {
 	if h.registryRepo != nil {
 		if err := h.registryRepo.Delete(r.Context(), id); err != nil {
 			slog.Error("Failed to delete registry", "id", id, "error", err)
+			h.setFlash(w, r, "error", "Failed to delete registry: "+err.Error())
+			h.redirect(w, r, "/registries")
+			return
 		}
 	}
 
+	h.setFlash(w, r, "success", "Registry deleted")
 	h.redirect(w, r, "/registries")
 }

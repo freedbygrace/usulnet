@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/lib/pq"
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/errors"
@@ -100,7 +99,7 @@ func (r *OAuthConfigRepository) Create(ctx context.Context, input *CreateOAuthCo
 
 	err := r.db.QueryRow(ctx, query,
 		id, input.Name, input.Provider, input.ClientID, input.ClientSecret,
-		input.AuthURL, input.TokenURL, input.UserInfoURL, pq.Array(input.Scopes), input.RedirectURL,
+		input.AuthURL, input.TokenURL, input.UserInfoURL, input.Scopes, input.RedirectURL,
 		input.DefaultRole, input.AutoProvision, input.AdminGroup, input.OperatorGroup,
 		input.UserIDClaim, input.UsernameClaim, input.EmailClaim, input.GroupsClaim,
 		input.IsEnabled, now, now,
@@ -132,7 +131,7 @@ func (r *OAuthConfigRepository) GetByID(ctx context.Context, id uuid.UUID) (*mod
 
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&config.ID, &config.Name, &config.Provider, &config.ClientID, &config.ClientSecret,
-		&config.AuthURL, &config.TokenURL, &config.UserInfoURL, pq.Array(&scopes), &config.RedirectURL,
+		&config.AuthURL, &config.TokenURL, &config.UserInfoURL, &scopes, &config.RedirectURL,
 		&config.DefaultRole, &config.AutoProvision, &config.AdminGroup, &config.OperatorGroup,
 		&config.UserIDClaim, &config.UsernameClaim, &config.EmailClaim, &config.GroupsClaim,
 		&config.IsEnabled, &config.CreatedAt, &config.UpdatedAt,
@@ -165,7 +164,7 @@ func (r *OAuthConfigRepository) GetByName(ctx context.Context, name string) (*mo
 
 	err := r.db.QueryRow(ctx, query, name).Scan(
 		&config.ID, &config.Name, &config.Provider, &config.ClientID, &config.ClientSecret,
-		&config.AuthURL, &config.TokenURL, &config.UserInfoURL, pq.Array(&scopes), &config.RedirectURL,
+		&config.AuthURL, &config.TokenURL, &config.UserInfoURL, &scopes, &config.RedirectURL,
 		&config.DefaultRole, &config.AutoProvision, &config.AdminGroup, &config.OperatorGroup,
 		&config.UserIDClaim, &config.UsernameClaim, &config.EmailClaim, &config.GroupsClaim,
 		&config.IsEnabled, &config.CreatedAt, &config.UpdatedAt,
@@ -206,7 +205,7 @@ func (r *OAuthConfigRepository) List(ctx context.Context) ([]*models.OAuthConfig
 
 		err := rows.Scan(
 			&config.ID, &config.Name, &config.Provider, &config.ClientID, &config.ClientSecret,
-			&config.AuthURL, &config.TokenURL, &config.UserInfoURL, pq.Array(&scopes), &config.RedirectURL,
+			&config.AuthURL, &config.TokenURL, &config.UserInfoURL, &scopes, &config.RedirectURL,
 			&config.DefaultRole, &config.AutoProvision, &config.AdminGroup, &config.OperatorGroup,
 			&config.UserIDClaim, &config.UsernameClaim, &config.EmailClaim, &config.GroupsClaim,
 			&config.IsEnabled, &config.CreatedAt, &config.UpdatedAt,
@@ -251,7 +250,7 @@ func (r *OAuthConfigRepository) ListEnabled(ctx context.Context) ([]*models.OAut
 
 		err := rows.Scan(
 			&config.ID, &config.Name, &config.Provider, &config.ClientID, &config.ClientSecret,
-			&config.AuthURL, &config.TokenURL, &config.UserInfoURL, pq.Array(&scopes), &config.RedirectURL,
+			&config.AuthURL, &config.TokenURL, &config.UserInfoURL, &scopes, &config.RedirectURL,
 			&config.DefaultRole, &config.AutoProvision, &config.AdminGroup, &config.OperatorGroup,
 			&config.UserIDClaim, &config.UsernameClaim, &config.EmailClaim, &config.GroupsClaim,
 			&config.IsEnabled, &config.CreatedAt, &config.UpdatedAt,
@@ -324,7 +323,7 @@ func (r *OAuthConfigRepository) Update(ctx context.Context, id uuid.UUID, input 
 		addClause("user_info_url", *input.UserInfoURL)
 	}
 	if input.Scopes != nil {
-		addClause("scopes", pq.Array(input.Scopes))
+		addClause("scopes", input.Scopes)
 	}
 	if input.RedirectURL != nil {
 		addClause("redirect_url", *input.RedirectURL)

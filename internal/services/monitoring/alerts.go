@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -100,7 +101,7 @@ type AlertService struct {
 
 	// Lifecycle
 	stopCh  chan struct{}
-	stopped bool
+	stopped atomic.Bool
 	wg      sync.WaitGroup
 }
 
@@ -148,11 +149,10 @@ func (s *AlertService) Start(ctx context.Context) error {
 
 // Stop stops the alert service.
 func (s *AlertService) Stop() error {
-	if s.stopped {
+	if !s.stopped.CompareAndSwap(false, true) {
 		return nil
 	}
 
-	s.stopped = true
 	close(s.stopCh)
 
 	// Wait for workers
@@ -407,6 +407,10 @@ func (s *AlertService) resolveActiveEvents(ctx context.Context, ruleID uuid.UUID
 
 // getMetricValue retrieves the current metric value for a rule.
 func (s *AlertService) getMetricValue(ctx context.Context, rule *models.AlertRule) (float64, error) {
+	if s.metrics == nil {
+		return 0, fmt.Errorf("metrics provider not configured")
+	}
+
 	hostID := s.getHostIDForRule(rule)
 
 	if rule.ContainerID != nil {

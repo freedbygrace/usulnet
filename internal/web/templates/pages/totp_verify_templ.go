@@ -137,7 +137,7 @@ func TOTPVerify(data TOTPVerifyData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " · Community Edition</p><p class=\"text-xs text-gray-600\"><a href=\"https://github.com/fr4nsys/usulnet\" target=\"_blank\" rel=\"noopener\" class=\"hover:text-primary-400 transition-colors\"><i class=\"fab fa-github mr-1\"></i>GitHub</a> <span class=\"mx-1\">·</span> <a href=\"https://www.gnu.org/licenses/agpl-3.0.html\" target=\"_blank\" rel=\"noopener\" class=\"hover:text-primary-400 transition-colors\">AGPLv3</a></p></div></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " · Community Edition</p><p class=\"text-xs text-gray-400\"><a href=\"https://github.com/fr4nsys/usulnet\" target=\"_blank\" rel=\"noopener\" class=\"hover:text-primary-400 transition-colors\"><i class=\"fab fa-github mr-1\"></i>GitHub</a> <span class=\"mx-1\">·</span> <a href=\"https://www.gnu.org/licenses/agpl-3.0.html\" target=\"_blank\" rel=\"noopener\" class=\"hover:text-primary-400 transition-colors\">AGPLv3</a></p></div></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

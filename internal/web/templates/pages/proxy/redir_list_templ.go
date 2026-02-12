@@ -242,13 +242,13 @@ func RedirList(data RedirListData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"card p-8 text-center\"><i class=\"fas fa-directions text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No redirection hosts</h3><p class=\"text-gray-400 mb-4\">Create a redirection to forward traffic between domains</p><a href=\"/proxy/redirections/new\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>New Redirection</a></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"card p-8 text-center\"><i class=\"fas fa-directions text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No redirection hosts</h3><p class=\"text-gray-400 mb-4\">Create a redirection to forward traffic between domains</p><a href=\"/proxy/redirections/new\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>New Redirection</a></div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<div class=\"card p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">NPM Not Connected</h3><p class=\"text-gray-400 mb-4\">Connect to NPM to manage redirections.</p><a href=\"/proxy/setup\" class=\"btn-primary\"><i class=\"fas fa-link mr-2\"></i>Setup Connection</a></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<div class=\"card p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">NPM Not Connected</h3><p class=\"text-gray-400 mb-4\">Connect to NPM to manage redirections.</p><a href=\"/proxy/setup\" class=\"btn-primary\"><i class=\"fas fa-link mr-2\"></i>Setup Connection</a></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

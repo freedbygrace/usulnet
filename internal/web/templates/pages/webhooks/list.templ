@@ -134,6 +134,7 @@ templ webhooksTab(data WebhooksData) {
 							</td>
 							<td class="px-6 py-4 whitespace-nowrap text-right text-sm">
 								<form method="POST" action={ templ.SafeURL("/webhooks/" + wh.ID + "/delete") } class="inline" onsubmit="return confirm('Delete this webhook?')">
+									<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 									<button type="submit" class="text-red-600 hover:text-red-900 dark:text-red-400">Delete</button>
 								</form>
 							</td>
@@ -144,7 +145,7 @@ templ webhooksTab(data WebhooksData) {
 		</div>
 	}
 
-	@createWebhookModal()
+	@createWebhookModal(data.PageData.CSRFToken)
 }
 
 templ deliveriesTab(data WebhooksData) {
@@ -243,6 +244,7 @@ templ autoDeployTab(data WebhooksData) {
 							</td>
 							<td class="px-6 py-4 whitespace-nowrap text-right text-sm">
 								<form method="POST" action={ templ.SafeURL("/webhooks/autodeploy/" + rule.ID + "/delete") } class="inline" onsubmit="return confirm('Delete this rule?')">
+									<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 									<button type="submit" class="text-red-600 hover:text-red-900 dark:text-red-400">Delete</button>
 								</form>
 							</td>
@@ -264,12 +266,13 @@ templ deliveryStatusBadge(status string) {
 	}
 }
 
-templ createWebhookModal() {
+templ createWebhookModal(csrfToken string) {
 	<div x-data="{ open: false }" @open-modal.window="if ($event.detail.id === 'create-webhook') open = true" x-show="open" x-cloak class="fixed inset-0 z-50 overflow-y-auto">
 		<div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
 			<div x-show="open" class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="open = false"></div>
 			<div x-show="open" class="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
 				<form method="POST" action="/webhooks">
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
 					<h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Create Outgoing Webhook</h3>
 					<div class="space-y-4">
 						<div>

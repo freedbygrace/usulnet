@@ -29,11 +29,6 @@ type CustomLogUploadRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
-// SetCustomLogUploadRepo sets the custom log upload repository.
-func (h *Handler) SetCustomLogUploadRepo(repo CustomLogUploadRepository) {
-	h.customLogUploadRepo = repo
-}
-
 // logUploadDir is the base directory for stored log uploads.
 const logUploadDir = "/tmp/usulnet/log-uploads"
 
@@ -73,24 +68,110 @@ func (h *Handler) LogManagement(w http.ResponseWriter, r *http.Request) {
 	switch tab {
 	case "aggregation":
 		data.Aggregation = h.loadLogAggregation(ctx)
+	case "search":
+		data.Aggregation = h.loadLogAggregation(ctx)
 	case "patterns":
 		data.Patterns = h.loadDetectedPatterns(ctx)
+		if len(data.Patterns) == 0 {
+			// Also load aggregation to get patterns from there
+			agg := h.loadLogAggregation(ctx)
+			data.Patterns = agg.TopPatterns
+		}
 	case "uploads":
 		data.Uploads = h.loadUploadedLogs(ctx, r)
+	default:
+		data.Aggregation = h.loadLogAggregation(ctx)
 	}
 
 	h.renderTempl(w, r, logspages.LogManagement(data))
 }
 
-// loadLogAggregation loads aggregated log statistics
+// loadLogAggregation loads aggregated log statistics from running containers
 func (h *Handler) loadLogAggregation(ctx interface{}) logspages.LogAggregationView {
-	return logspages.LogAggregationView{
+	agg := logspages.LogAggregationView{
 		Timeframe:  "24h",
 		TotalLogs:  0,
 		BySeverity: make(map[string]int64),
 		BySource:   make(map[string]int64),
 		ErrorRate:  0,
 	}
+
+	// Aggregate logs from running containers
+	containerSvc := h.services.Containers()
+	if containerSvc == nil {
+		return agg
+	}
+
+	// Use the actual request context if available
+	reqCtx, ok := ctx.(context.Context)
+	if !ok {
+		return agg
+	}
+
+	containers, err := containerSvc.List(reqCtx, nil)
+	if err != nil {
+		return agg
+	}
+
+	// Sample logs from each running container (last 50 lines each)
+	for _, c := range containers {
+		if c.State != "running" {
+			continue
+		}
+		name := strings.TrimPrefix(c.Name, "/")
+		lines, err := containerSvc.GetLogs(reqCtx, c.ID, 50)
+		if err != nil {
+			continue
+		}
+
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			agg.TotalLogs++
+			agg.BySource[name]++
+
+			result := models.ParseLogLine(line, models.LogSourceContainer, c.ID, name)
+			sevStr := string(result.Entry.Severity)
+			agg.BySeverity[sevStr]++
+
+			// Track error patterns
+			if result.Entry.Severity == models.LogSeverityError || result.Entry.Severity == models.LogSeverityCritical {
+				patternKey := result.Entry.Message
+				if len(patternKey) > 80 {
+					patternKey = patternKey[:80]
+				}
+				found := false
+				for i := range agg.TopPatterns {
+					if agg.TopPatterns[i].Pattern == patternKey {
+						agg.TopPatterns[i].Count++
+						found = true
+						break
+					}
+				}
+				if !found && len(agg.TopPatterns) < 20 {
+					agg.TopPatterns = append(agg.TopPatterns, logspages.DetectedPattern{
+						ID:        fmt.Sprintf("p-%d", len(agg.TopPatterns)+1),
+						Pattern:   patternKey,
+						Type:      "error",
+						Count:     1,
+						Severity:  sevStr,
+						Sources:   []string{name},
+						Example:   line,
+						FirstSeen: "recent",
+						LastSeen:  "recent",
+					})
+				}
+			}
+		}
+	}
+
+	if agg.TotalLogs > 0 {
+		errorCount := agg.BySeverity["error"] + agg.BySeverity["critical"]
+		agg.ErrorRate = float64(errorCount) / float64(agg.TotalLogs) * 100
+	}
+
+	return agg
 }
 
 // loadDetectedPatterns loads detected error patterns

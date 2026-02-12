@@ -40,7 +40,7 @@ templ TableHeaderSortable(text, sortKey, currentSort, currentDir string) {
 					<i class="fas fa-sort-down text-primary-400"></i>
 				}
 			} else {
-				<i class="fas fa-sort text-gray-600"></i>
+				<i class="fas fa-sort text-gray-400"></i>
 			}
 		</a>
 	</th>
@@ -72,7 +72,7 @@ templ TableEmpty(message, icon string) {
 	<tr>
 		<td colspan="100" class="px-4 py-12 text-center">
 			<div class="flex flex-col items-center">
-				<i class={ "fas " + icon + " text-4xl text-gray-600 mb-4" }></i>
+				<i class={ "fas " + icon + " text-4xl text-gray-400 mb-4" }></i>
 				<p class="text-gray-400">{ message }</p>
 			</div>
 		</td>

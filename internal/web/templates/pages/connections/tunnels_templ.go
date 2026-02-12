@@ -132,7 +132,7 @@ func SSHTunnels(data SSHTunnelsPageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Tunnels) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"px-6 py-12 text-center\"><i class=\"fas fa-network-wired text-4xl text-gray-600 mb-4\"></i><p class=\"text-gray-400\">No tunnels configured</p><p class=\"text-gray-500 text-sm mt-1\">Create a tunnel to forward ports through this SSH connection</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"px-6 py-12 text-center\"><i class=\"fas fa-network-wired text-4xl text-gray-400 mb-4\"></i><p class=\"text-gray-400\">No tunnels configured</p><p class=\"text-gray-500 text-sm mt-1\">Create a tunnel to forward ports through this SSH connection</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

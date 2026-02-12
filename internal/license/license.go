@@ -43,6 +43,16 @@ const (
 	FeatureSharedTerminals   Feature = "shared_terminals"
 	FeatureWhiteLabel        Feature = "white_label"
 	FeatureSwarm             Feature = "swarm"
+	FeatureCompliance        Feature = "compliance"
+	FeatureOPAPolicies       Feature = "opa_policies"
+	FeatureImageSigning      Feature = "image_signing"
+	FeatureRuntimeSecurity   Feature = "runtime_security"
+	FeatureLogAggregation    Feature = "log_aggregation"
+	FeatureCustomDashboards  Feature = "custom_dashboards"
+	// Phase 3: Market Expansion - GitOps
+	FeatureGitSync           Feature = "git_sync"
+	FeatureEphemeralEnvs     Feature = "ephemeral_envs"
+	FeatureManifestBuilder   Feature = "manifest_builder"
 )
 
 // AllBusinessFeatures returns every feature flag enabled in Business edition.
@@ -57,6 +67,7 @@ func AllBusinessFeatures() []Feature {
 		FeatureAPIKeys,
 		FeaturePrioritySupport,
 		FeatureSwarm,
+		FeatureGitSync,
 	}
 }
 
@@ -76,6 +87,15 @@ func AllEnterpriseFeatures() []Feature {
 		FeatureHAMode,
 		FeatureSharedTerminals,
 		FeatureWhiteLabel,
+		FeatureCompliance,
+		FeatureOPAPolicies,
+		FeatureImageSigning,
+		FeatureRuntimeSecurity,
+		FeatureLogAggregation,
+		FeatureCustomDashboards,
+		FeatureGitSync,
+		FeatureEphemeralEnvs,
+		FeatureManifestBuilder,
 	}
 }
 
@@ -109,7 +129,7 @@ func CELimits() Limits {
 		MaxUsers:                3,
 		MaxTeams:                1,
 		MaxCustomRoles:          1,
-		MaxLDAPServers:          0, // disabled entirely (no FeatureLDAP)
+		MaxLDAPServers:          1, // 1 LDAP server in CE
 		MaxOAuthProviders:       0, // disabled entirely (no FeatureOAuth)
 		MaxAPIKeys:              3,
 		MaxGitConnections:       1,

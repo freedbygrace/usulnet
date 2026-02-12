@@ -42,6 +42,11 @@ func (h *Handler) TeamsTempl(w http.ResponseWriter, r *http.Request) {
 			if t.Description != nil {
 				item.Description = *t.Description
 			}
+			if t.CreatedBy != nil {
+				if creator, err := h.services.Users().Get(ctx, t.CreatedBy.String()); err == nil && creator != nil {
+					item.CreatedBy = creator.Username
+				}
+			}
 			items = append(items, item)
 
 			if t.MemberCount > 0 {
@@ -85,6 +90,7 @@ func (h *Handler) TeamCreate(w http.ResponseWriter, r *http.Request) {
 	description := r.FormValue("description")
 
 	if name == "" {
+		h.setFlash(w, r, "error", "Team name is required")
 		h.redirect(w, r, "/teams/new")
 		return
 	}
@@ -98,10 +104,12 @@ func (h *Handler) TeamCreate(w http.ResponseWriter, r *http.Request) {
 	_, err := h.services.Teams().CreateTeam(ctx, name, description, createdBy)
 	if err != nil {
 		slog.Error("Failed to create team", "name", name, "error", err)
+		h.setFlash(w, r, "error", "Failed to create team: "+err.Error())
 		h.redirect(w, r, "/teams/new")
 		return
 	}
 
+	h.setFlash(w, r, "success", "Team created successfully")
 	h.redirect(w, r, "/teams")
 }
 
@@ -138,6 +146,11 @@ func (h *Handler) TeamDetailTempl(w http.ResponseWriter, r *http.Request) {
 	}
 	if team.Description != nil {
 		teamItem.Description = *team.Description
+	}
+	if team.CreatedBy != nil {
+		if creator, err := h.services.Users().Get(ctx, team.CreatedBy.String()); err == nil && creator != nil {
+			teamItem.CreatedBy = creator.Username
+		}
 	}
 
 	// Fetch members
@@ -233,22 +246,26 @@ func (h *Handler) TeamDetailTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var availableGiteaConns []teams.ResourceOption
-	if giteaList, err := h.services.Gitea().ListAllConnections(ctx); err == nil {
-		for _, g := range giteaList {
-			availableGiteaConns = append(availableGiteaConns, teams.ResourceOption{
-				ID:   g.ID.String(),
-				Name: g.Name,
-			})
+	if giteaSvc := h.services.Gitea(); giteaSvc != nil {
+		if giteaList, err := giteaSvc.ListAllConnections(ctx); err == nil {
+			for _, g := range giteaList {
+				availableGiteaConns = append(availableGiteaConns, teams.ResourceOption{
+					ID:   g.ID.String(),
+					Name: g.Name,
+				})
+			}
 		}
 	}
 
 	var availableS3Conns []teams.ResourceOption
-	if s3List, err := h.services.Storage().ListConnections(ctx); err == nil {
-		for _, s := range s3List {
-			availableS3Conns = append(availableS3Conns, teams.ResourceOption{
-				ID:   s.ID,
-				Name: s.Name,
-			})
+	if storageSvc := h.services.Storage(); storageSvc != nil {
+		if s3List, err := storageSvc.ListConnections(ctx); err == nil {
+			for _, s := range s3List {
+				availableS3Conns = append(availableS3Conns, teams.ResourceOption{
+					ID:   s.ID,
+					Name: s.Name,
+				})
+			}
 		}
 	}
 
@@ -327,6 +344,7 @@ func (h *Handler) TeamUpdate(w http.ResponseWriter, r *http.Request) {
 	description := r.FormValue("description")
 
 	if name == "" {
+		h.setFlash(w, r, "error", "Team name is required")
 		h.redirect(w, r, "/teams/"+idStr+"/edit")
 		return
 	}
@@ -334,6 +352,7 @@ func (h *Handler) TeamUpdate(w http.ResponseWriter, r *http.Request) {
 	_, err = h.services.Teams().UpdateTeam(ctx, teamID, name, description)
 	if err != nil {
 		slog.Error("Failed to update team", "id", teamID, "error", err)
+		h.setFlash(w, r, "error", "Failed to update team: "+err.Error())
 		h.redirect(w, r, "/teams/"+idStr+"/edit")
 		return
 	}
@@ -357,8 +376,12 @@ func (h *Handler) TeamDelete(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Teams().DeleteTeam(ctx, teamID); err != nil {
 		slog.Error("Failed to delete team", "id", teamID, "error", err)
+		h.setFlash(w, r, "error", "Failed to delete team: "+err.Error())
+		h.redirect(w, r, "/teams")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Team deleted successfully")
 	h.redirect(w, r, "/teams")
 }
 
@@ -405,8 +428,12 @@ func (h *Handler) TeamAddMember(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Teams().AddMember(ctx, teamID, userID, role, addedBy); err != nil {
 		slog.Error("Failed to add team member", "team_id", teamID, "user_id", userID, "error", err)
+		h.setFlash(w, r, "error", "Failed to add member: "+err.Error())
+		h.redirect(w, r, "/teams/"+idStr+"?tab=members")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Member added to team")
 	h.redirect(w, r, "/teams/"+idStr+"?tab=members")
 }
 
@@ -429,8 +456,12 @@ func (h *Handler) TeamRemoveMember(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Teams().RemoveMember(ctx, teamID, userID); err != nil {
 		slog.Error("Failed to remove team member", "team_id", teamID, "user_id", userID, "error", err)
+		h.setFlash(w, r, "error", "Failed to remove member: "+err.Error())
+		h.redirect(w, r, "/teams/"+idStr+"?tab=members")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Member removed from team")
 	h.redirect(w, r, "/teams/"+idStr+"?tab=members")
 }
 
@@ -483,8 +514,12 @@ func (h *Handler) TeamGrantPermission(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Teams().GrantAccess(ctx, teamID, resourceType, resourceID, accessLevel, grantedBy); err != nil {
 		slog.Error("Failed to grant permission", "team_id", teamID, "resource_type", resourceType, "resource_id", resourceID, "error", err)
+		h.setFlash(w, r, "error", "Failed to grant permission: "+err.Error())
+		h.redirect(w, r, "/teams/"+idStr+"?tab=permissions")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Permission granted")
 	h.redirect(w, r, "/teams/"+idStr+"?tab=permissions")
 }
 
@@ -501,7 +536,11 @@ func (h *Handler) TeamRevokePermission(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.services.Teams().RevokeAccessByID(ctx, permID); err != nil {
 		slog.Error("Failed to revoke permission", "perm_id", permID, "error", err)
+		h.setFlash(w, r, "error", "Failed to revoke permission: "+err.Error())
+		h.redirect(w, r, "/teams/"+idStr+"?tab=permissions")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Permission revoked")
 	h.redirect(w, r, "/teams/"+idStr+"?tab=permissions")
 }

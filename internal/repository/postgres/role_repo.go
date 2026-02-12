@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/lib/pq"
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/errors"
@@ -55,7 +54,7 @@ func (r *RoleRepository) Create(ctx context.Context, role *models.Role) error {
 		role.Name,
 		role.DisplayName,
 		role.Description,
-		pq.Array(role.Permissions),
+		role.Permissions,
 		role.IsSystem,
 		role.IsActive,
 		role.Priority,
@@ -115,7 +114,7 @@ func (r *RoleRepository) Update(ctx context.Context, role *models.Role) error {
 		role.ID,
 		role.DisplayName,
 		role.Description,
-		pq.Array(role.Permissions),
+		role.Permissions,
 		role.IsActive,
 		role.Priority,
 		role.UpdatedAt,

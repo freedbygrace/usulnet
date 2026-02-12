@@ -12,7 +12,6 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 // AlertRepository implements alert persistence.
@@ -46,7 +45,7 @@ func (r *AlertRepository) CreateRule(ctx context.Context, rule *models.AlertRule
 		rule.ID, rule.HostID, rule.ContainerID, rule.Name, rule.Description,
 		rule.Metric, rule.Operator, rule.Threshold, rule.Severity,
 		rule.Duration, rule.Cooldown, rule.EvalInterval,
-		rule.State, pq.Array(rule.NotifyChannels), autoActionsJSON,
+		rule.State, rule.NotifyChannels, autoActionsJSON,
 		rule.IsEnabled, labelsJSON, rule.CreatedBy,
 	)
 	return err
@@ -67,7 +66,7 @@ func (r *AlertRepository) GetRule(ctx context.Context, id uuid.UUID) (*models.Al
 		&rule.Metric, &rule.Operator, &rule.Threshold, &rule.Severity,
 		&rule.Duration, &rule.Cooldown, &rule.EvalInterval,
 		&rule.State, &rule.StateChangedAt, &rule.LastEvaluated, &rule.LastFiredAt, &rule.FiringValue,
-		pq.Array(&rule.NotifyChannels), &autoActionsJSON, &rule.IsEnabled, &labelsJSON,
+		&rule.NotifyChannels, &autoActionsJSON, &rule.IsEnabled, &labelsJSON,
 		&rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedAt,
 	)
 	if err != nil {
@@ -98,7 +97,7 @@ func (r *AlertRepository) UpdateRule(ctx context.Context, rule *models.AlertRule
 		rule.ID, rule.Name, rule.Description, rule.Threshold, rule.Severity,
 		rule.Duration, rule.Cooldown, rule.EvalInterval,
 		rule.State, rule.StateChangedAt, rule.LastEvaluated, rule.LastFiredAt, rule.FiringValue,
-		pq.Array(rule.NotifyChannels), rule.AutoActions, rule.IsEnabled, labelsJSON,
+		rule.NotifyChannels, rule.AutoActions, rule.IsEnabled, labelsJSON,
 	)
 	return err
 }
@@ -191,7 +190,7 @@ func (r *AlertRepository) ListRules(ctx context.Context, opts models.AlertListOp
 			&rule.Metric, &rule.Operator, &rule.Threshold, &rule.Severity,
 			&rule.Duration, &rule.Cooldown, &rule.EvalInterval,
 			&rule.State, &rule.StateChangedAt, &rule.LastEvaluated, &rule.LastFiredAt, &rule.FiringValue,
-			pq.Array(&rule.NotifyChannels), &autoActionsJSON, &rule.IsEnabled, &labelsJSON,
+			&rule.NotifyChannels, &autoActionsJSON, &rule.IsEnabled, &labelsJSON,
 			&rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -363,6 +362,17 @@ func (r *AlertRepository) ListEvents(ctx context.Context, opts models.AlertEvent
 	}
 
 	return events, total, nil
+}
+
+// DeleteOldEvents removes alert events older than the specified retention period.
+// Returns the number of deleted rows.
+func (r *AlertRepository) DeleteOldEvents(ctx context.Context, retentionDays int) (int64, error) {
+	result, err := r.db.Exec(ctx,
+		`SELECT cleanup_old_alert_events($1)`, retentionDays)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup old alert events: %w", err)
+	}
+	return result.RowsAffected(), nil
 }
 
 // GetActiveEvents returns currently firing/pending events.

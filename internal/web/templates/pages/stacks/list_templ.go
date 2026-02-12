@@ -130,7 +130,7 @@ func List(data StacksData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Stacks) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"card p-12 text-center\"><i class=\"fas fa-layer-group text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No stacks found</h3><p class=\"text-gray-400 mb-4\">Deploy your first Docker Compose stack</p><div class=\"flex items-center justify-center gap-3\"><a href=\"/stacks/catalog\" class=\"btn-secondary\"><i class=\"fas fa-store mr-2\"></i>Browse Apps</a> <a href=\"/stacks/new\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>Create Stack</a></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"card p-12 text-center\"><i class=\"fas fa-layer-group text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No stacks found</h3><p class=\"text-gray-400 mb-4\">Deploy your first Docker Compose stack</p><div class=\"flex items-center justify-center gap-3\"><a href=\"/stacks/catalog\" class=\"btn-secondary\"><i class=\"fas fa-store mr-2\"></i>Browse Apps</a> <a href=\"/stacks/new\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>Create Stack</a></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

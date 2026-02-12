@@ -348,6 +348,10 @@ func (a *caddyProxyAdapter) IsConnected(ctx context.Context) bool {
 	return healthy
 }
 
+func (a *caddyProxyAdapter) Mode() string {
+	return "caddy"
+}
+
 // ---- UUID resolution ----
 
 // resolveHostID maps a legacy int ID to a UUID.

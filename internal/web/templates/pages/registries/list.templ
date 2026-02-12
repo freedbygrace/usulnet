@@ -81,6 +81,7 @@ templ List(data RegistriesData) {
 									<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ reg.CreatedAt }</td>
 									<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
 										<form method="POST" action={ templ.SafeURL("/registries/" + reg.ID + "/delete") } class="inline" onsubmit="return confirm('Delete this registry?')">
+											<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 											<button type="submit" class="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Delete</button>
 										</form>
 									</td>
@@ -92,16 +93,17 @@ templ List(data RegistriesData) {
 			}
 		</div>
 
-		@createRegistryModal()
+		@createRegistryModal(data.PageData.CSRFToken)
 	}
 }
 
-templ createRegistryModal() {
+templ createRegistryModal(csrfToken string) {
 	<div x-data="{ open: false }" @open-modal.window="if ($event.detail.id === 'create-registry') open = true" x-show="open" x-cloak class="fixed inset-0 z-50 overflow-y-auto">
 		<div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
 			<div x-show="open" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="open = false"></div>
 			<div x-show="open" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100" class="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
 				<form method="POST" action="/registries">
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
 					<h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Add Container Registry</h3>
 					<div class="space-y-4">
 						<div>

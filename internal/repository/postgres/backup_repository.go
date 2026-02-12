@@ -7,12 +7,12 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/errors"
@@ -20,11 +20,11 @@ import (
 
 // BackupRepository implements backup.Repository for PostgreSQL.
 type BackupRepository struct {
-	db *sql.DB
+	db *DB
 }
 
 // NewBackupRepository creates a new backup repository.
-func NewBackupRepository(db *sql.DB) *BackupRepository {
+func NewBackupRepository(db *DB) *BackupRepository {
 	return &BackupRepository{db: db}
 }
 
@@ -51,7 +51,7 @@ func (r *BackupRepository) Create(ctx context.Context, backup *models.Backup) er
 			$17, $18, $19, $20, $21, $22
 		)`
 
-	_, err = r.db.ExecContext(ctx, query,
+	_, err = r.db.Exec(ctx, query,
 		backup.ID,
 		backup.HostID,
 		backup.Type,
@@ -106,7 +106,7 @@ func (r *BackupRepository) Update(ctx context.Context, backup *models.Backup) er
 			expires_at = $13
 		WHERE id = $1`
 
-	result, err := r.db.ExecContext(ctx, query,
+	result, err := r.db.Exec(ctx, query,
 		backup.ID,
 		backup.Status,
 		backup.Path,
@@ -125,8 +125,7 @@ func (r *BackupRepository) Update(ctx context.Context, backup *models.Backup) er
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to update backup")
 	}
 
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	if result.RowsAffected() == 0 {
 		return errors.NotFound("backup")
 	}
 
@@ -142,7 +141,7 @@ func (r *BackupRepository) Get(ctx context.Context, id uuid.UUID) (*models.Backu
 			started_at, completed_at, expires_at, created_at
 		FROM backups WHERE id = $1`
 
-	return r.scanBackup(r.db.QueryRowContext(ctx, query, id))
+	return r.scanBackup(r.db.QueryRow(ctx, query, id))
 }
 
 // GetByHostAndTarget retrieves backups for a specific target.
@@ -218,7 +217,7 @@ func (r *BackupRepository) List(ctx context.Context, opts models.BackupListOptio
 
 	// Get total count
 	var total int64
-	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
+	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "failed to count backups")
 	}
@@ -250,13 +249,12 @@ func (r *BackupRepository) List(ctx context.Context, opts models.BackupListOptio
 func (r *BackupRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM backups WHERE id = $1`
 
-	result, err := r.db.ExecContext(ctx, query, id)
+	result, err := r.db.Exec(ctx, query, id)
 	if err != nil {
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to delete backup")
 	}
 
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	if result.RowsAffected() == 0 {
 		return errors.NotFound("backup")
 	}
 
@@ -270,7 +268,7 @@ func (r *BackupRepository) DeleteExpired(ctx context.Context) ([]uuid.UUID, erro
 		SELECT id FROM backups 
 		WHERE expires_at IS NOT NULL AND expires_at < NOW()`
 
-	rows, err := r.db.QueryContext(ctx, selectQuery)
+	rows, err := r.db.Query(ctx, selectQuery)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to query expired backups")
 	}
@@ -294,7 +292,7 @@ func (r *BackupRepository) DeleteExpired(ctx context.Context) ([]uuid.UUID, erro
 		DELETE FROM backups 
 		WHERE expires_at IS NOT NULL AND expires_at < NOW()`
 
-	_, err = r.db.ExecContext(ctx, deleteQuery)
+	_, err = r.db.Exec(ctx, deleteQuery)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to delete expired backups")
 	}
@@ -328,29 +326,21 @@ func (r *BackupRepository) GetStats(ctx context.Context, hostID *uuid.UUID) (*mo
 			MIN(created_at) as oldest_backup
 		FROM backups` + baseWhere
 
-	var lastBackup, oldestBackup sql.NullTime
-	err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(
+	err := r.db.QueryRow(ctx, countQuery, args...).Scan(
 		&stats.TotalBackups,
 		&stats.CompletedBackups,
 		&stats.FailedBackups,
 		&stats.TotalSize,
-		&lastBackup,
-		&oldestBackup,
+		&stats.LastBackupAt,
+		&stats.OldestBackupAt,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to get backup stats")
 	}
 
-	if lastBackup.Valid {
-		stats.LastBackupAt = &lastBackup.Time
-	}
-	if oldestBackup.Valid {
-		stats.OldestBackupAt = &oldestBackup.Time
-	}
-
 	// By type
 	typeQuery := `SELECT type, COUNT(*) FROM backups` + baseWhere + ` GROUP BY type`
-	typeRows, err := r.db.QueryContext(ctx, typeQuery, args...)
+	typeRows, err := r.db.Query(ctx, typeQuery, args...)
 	if err == nil {
 		defer typeRows.Close()
 		for typeRows.Next() {
@@ -364,7 +354,7 @@ func (r *BackupRepository) GetStats(ctx context.Context, hostID *uuid.UUID) (*mo
 
 	// By trigger
 	triggerQuery := `SELECT trigger, COUNT(*) FROM backups` + baseWhere + ` GROUP BY trigger`
-	triggerRows, err := r.db.QueryContext(ctx, triggerQuery, args...)
+	triggerRows, err := r.db.Query(ctx, triggerQuery, args...)
 	if err == nil {
 		defer triggerRows.Close()
 		for triggerRows.Next() {
@@ -394,7 +384,7 @@ func (r *BackupRepository) CreateSchedule(ctx context.Context, schedule *models.
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 		)`
 
-	_, err := r.db.ExecContext(ctx, query,
+	_, err := r.db.Exec(ctx, query,
 		schedule.ID,
 		schedule.HostID,
 		schedule.Type,
@@ -434,7 +424,7 @@ func (r *BackupRepository) UpdateSchedule(ctx context.Context, schedule *models.
 			updated_at = $9
 		WHERE id = $1`
 
-	result, err := r.db.ExecContext(ctx, query,
+	result, err := r.db.Exec(ctx, query,
 		schedule.ID,
 		schedule.Schedule,
 		schedule.Compression,
@@ -449,8 +439,7 @@ func (r *BackupRepository) UpdateSchedule(ctx context.Context, schedule *models.
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to update backup schedule")
 	}
 
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	if result.RowsAffected() == 0 {
 		return errors.NotFound("backup schedule")
 	}
 
@@ -465,7 +454,7 @@ func (r *BackupRepository) GetSchedule(ctx context.Context, id uuid.UUID) (*mode
 			last_run_status, next_run_at, created_by, created_at, updated_at
 		FROM backup_schedules WHERE id = $1`
 
-	return r.scanSchedule(r.db.QueryRowContext(ctx, query, id))
+	return r.scanSchedule(r.db.QueryRow(ctx, query, id))
 }
 
 // ListSchedules retrieves all schedules.
@@ -483,7 +472,7 @@ func (r *BackupRepository) ListSchedules(ctx context.Context, hostID *uuid.UUID)
 	}
 	query += ` ORDER BY created_at DESC`
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to list schedules")
 	}
@@ -505,13 +494,12 @@ func (r *BackupRepository) ListSchedules(ctx context.Context, hostID *uuid.UUID)
 func (r *BackupRepository) DeleteSchedule(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM backup_schedules WHERE id = $1`
 
-	result, err := r.db.ExecContext(ctx, query, id)
+	result, err := r.db.Exec(ctx, query, id)
 	if err != nil {
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to delete schedule")
 	}
 
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	if result.RowsAffected() == 0 {
 		return errors.NotFound("backup schedule")
 	}
 
@@ -527,7 +515,7 @@ func (r *BackupRepository) GetDueSchedules(ctx context.Context) ([]*models.Backu
 		FROM backup_schedules
 		WHERE is_enabled = true AND next_run_at <= NOW()`
 
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to get due schedules")
 	}
@@ -555,7 +543,7 @@ func (r *BackupRepository) UpdateScheduleLastRun(ctx context.Context, id uuid.UU
 			updated_at = NOW()
 		WHERE id = $1`
 
-	_, err := r.db.ExecContext(ctx, query, id, status, nextRun)
+	_, err := r.db.Exec(ctx, query, id, status, nextRun)
 	if err != nil {
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to update schedule last run")
 	}
@@ -574,9 +562,6 @@ type scanner interface {
 func (r *BackupRepository) scanBackup(row scanner) (*models.Backup, error) {
 	var b models.Backup
 	var metadata []byte
-	var verifiedAt, startedAt, completedAt, expiresAt sql.NullTime
-	var createdBy sql.NullString
-	var checksum, errorMessage sql.NullString
 
 	err := row.Scan(
 		&b.ID,
@@ -591,46 +576,24 @@ func (r *BackupRepository) scanBackup(row scanner) (*models.Backup, error) {
 		&b.SizeBytes,
 		&b.Compression,
 		&b.Encrypted,
-		&checksum,
+		&b.Checksum,
 		&b.Verified,
-		&verifiedAt,
+		&b.VerifiedAt,
 		&metadata,
-		&errorMessage,
-		&createdBy,
-		&startedAt,
-		&completedAt,
-		&expiresAt,
+		&b.ErrorMessage,
+		&b.CreatedBy,
+		&b.StartedAt,
+		&b.CompletedAt,
+		&b.ExpiresAt,
 		&b.CreatedAt,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == pgx.ErrNoRows {
 			return nil, errors.NotFound("backup")
 		}
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to scan backup")
 	}
 
-	if checksum.Valid {
-		b.Checksum = &checksum.String
-	}
-	if errorMessage.Valid {
-		b.ErrorMessage = &errorMessage.String
-	}
-	if createdBy.Valid {
-		id, _ := uuid.Parse(createdBy.String)
-		b.CreatedBy = &id
-	}
-	if verifiedAt.Valid {
-		b.VerifiedAt = &verifiedAt.Time
-	}
-	if startedAt.Valid {
-		b.StartedAt = &startedAt.Time
-	}
-	if completedAt.Valid {
-		b.CompletedAt = &completedAt.Time
-	}
-	if expiresAt.Valid {
-		b.ExpiresAt = &expiresAt.Time
-	}
 	if len(metadata) > 0 {
 		var m models.BackupMetadata
 		if json.Unmarshal(metadata, &m) == nil {
@@ -642,7 +605,7 @@ func (r *BackupRepository) scanBackup(row scanner) (*models.Backup, error) {
 }
 
 func (r *BackupRepository) queryBackups(ctx context.Context, query string, args ...interface{}) ([]*models.Backup, error) {
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to query backups")
 	}
@@ -662,9 +625,6 @@ func (r *BackupRepository) queryBackups(ctx context.Context, query string, args 
 
 func (r *BackupRepository) scanSchedule(row scanner) (*models.BackupSchedule, error) {
 	var s models.BackupSchedule
-	var lastRunAt, nextRunAt sql.NullTime
-	var lastRunStatus sql.NullString
-	var createdBy sql.NullString
 
 	err := row.Scan(
 		&s.ID,
@@ -678,43 +638,25 @@ func (r *BackupRepository) scanSchedule(row scanner) (*models.BackupSchedule, er
 		&s.RetentionDays,
 		&s.MaxBackups,
 		&s.IsEnabled,
-		&lastRunAt,
-		&lastRunStatus,
-		&nextRunAt,
-		&createdBy,
+		&s.LastRunAt,
+		&s.LastRunStatus,
+		&s.NextRunAt,
+		&s.CreatedBy,
 		&s.CreatedAt,
 		&s.UpdatedAt,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == pgx.ErrNoRows {
 			return nil, errors.NotFound("backup schedule")
 		}
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to scan schedule")
 	}
 
-	if lastRunAt.Valid {
-		s.LastRunAt = &lastRunAt.Time
-	}
-	if nextRunAt.Valid {
-		s.NextRunAt = &nextRunAt.Time
-	}
-	if lastRunStatus.Valid {
-		status := models.BackupStatus(lastRunStatus.String)
-		s.LastRunStatus = &status
-	}
-	if createdBy.Valid {
-		id, _ := uuid.Parse(createdBy.String)
-		s.CreatedBy = &id
-	}
-
 	return &s, nil
 }
 
-func (r *BackupRepository) scanScheduleRows(rows *sql.Rows) (*models.BackupSchedule, error) {
+func (r *BackupRepository) scanScheduleRows(rows pgx.Rows) (*models.BackupSchedule, error) {
 	var s models.BackupSchedule
-	var lastRunAt, nextRunAt sql.NullTime
-	var lastRunStatus sql.NullString
-	var createdBy sql.NullString
 
 	err := rows.Scan(
 		&s.ID,
@@ -728,30 +670,15 @@ func (r *BackupRepository) scanScheduleRows(rows *sql.Rows) (*models.BackupSched
 		&s.RetentionDays,
 		&s.MaxBackups,
 		&s.IsEnabled,
-		&lastRunAt,
-		&lastRunStatus,
-		&nextRunAt,
-		&createdBy,
+		&s.LastRunAt,
+		&s.LastRunStatus,
+		&s.NextRunAt,
+		&s.CreatedBy,
 		&s.CreatedAt,
 		&s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to scan schedule row")
-	}
-
-	if lastRunAt.Valid {
-		s.LastRunAt = &lastRunAt.Time
-	}
-	if nextRunAt.Valid {
-		s.NextRunAt = &nextRunAt.Time
-	}
-	if lastRunStatus.Valid {
-		status := models.BackupStatus(lastRunStatus.String)
-		s.LastRunStatus = &status
-	}
-	if createdBy.Valid {
-		id, _ := uuid.Parse(createdBy.String)
-		s.CreatedBy = &id
 	}
 
 	return &s, nil

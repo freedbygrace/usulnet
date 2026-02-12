@@ -53,12 +53,22 @@ type ConsumerConfig struct {
 }
 
 // NewJetStream creates a new JetStream wrapper.
+// Respects the client's JetStreamEnabled and JetStreamDomain configuration.
 func NewJetStream(client *Client) (*JetStream, error) {
 	if client == nil || client.Conn() == nil {
 		return nil, fmt.Errorf("NATS client not connected")
 	}
 
-	js, err := client.Conn().JetStream()
+	if !client.config.JetStreamEnabled {
+		return nil, fmt.Errorf("JetStream is disabled in configuration")
+	}
+
+	var jsOpts []nats.JSOpt
+	if client.config.JetStreamDomain != "" {
+		jsOpts = append(jsOpts, nats.Domain(client.config.JetStreamDomain))
+	}
+
+	js, err := client.Conn().JetStream(jsOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JetStream context: %w", err)
 	}

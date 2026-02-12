@@ -371,7 +371,7 @@ func List(data HostsData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Hosts) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"card p-12 text-center\"><i class=\"fas fa-server text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No nodes configured</h3><p class=\"text-gray-400 mb-4\">Add a local, remote, or agent-managed Docker node to get started</p><a href=\"/nodes/new\" class=\"btn btn-primary\"><i class=\"fas fa-plus mr-2\"></i>Add Your First Node</a></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"card p-12 text-center\"><i class=\"fas fa-server text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No nodes configured</h3><p class=\"text-gray-400 mb-4\">Add a local, remote, or agent-managed Docker node to get started</p><a href=\"/nodes/new\" class=\"btn btn-primary\"><i class=\"fas fa-plus mr-2\"></i>Add Your First Node</a></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

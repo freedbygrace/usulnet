@@ -570,15 +570,15 @@ func RDPConnectionDetail(data RDPConnectionDetailData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var30 templ.SafeURL
-			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", data.Connection.ID)))
+			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 337, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 337, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" class=\"card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors\"><div class=\"w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center\"><i class=\"fas fa-desktop text-primary-400\"></i></div><div><p class=\"text-white font-medium\">Connect</p><p class=\"text-xs text-gray-400\">Open Remote Desktop</p></div></a></div><!-- Test result --><div id=\"test-result\"></div><!-- Edit Form --><form method=\"POST\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" class=\"card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors\" download><div class=\"w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center\"><i class=\"fas fa-desktop text-primary-400\"></i></div><div><p class=\"text-white font-medium\">Connect</p><p class=\"text-xs text-gray-400\">Download .rdp file</p></div></a></div><!-- Test result --><div id=\"test-result\"></div><!-- Edit Form --><form method=\"POST\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

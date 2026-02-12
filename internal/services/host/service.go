@@ -66,8 +66,11 @@ type Service struct {
 }
 
 // SetLimitProvider sets the license limit provider for resource cap enforcement.
+// Thread-safe: may be called while background goroutines are reading limitProvider.
 func (s *Service) SetLimitProvider(lp license.LimitProvider) {
+	s.mu.Lock()
 	s.limitProvider = lp
+	s.mu.Unlock()
 }
 
 // NewService creates a new host service.
@@ -109,15 +112,20 @@ func NewStandaloneService(config Config, log *logger.Logger) *Service {
 }
 
 // SetCommandSender sets the gateway command sender for routing operations to remote agents.
-// This must be called before agent-type hosts can be used.
+// Thread-safe: may be called while background goroutines read cmdSender.
 func (s *Service) SetCommandSender(sender docker.CommandSender) {
+	s.mu.Lock()
 	s.cmdSender = sender
+	s.mu.Unlock()
 	s.logger.Info("command sender configured for agent proxy support")
 }
 
 // SetRepository sets the host repository (for upgrading standalone to master mode).
+// Thread-safe: may be called while background goroutines read repo.
 func (s *Service) SetRepository(repo *postgres.HostRepository) {
+	s.mu.Lock()
 	s.repo = repo
+	s.mu.Unlock()
 	s.logger.Info("host repository configured for database-backed host lookups")
 }
 

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fr4nsys/usulnet/internal/models"
@@ -27,6 +28,7 @@ const (
 	ContextKeyFlash      ContextKey = "flash"
 	ContextKeyStats      ContextKey = "stats"
 	ContextKeyActiveHost ContextKey = "active_host_id"
+	ContextKeySession    ContextKey = "session"
 )
 
 // SessionStore interface for session management.
@@ -57,6 +59,9 @@ type AuthService interface {
 	VerifyCredentials(ctx context.Context, username, password, userAgent, ipAddress string) (*UserContext, error)
 	CreateSessionForUser(ctx context.Context, userID, userAgent, ipAddress string) (*UserContext, error)
 	Logout(ctx context.Context, sessionID string) error
+	// OAuth SSO
+	OAuthGetAuthURL(providerName, state string) (string, error)
+	OAuthCallback(ctx context.Context, providerName, code, userAgent, ipAddress string) (*UserContext, error)
 }
 
 // StatsService interface for fetching global stats.
@@ -69,6 +74,7 @@ type Middleware struct {
 	sessionStore  SessionStore
 	authService   AuthService
 	statsService  StatsService
+	providerMu    sync.RWMutex
 	scopeProvider ScopeProvider
 	roleProvider  RoleProvider
 	sessionName   string
@@ -138,9 +144,10 @@ func (m *Middleware) AuthRequired(next http.Handler) http.Handler {
 			return
 		}
 
-		// Add user to context
+		// Add user and session to context (session cached to avoid re-reading in FlashMiddleware)
 		ctx := context.WithValue(r.Context(), ContextKeyUser, user)
-		
+		ctx = context.WithValue(ctx, ContextKeySession, session)
+
 		// Add theme to context
 		theme := session.Theme
 		if theme == "" {
@@ -293,13 +300,24 @@ func (m *Middleware) OperatorRequired(next http.Handler) http.Handler {
 }
 
 // FlashMiddleware handles flash messages from session.
+// Reuses session cached by AuthRequired to avoid a second Redis roundtrip.
 func (m *Middleware) FlashMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		// Get session
-		session, err := m.sessionStore.Get(r, m.sessionName)
-		if err == nil && session != nil {
+		// Try cached session from AuthRequired first (avoids 2nd Redis read)
+		session, _ := ctx.Value(ContextKeySession).(*Session)
+		if session == nil {
+			// Fallback: read session from store (for routes without AuthRequired)
+			var err error
+			session, err = m.sessionStore.Get(r, m.sessionName)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		if session != nil {
 			// Check for flash message
 			if flash, ok := session.Values["flash"].(*FlashMessage); ok && flash != nil {
 				ctx = context.WithValue(ctx, ContextKeyFlash, flash)
@@ -458,9 +476,11 @@ type ScopeProvider interface {
 }
 
 // SetScopeProvider sets the scope provider on the middleware.
-// Call after NewMiddleware when the team service is ready.
+// Thread-safe: may be called while middleware goroutines read scopeProvider.
 func (m *Middleware) SetScopeProvider(sp ScopeProvider) {
+	m.providerMu.Lock()
 	m.scopeProvider = sp
+	m.providerMu.Unlock()
 }
 
 // ResourceScopeMiddleware computes and injects the ResourceScope into context.
@@ -474,7 +494,11 @@ func (m *Middleware) ResourceScopeMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if m.scopeProvider == nil {
+		m.providerMu.RLock()
+		sp := m.scopeProvider
+		m.providerMu.RUnlock()
+
+		if sp == nil {
 			// No scope provider configured → no scoping (backward compat)
 			scope := &models.ResourceScope{NoTeamsExist: true}
 			ctx := context.WithValue(r.Context(), ContextKeyScope, scope)
@@ -482,11 +506,11 @@ func (m *Middleware) ResourceScopeMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		scope, err := m.scopeProvider.GetUserScope(r.Context(), user.ID, user.Role)
+		scope, err := sp.GetUserScope(r.Context(), user.ID, user.Role)
 		if err != nil {
-			// On error, fail open (don't block the request)
-			log.Printf("[WARN] scope computation failed for user %s: %v", user.ID, err)
-			scope = &models.ResourceScope{NoTeamsExist: true}
+			// On error, fail closed (restrict access)
+			log.Printf("[ERROR] scope computation failed for user %s: %v — restricting access", user.ID, err)
+			scope = &models.ResourceScope{}
 		}
 
 		ctx := context.WithValue(r.Context(), ContextKeyScope, scope)
@@ -517,8 +541,11 @@ type RoleProvider interface {
 }
 
 // SetRoleProvider sets the role provider on the middleware.
+// Thread-safe: may be called while middleware goroutines read roleProvider.
 func (m *Middleware) SetRoleProvider(rp RoleProvider) {
+	m.providerMu.Lock()
 	m.roleProvider = rp
+	m.providerMu.Unlock()
 }
 
 // RequirePermission creates a middleware that checks for a specific permission.
@@ -539,8 +566,11 @@ func (m *Middleware) RequirePermission(permission string) func(http.Handler) htt
 			}
 
 			// Get user's role and check permission
-			if m.roleProvider != nil && user.RoleID != "" {
-				role, err := m.roleProvider.GetByID(r.Context(), user.RoleID)
+			m.providerMu.RLock()
+			rp := m.roleProvider
+			m.providerMu.RUnlock()
+			if rp != nil && user.RoleID != "" {
+				role, err := rp.GetByID(r.Context(), user.RoleID)
 				if err == nil && role != nil && role.HasPermission(permission) {
 					next.ServeHTTP(w, r)
 					return
@@ -575,8 +605,11 @@ func (m *Middleware) RequireAnyPermission(permissions ...string) func(http.Handl
 			}
 
 			// Get user's role and check permissions
-			if m.roleProvider != nil && user.RoleID != "" {
-				role, err := m.roleProvider.GetByID(r.Context(), user.RoleID)
+			m.providerMu.RLock()
+			rp := m.roleProvider
+			m.providerMu.RUnlock()
+			if rp != nil && user.RoleID != "" {
+				role, err := rp.GetByID(r.Context(), user.RoleID)
 				if err == nil && role != nil && role.HasAnyPermission(permissions...) {
 					next.ServeHTTP(w, r)
 					return
@@ -608,7 +641,7 @@ func hasLegacyPermission(role, permission string) bool {
 		"volume:view": true, "volume:create": true, "volume:remove": true,
 		"network:view": true, "network:create": true, "network:remove": true,
 		"stack:view": true, "stack:deploy": true, "stack:update": true, "stack:remove": true,
-		"host:view": true,
+		"host:view":   true,
 		"backup:view": true, "backup:create": true,
 		"security:view": true, "security:scan": true,
 		"config:view": true, "config:create": true, "config:update": true, "config:remove": true,
@@ -616,14 +649,14 @@ func hasLegacyPermission(role, permission string) bool {
 
 	viewerPerms := map[string]bool{
 		"container:view": true, "container:logs": true,
-		"image:view": true,
-		"volume:view": true,
-		"network:view": true,
-		"stack:view": true,
-		"host:view": true,
-		"backup:view": true,
+		"image:view":    true,
+		"volume:view":   true,
+		"network:view":  true,
+		"stack:view":    true,
+		"host:view":     true,
+		"backup:view":   true,
 		"security:view": true,
-		"config:view": true,
+		"config:view":   true,
 	}
 
 	switch role {

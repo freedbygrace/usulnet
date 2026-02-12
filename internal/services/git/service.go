@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,12 +28,16 @@ type Service struct {
 	repoRepo      *postgres.GitRepositoryRepository
 	encryptor     *crypto.AESEncryptor
 	logger        *logger.Logger
+	limitMu       sync.RWMutex
 	limitProvider license.LimitProvider
 }
 
 // SetLimitProvider sets the license limit provider for enforcing MaxGitConnections.
+// Thread-safe: may be called while goroutines read limitProvider.
 func (s *Service) SetLimitProvider(lp license.LimitProvider) {
+	s.limitMu.Lock()
 	s.limitProvider = lp
+	s.limitMu.Unlock()
 }
 
 // NewService creates a new unified Git service.
@@ -71,8 +76,11 @@ type CreateConnectionInput struct {
 // CreateConnection creates a new Git connection (any provider).
 func (s *Service) CreateConnection(ctx context.Context, input *CreateConnectionInput) (*models.GitConnection, error) {
 	// Enforce MaxGitConnections license limit
-	if s.limitProvider != nil {
-		limit := s.limitProvider.GetLimits().MaxGitConnections
+	s.limitMu.RLock()
+	lp := s.limitProvider
+	s.limitMu.RUnlock()
+	if lp != nil {
+		limit := lp.GetLimits().MaxGitConnections
 		if limit > 0 {
 			count, err := s.connRepo.CountAll(ctx)
 			if err == nil && count >= limit {

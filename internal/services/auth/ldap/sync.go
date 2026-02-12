@@ -72,6 +72,7 @@ type SyncService struct {
 	running    bool
 	lastResult *SyncResult
 	stopCh     chan struct{}
+	wg         sync.WaitGroup
 }
 
 // NewSyncService creates a new LDAP sync service.
@@ -106,22 +107,31 @@ func (s *SyncService) Start(ctx context.Context) {
 		"providers", len(s.clients),
 	)
 
-	// Run initial sync
+	// Run initial sync after startup delay (cancelable)
+	s.wg.Add(1)
 	go func() {
-		time.Sleep(30 * time.Second) // Wait for startup
-		s.SyncAll(ctx)
+		defer s.wg.Done()
+		select {
+		case <-time.After(30 * time.Second):
+			s.SyncAll(ctx)
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		}
 	}()
 
 	// Periodic sync
-	ticker := time.NewTicker(s.config.Interval)
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(s.config.Interval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				ticker.Stop()
 				return
 			case <-s.stopCh:
-				ticker.Stop()
 				return
 			case <-ticker.C:
 				s.SyncAll(ctx)
@@ -130,9 +140,21 @@ func (s *SyncService) Start(ctx context.Context) {
 	}()
 }
 
-// Stop stops the sync worker.
+// Stop stops the sync worker and waits for goroutines to finish.
 func (s *SyncService) Stop() {
 	close(s.stopCh)
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		s.logger.Warn("timeout waiting for LDAP sync workers to stop")
+	}
 }
 
 // SyncAll synchronizes users from all LDAP providers.

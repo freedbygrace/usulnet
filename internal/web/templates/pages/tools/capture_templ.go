@@ -583,7 +583,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<!-- No Active Capture --> <div class=\"card p-12 text-center\"><i class=\"fas fa-satellite-dish text-6xl text-gray-600 mb-4\"></i><h2 class=\"text-xl font-semibold text-white mb-2\">Network Packet Capture</h2><p class=\"text-gray-400 mb-6\">Capture and analyze network traffic in real-time</p><button onclick=\"document.getElementById('new-capture-modal').classList.remove('hidden')\" class=\"btn-primary\"><i class=\"fas fa-play mr-2\"></i>Start New Capture</button></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<!-- No Active Capture --> <div class=\"card p-12 text-center\"><i class=\"fas fa-satellite-dish text-6xl text-gray-400 mb-4\"></i><h2 class=\"text-xl font-semibold text-white mb-2\">Network Packet Capture</h2><p class=\"text-gray-400 mb-6\">Capture and analyze network traffic in real-time</p><button onclick=\"document.getElementById('new-capture-modal').classList.remove('hidden')\" class=\"btn-primary\"><i class=\"fas fa-play mr-2\"></i>Start New Capture</button></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

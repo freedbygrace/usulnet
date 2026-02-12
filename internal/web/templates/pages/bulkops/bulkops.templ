@@ -1,0 +1,325 @@
+package bulkops
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+// BulkOpsData holds all data for the bulk operations page.
+type BulkOpsData struct {
+	PageData   layouts.PageData
+	Containers []BulkContainerView
+	Stats      BulkStats
+	LastResult *BulkResultView
+}
+
+// BulkContainerView represents a container for bulk selection.
+type BulkContainerView struct {
+	ID        string
+	Name      string
+	Image     string
+	State     string
+	Status    string
+	Health    string
+	Stack     string
+	CreatedAt string
+}
+
+// BulkStats for the page header.
+type BulkStats struct {
+	Total   int
+	Running int
+	Stopped int
+	Paused  int
+}
+
+// BulkResultView shows the result of a bulk operation.
+type BulkResultView struct {
+	Action     string
+	Total      int
+	Successful int
+	Failed     int
+	Results    []BulkItemResult
+}
+
+// BulkItemResult shows per-container result.
+type BulkItemResult struct {
+	ContainerID string
+	Name        string
+	Success     bool
+	Error       string
+}
+
+templ BulkOps(data BulkOpsData) {
+	@layouts.Base(data.PageData) {
+		<div x-data={ bulkOpsInit(data.PageData.CSRFToken) } class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">Bulk Operations</h1>
+					<p class="text-gray-400 mt-1">Select multiple containers and perform actions on them at once</p>
+				</div>
+				<div class="flex items-center gap-2 text-sm text-gray-400">
+					<span>{ fmt.Sprintf("%d", data.Stats.Total) } containers</span>
+					<span class="text-gray-400">|</span>
+					<span class="text-green-400">{ fmt.Sprintf("%d", data.Stats.Running) } running</span>
+					<span class="text-gray-400">|</span>
+					<span class="text-red-400">{ fmt.Sprintf("%d", data.Stats.Stopped) } stopped</span>
+					if data.Stats.Paused > 0 {
+						<span class="text-gray-400">|</span>
+						<span class="text-yellow-400">{ fmt.Sprintf("%d", data.Stats.Paused) } paused</span>
+					}
+				</div>
+			</div>
+
+			<!-- Last Result Banner -->
+			if data.LastResult != nil {
+				<div class={ "card p-4", resultBorderClass(data.LastResult.Failed) }>
+					<div class="flex items-center justify-between">
+						<div class="flex items-center gap-3">
+							if data.LastResult.Failed == 0 {
+								<i class="fas fa-check-circle text-green-400"></i>
+							} else {
+								<i class="fas fa-exclamation-triangle text-yellow-400"></i>
+							}
+							<div>
+								<h3 class="text-sm font-medium text-white">
+									Bulk { data.LastResult.Action }: { fmt.Sprintf("%d/%d successful", data.LastResult.Successful, data.LastResult.Total) }
+								</h3>
+								if data.LastResult.Failed > 0 {
+									<p class="text-xs text-red-400 mt-0.5">{ fmt.Sprintf("%d failed", data.LastResult.Failed) }</p>
+								}
+							</div>
+						</div>
+					</div>
+				</div>
+			}
+
+			<!-- Actions Toolbar -->
+			<div class="card p-4 sticky top-0 z-10">
+				<div class="flex items-center justify-between flex-wrap gap-3">
+					<div class="flex items-center gap-2">
+						<span class="text-sm text-gray-400" x-text="selected.length + ' selected'"></span>
+						<button @click="selectAll()" class="text-xs text-primary-400 hover:text-primary-300 transition-colors" x-show="selected.length < containers.length">Select All</button>
+						<button @click="clearSelection()" class="text-xs text-gray-400 hover:text-white transition-colors" x-show="selected.length > 0">Clear</button>
+						<!-- Quick select by state -->
+						<span class="text-gray-400 mx-1">|</span>
+						<button @click="selectByState('running')" class="text-xs text-green-400 hover:text-green-300 transition-colors">Running</button>
+						<button @click="selectByState('exited')" class="text-xs text-red-400 hover:text-red-300 transition-colors">Stopped</button>
+						<button @click="selectByState('paused')" class="text-xs text-yellow-400 hover:text-yellow-300 transition-colors">Paused</button>
+					</div>
+					<div class="flex items-center gap-2 flex-wrap">
+						<button @click="bulkAction('start')" :disabled="selected.length === 0" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5">
+							<i class="fas fa-play text-xs"></i>Start
+						</button>
+						<button @click="bulkAction('stop')" :disabled="selected.length === 0" class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5">
+							<i class="fas fa-stop text-xs"></i>Stop
+						</button>
+						<button @click="bulkAction('restart')" :disabled="selected.length === 0" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5">
+							<i class="fas fa-redo text-xs"></i>Restart
+						</button>
+						<button @click="bulkAction('pause')" :disabled="selected.length === 0" class="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5">
+							<i class="fas fa-pause text-xs"></i>Pause
+						</button>
+						<button @click="bulkAction('unpause')" :disabled="selected.length === 0" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5">
+							<i class="fas fa-play text-xs"></i>Unpause
+						</button>
+						<button @click="bulkAction('kill')" :disabled="selected.length === 0" class="px-3 py-1.5 bg-red-700 hover:bg-red-800 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5">
+							<i class="fas fa-skull text-xs"></i>Kill
+						</button>
+						<button @click="confirmRemove = true" :disabled="selected.length === 0" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5">
+							<i class="fas fa-trash text-xs"></i>Remove
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Hidden form for HTMX submission -->
+			<form id="bulkForm" method="POST" x-ref="bulkForm" class="hidden">
+				<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+				<template x-for="id in selected" :key="id">
+					<input type="hidden" name="container_ids" :value="id"/>
+				</template>
+			</form>
+
+			<!-- Container List -->
+			if len(data.Containers) == 0 {
+				<div class="card p-12 text-center">
+					<i class="fas fa-box-open text-4xl text-gray-400 mb-4"></i>
+					<h3 class="text-lg font-medium text-white mb-2">No Containers</h3>
+					<p class="text-gray-400">No containers found to perform bulk operations on</p>
+				</div>
+			} else {
+				<div class="card overflow-hidden">
+					<table class="w-full">
+						<thead>
+							<tr class="border-b border-dark-600">
+								<th class="px-4 py-3 w-10">
+									<input type="checkbox" @change="toggleAll($event)" :checked="selected.length === containers.length && containers.length > 0" class="form-checkbox rounded bg-dark-700 border-dark-500"/>
+								</th>
+								<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Container</th>
+								<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Image</th>
+								<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">State</th>
+								<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Health</th>
+								<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Stack</th>
+								<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Created</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-dark-700">
+							for _, c := range data.Containers {
+								<tr class="hover:bg-dark-700/50 cursor-pointer" data-id={ c.ID } data-state={ c.State } :class={ fmt.Sprintf("selected.includes('%s') ? 'bg-primary-500/10' : ''", c.ID) } @click={ fmt.Sprintf("toggleSelect('%s')", c.ID) }>
+									<td class="px-4 py-3" @click.stop="">
+										<input type="checkbox" :checked={ fmt.Sprintf("selected.includes('%s')", c.ID) } @change={ fmt.Sprintf("toggleSelect('%s')", c.ID) } class="form-checkbox rounded bg-dark-700 border-dark-500"/>
+									</td>
+									<td class="px-4 py-3">
+										<div class="text-sm text-white font-medium">{ c.Name }</div>
+										<div class="text-xs text-gray-500 font-mono">{ c.ID }</div>
+									</td>
+									<td class="px-4 py-3 text-sm text-gray-400">{ c.Image }</td>
+									<td class="px-4 py-3">
+										@containerStateBadge(c.State)
+									</td>
+									<td class="px-4 py-3">
+										@containerHealthBadge(c.Health)
+									</td>
+									<td class="px-4 py-3 text-sm text-gray-400">
+										if c.Stack != "" {
+											<span class="px-2 py-0.5 text-xs bg-dark-600 text-gray-300 rounded">{ c.Stack }</span>
+										} else {
+											<span class="text-gray-400">-</span>
+										}
+									</td>
+									<td class="px-4 py-3 text-sm text-gray-400">{ c.CreatedAt }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+
+			<!-- Remove Confirmation Modal -->
+			<div x-show="confirmRemove" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+				<div class="bg-dark-800 rounded-xl shadow-xl border border-dark-600 w-full max-w-md mx-4 p-6">
+					<div class="flex items-center gap-3 mb-4">
+						<div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+							<i class="fas fa-exclamation-triangle text-red-400"></i>
+						</div>
+						<div>
+							<h3 class="text-lg font-medium text-white">Remove Containers</h3>
+							<p class="text-sm text-gray-400" x-text="'Remove ' + selected.length + ' selected container(s)?'"></p>
+						</div>
+					</div>
+					<p class="text-sm text-gray-400 mb-4">This action cannot be undone. The containers and their writable layers will be permanently deleted.</p>
+					<label class="flex items-center gap-2 mb-4">
+						<input type="checkbox" x-model="forceRemove" class="form-checkbox rounded bg-dark-700 border-dark-500"/>
+						<span class="text-sm text-gray-300">Force remove (stop running containers first)</span>
+					</label>
+					<div class="flex justify-end gap-3">
+						<button @click="confirmRemove = false" class="btn-secondary">Cancel</button>
+						<button @click="bulkAction('remove'); confirmRemove = false" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+							<i class="fas fa-trash mr-2"></i>Remove
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ containerStateBadge(state string) {
+	switch state {
+		case "running":
+			<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>Running</span>
+		case "exited":
+			<span class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>Stopped</span>
+		case "paused":
+			<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>Paused</span>
+		case "restarting":
+			<span class="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>Restarting</span>
+		case "dead":
+			<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>Dead</span>
+		default:
+			<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded">{ state }</span>
+	}
+}
+
+templ containerHealthBadge(health string) {
+	switch health {
+		case "healthy":
+			<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded">Healthy</span>
+		case "unhealthy":
+			<span class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded">Unhealthy</span>
+		case "starting":
+			<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded">Starting</span>
+		default:
+			<span class="text-xs text-gray-400">-</span>
+	}
+}
+
+func bulkOpsInit(csrfToken string) string {
+	return `{
+		selected: [],
+		containers: [],
+		confirmRemove: false,
+		forceRemove: false,
+		csrfToken: '` + csrfToken + `',
+		init() {
+			this.containers = Array.from(document.querySelectorAll('tbody tr[data-id]')).map(tr => tr.dataset.id);
+		},
+		toggleAll(event) {
+			if (event.target.checked) {
+				this.selected = [...this.containers];
+			} else {
+				this.selected = [];
+			}
+		},
+		toggleSelect(id) {
+			const idx = this.selected.indexOf(id);
+			if (idx > -1) {
+				this.selected.splice(idx, 1);
+			} else {
+				this.selected.push(id);
+			}
+		},
+		selectAll() {
+			this.selected = [...this.containers];
+		},
+		selectByState(state) {
+			this.selected = [];
+			document.querySelectorAll('tbody tr[data-id]').forEach(row => {
+				if (row.dataset.state === state) {
+					this.selected.push(row.dataset.id);
+				}
+			});
+		},
+		clearSelection() { this.selected = []; },
+		bulkAction(action) {
+			if (this.selected.length === 0) return;
+			const form = this.$refs.bulkForm;
+			form.action = '/bulk-ops/action?action=' + action;
+			form.querySelectorAll('input[name=container_ids]').forEach(el => el.remove());
+			this.selected.forEach(id => {
+				const input = document.createElement('input');
+				input.type = 'hidden';
+				input.name = 'container_ids';
+				input.value = id;
+				form.appendChild(input);
+			});
+			if (action === 'remove' && this.forceRemove) {
+				const input = document.createElement('input');
+				input.type = 'hidden';
+				input.name = 'force';
+				input.value = 'true';
+				form.appendChild(input);
+			}
+			form.submit();
+		}
+	}`
+}
+
+func resultBorderClass(failed int) string {
+	if failed > 0 {
+		return "border-l-4 border-l-yellow-500"
+	}
+	return "border-l-4 border-l-green-500"
+}

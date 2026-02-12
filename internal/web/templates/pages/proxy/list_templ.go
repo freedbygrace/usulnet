@@ -101,7 +101,7 @@ func List(data ProxyData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if !data.Connected {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">NPM Not Connected</h3><p class=\"text-gray-400 mb-4\">Connect to your Nginx Proxy Manager instance to manage reverse proxy hosts.</p><a href=\"/proxy/setup\" class=\"btn-primary\"><i class=\"fas fa-link mr-2\"></i>Setup Connection</a></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">NPM Not Connected</h3><p class=\"text-gray-400 mb-4\">Connect to your Nginx Proxy Manager instance to manage reverse proxy hosts.</p><a href=\"/proxy/setup\" class=\"btn-primary\"><i class=\"fas fa-link mr-2\"></i>Setup Connection</a></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -326,7 +326,7 @@ func List(data ProxyData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				if len(data.ProxyHosts) == 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"card p-8 text-center\"><i class=\"fas fa-globe text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No proxy hosts</h3><p class=\"text-gray-400 mb-4\">Create your first reverse proxy host</p><a href=\"/proxy/new\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>New Host</a></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"card p-8 text-center\"><i class=\"fas fa-globe text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No proxy hosts</h3><p class=\"text-gray-400 mb-4\">Create your first reverse proxy host</p><a href=\"/proxy/new\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>New Host</a></div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

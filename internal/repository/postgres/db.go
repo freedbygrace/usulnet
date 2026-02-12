@@ -20,6 +20,7 @@ type Options struct {
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
+	QueryTimeout    time.Duration // Default timeout for queries (0 = no default)
 }
 
 // DefaultOptions returns production-tuned default options.
@@ -36,7 +37,8 @@ func DefaultOptions() Options {
 
 // DB wraps pgxpool.Pool with additional functionality
 type DB struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	queryTimeout time.Duration
 }
 
 // New creates a new database connection pool
@@ -75,12 +77,18 @@ func New(ctx context.Context, connString string, opts Options) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	return &DB{pool: pool}, nil
+	return &DB{pool: pool, queryTimeout: opts.QueryTimeout}, nil
 }
 
 // Pool returns the underlying pgxpool.Pool
 func (db *DB) Pool() *pgxpool.Pool {
 	return db.pool
+}
+
+// QueryTimeout returns the configured default query timeout.
+// Returns 0 if no default timeout is set.
+func (db *DB) QueryTimeout() time.Duration {
+	return db.queryTimeout
 }
 
 // Close closes the database connection pool

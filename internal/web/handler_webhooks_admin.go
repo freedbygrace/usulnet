@@ -123,11 +123,21 @@ func (h *Handler) WebhooksTempl(w http.ResponseWriter, r *http.Request) {
 // WebhookCreate handles creation of a new outgoing webhook.
 func (h *Handler) WebhookCreate(w http.ResponseWriter, r *http.Request) {
 	if h.webhookRepo == nil {
+		h.setFlash(w, r, "error", "Webhook service not configured")
 		h.redirect(w, r, "/webhooks")
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
+		h.setFlash(w, r, "error", "Invalid form data")
+		h.redirect(w, r, "/webhooks")
+		return
+	}
+
+	name := r.FormValue("name")
+	webhookURL := r.FormValue("url")
+	if name == "" || webhookURL == "" {
+		h.setFlash(w, r, "error", "Name and URL are required")
 		h.redirect(w, r, "/webhooks")
 		return
 	}
@@ -138,8 +148,8 @@ func (h *Handler) WebhookCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wh := &models.OutgoingWebhook{
-		Name:        r.FormValue("name"),
-		URL:         r.FormValue("url"),
+		Name:        name,
+		URL:         webhookURL,
 		Events:      events,
 		IsEnabled:   r.FormValue("is_enabled") == "on",
 		RetryCount:  3,
@@ -163,8 +173,12 @@ func (h *Handler) WebhookCreate(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.webhookRepo.Create(r.Context(), wh); err != nil {
 		slog.Error("Failed to create webhook", "name", wh.Name, "error", err)
+		h.setFlash(w, r, "error", "Failed to create webhook: "+err.Error())
+		h.redirect(w, r, "/webhooks")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Webhook created successfully")
 	h.redirect(w, r, "/webhooks")
 }
 
@@ -180,28 +194,42 @@ func (h *Handler) WebhookDelete(w http.ResponseWriter, r *http.Request) {
 	if h.webhookRepo != nil {
 		if err := h.webhookRepo.Delete(r.Context(), id); err != nil {
 			slog.Error("Failed to delete webhook", "id", id, "error", err)
+			h.setFlash(w, r, "error", "Failed to delete webhook: "+err.Error())
+			h.redirect(w, r, "/webhooks")
+			return
 		}
 	}
 
+	h.setFlash(w, r, "success", "Webhook deleted")
 	h.redirect(w, r, "/webhooks")
 }
 
 // AutoDeployCreate handles creation of a new auto-deploy rule.
 func (h *Handler) AutoDeployCreate(w http.ResponseWriter, r *http.Request) {
 	if h.autoDeployRepo == nil {
+		h.setFlash(w, r, "error", "Auto-deploy service not configured")
 		h.redirect(w, r, "/webhooks?tab=autodeploy")
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
+		h.setFlash(w, r, "error", "Invalid form data")
+		h.redirect(w, r, "/webhooks?tab=autodeploy")
+		return
+	}
+
+	name := r.FormValue("name")
+	sourceRepo := r.FormValue("source_repo")
+	if name == "" || sourceRepo == "" {
+		h.setFlash(w, r, "error", "Name and source repository are required")
 		h.redirect(w, r, "/webhooks?tab=autodeploy")
 		return
 	}
 
 	rule := &models.AutoDeployRule{
-		Name:       r.FormValue("name"),
+		Name:       name,
 		SourceType: r.FormValue("source_type"),
-		SourceRepo: r.FormValue("source_repo"),
+		SourceRepo: sourceRepo,
 		Action:     r.FormValue("action"),
 		IsEnabled:  r.FormValue("is_enabled") == "on",
 	}
@@ -224,8 +252,12 @@ func (h *Handler) AutoDeployCreate(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.autoDeployRepo.Create(r.Context(), rule); err != nil {
 		slog.Error("Failed to create auto-deploy rule", "name", rule.Name, "error", err)
+		h.setFlash(w, r, "error", "Failed to create auto-deploy rule: "+err.Error())
+		h.redirect(w, r, "/webhooks?tab=autodeploy")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Auto-deploy rule created successfully")
 	h.redirect(w, r, "/webhooks?tab=autodeploy")
 }
 
@@ -241,8 +273,12 @@ func (h *Handler) AutoDeployDelete(w http.ResponseWriter, r *http.Request) {
 	if h.autoDeployRepo != nil {
 		if err := h.autoDeployRepo.Delete(r.Context(), id); err != nil {
 			slog.Error("Failed to delete auto-deploy rule", "id", id, "error", err)
+			h.setFlash(w, r, "error", "Failed to delete auto-deploy rule: "+err.Error())
+			h.redirect(w, r, "/webhooks?tab=autodeploy")
+			return
 		}
 	}
 
+	h.setFlash(w, r, "success", "Auto-deploy rule deleted")
 	h.redirect(w, r, "/webhooks?tab=autodeploy")
 }

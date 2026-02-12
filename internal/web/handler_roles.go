@@ -32,11 +32,6 @@ type RoleRepository interface {
 	CountCustomRoles(ctx context.Context) (int, error)
 }
 
-// SetRoleRepo sets the role repository.
-func (h *Handler) SetRoleRepo(repo RoleRepository) {
-	h.roleRepo = repo
-}
-
 // RolesTempl renders the roles list page.
 func (h *Handler) RolesTempl(w http.ResponseWriter, r *http.Request) {
 	pageData := h.preparePageData(r, "Roles & Permissions", "roles")

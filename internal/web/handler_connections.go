@@ -162,11 +162,6 @@ type ShortcutsService interface {
 	FetchAndSetFavicon(ctx context.Context, shortcutID uuid.UUID) error
 }
 
-// SetShortcutsService sets the shortcuts service.
-func (h *Handler) SetShortcutsService(svc ShortcutsService) {
-	h.shortcutsService = svc
-}
-
 // toShortcutData converts a model to template data.
 func toShortcutData(s *models.WebShortcut) connections.ShortcutData {
 	return connections.ShortcutData{
@@ -566,11 +561,13 @@ func (h *Handler) SSHConnectionDelete(w http.ResponseWriter, r *http.Request) {
 
 	if err := svc.DeleteConnection(ctx, connID); err != nil {
 		h.logger.Error("failed to delete SSH connection", "error", err)
-		http.Error(w, "Failed to delete connection", http.StatusInternalServerError)
+		h.jsonError(w, "Failed to delete connection: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	h.jsonSuccess(w, map[string]interface{}{
+		"message": "Connection deleted",
+	})
 }
 
 // SSHConnectionTest tests an SSH connection.
@@ -602,13 +599,11 @@ func (h *Handler) SSHConnectionTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if result.Success {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success": true, "message": "` + result.Message + `", "latency_ms": ` + strconv.FormatInt(result.Latency, 10) + `}`))
-	} else {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success": false, "message": "` + result.Message + `"}`))
-	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    result.Success,
+		"message":    result.Message,
+		"latency_ms": result.Latency,
+	})
 }
 
 // ============================================================================

@@ -6,6 +6,8 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -15,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/fr4nsys/usulnet/internal/docker"
+	"github.com/fr4nsys/usulnet/internal/models"
 	totppkg "github.com/fr4nsys/usulnet/internal/pkg/totp"
 	"github.com/fr4nsys/usulnet/internal/web/templates/components"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages"
@@ -55,7 +58,7 @@ func (h *Handler) preparePageData(r *http.Request, title, active string) *PageDa
 		Title:  title,
 		Active: active,
 	}
-	
+
 	// Inject common data from context
 	data.User = GetUserFromContext(r.Context())
 	data.Theme = GetThemeFromContext(r.Context())
@@ -63,7 +66,7 @@ func (h *Handler) preparePageData(r *http.Request, title, active string) *PageDa
 	data.Stats = GetStatsFromContext(r.Context())
 	data.Flash = GetFlashFromContext(r.Context())
 	data.Version = h.version
-	
+
 	return data
 }
 
@@ -74,17 +77,30 @@ func (h *Handler) preparePageData(r *http.Request, title, active string) *PageDa
 // LoginPageTempl renders the login page using Templ.
 func (h *Handler) LoginPageTempl(w http.ResponseWriter, r *http.Request) {
 	pageData := h.preparePageData(r, "Login", "")
-	
+
 	// Get error from query params (e.g., after failed login)
 	errorMsg := r.URL.Query().Get("error")
 	username := r.URL.Query().Get("username")
 	returnURL := r.URL.Query().Get("return")
-	
-	// TODO: Get from settings
+
+	// Check LDAP and OAuth configuration from repositories
 	ldapEnabled := false
 	oauthEnabled := false
 	oauthProvider := ""
-	
+
+	if h.ldapConfigRepo != nil {
+		if count, err := h.ldapConfigRepo.CountEnabled(r.Context()); err == nil && count > 0 {
+			ldapEnabled = true
+		}
+	}
+
+	if h.oauthConfigRepo != nil {
+		if providers, err := h.oauthConfigRepo.ListEnabled(r.Context()); err == nil && len(providers) > 0 {
+			oauthEnabled = true
+			oauthProvider = providers[0].Name
+		}
+	}
+
 	loginData := ToTemplLoginData(pageData, errorMsg, username, returnURL, ldapEnabled, oauthEnabled, oauthProvider)
 	h.renderTempl(w, r, pages.Login(loginData))
 }
@@ -168,9 +184,10 @@ func (h *Handler) TOTPVerifySubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session := &Session{
-		UserID:   userCtx.ID,
-		Username: userCtx.Username,
-		Role:     userCtx.Role,
+		UserID:    userCtx.ID,
+		Username:  userCtx.Username,
+		Role:      userCtx.Role,
+		CSRFToken: GenerateCSRFToken(),
 	}
 
 	if err := h.sessionStore.Save(r, w, session); err != nil {
@@ -279,6 +296,119 @@ func (h *Handler) TOTPDisableSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================================
+// OAuth Login Handlers
+// ============================================================================
+
+// OAuthLogin initiates the OAuth login flow by redirecting to the provider's authorization URL.
+func (h *Handler) OAuthLogin(w http.ResponseWriter, r *http.Request) {
+	providerName := r.URL.Query().Get("provider")
+
+	// If no provider specified, use the first enabled provider
+	if providerName == "" && h.oauthConfigRepo != nil {
+		if providers, err := h.oauthConfigRepo.ListEnabled(r.Context()); err == nil && len(providers) > 0 {
+			providerName = providers[0].Name
+		}
+	}
+
+	if providerName == "" {
+		h.redirect(w, r, "/login?error=No+OAuth+provider+configured")
+		return
+	}
+
+	// Generate state token (random, stored in cookie for CSRF protection)
+	state := GenerateCSRFToken()
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   300, // 5 minutes
+	})
+
+	// Store provider name in cookie for callback
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_provider",
+		Value:    providerName,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   300,
+	})
+
+	authURL, err := h.services.Auth().OAuthGetAuthURL(providerName, state)
+	if err != nil {
+		slog.Error("Failed to get OAuth auth URL", "provider", providerName, "error", err)
+		h.redirect(w, r, "/login?error=OAuth+provider+not+available")
+		return
+	}
+
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+}
+
+// OAuthCallbackHandler handles the OAuth provider's callback after user authorization.
+func (h *Handler) OAuthCallbackHandler(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	oauthError := r.URL.Query().Get("error")
+
+	if oauthError != "" {
+		slog.Warn("OAuth provider returned error", "error", oauthError)
+		h.redirect(w, r, "/login?error=OAuth+authentication+denied")
+		return
+	}
+
+	if code == "" || state == "" {
+		h.redirect(w, r, "/login?error=Invalid+OAuth+callback")
+		return
+	}
+
+	// Validate state against cookie
+	stateCookie, err := r.Cookie("oauth_state")
+	if err != nil || stateCookie.Value != state {
+		h.redirect(w, r, "/login?error=Invalid+OAuth+state")
+		return
+	}
+
+	// Get provider name from cookie
+	providerCookie, err := r.Cookie("oauth_provider")
+	if err != nil || providerCookie.Value == "" {
+		h.redirect(w, r, "/login?error=OAuth+session+expired")
+		return
+	}
+	providerName := providerCookie.Value
+
+	// Clear state cookies
+	http.SetCookie(w, &http.Cookie{Name: "oauth_state", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "oauth_provider", Value: "", Path: "/", MaxAge: -1})
+
+	// Exchange code for user info
+	userCtx, err := h.services.Auth().OAuthCallback(r.Context(), providerName, code, r.UserAgent(), getClientIP(r))
+	if err != nil {
+		slog.Error("OAuth callback failed", "provider", providerName, "error", err)
+		h.redirect(w, r, "/login?error=OAuth+authentication+failed")
+		return
+	}
+
+	// Create session
+	session := &Session{
+		UserID:    userCtx.ID,
+		Username:  userCtx.Username,
+		Role:      userCtx.Role,
+		CSRFToken: GenerateCSRFToken(),
+	}
+
+	if err := h.sessionStore.Save(r, w, session); err != nil {
+		h.redirect(w, r, "/login?error=Session+creation+failed")
+		return
+	}
+
+	h.redirect(w, r, "/")
+}
+
+// ============================================================================
 // Dashboard Handlers (Templ)
 // ============================================================================
 
@@ -289,22 +419,30 @@ func (h *Handler) DashboardTempl(w http.ResponseWriter, r *http.Request) {
 
 	// Get containers
 	containersList, _ := h.services.Containers().List(ctx, nil)
-	
+
 	// Get events
 	eventsList, _ := h.services.Events().List(ctx, 10)
-	
-	// Get system info (if available)
+
+	// Get system info from Docker host
 	var sysInfo *SystemInfoView
-	if statsService := h.services.Stats(); statsService != nil {
-		// TODO: Implement GetSystemInfo in StatsService
-		sysInfo = nil
+	if dockerInfo, err := h.services.Hosts().GetDockerInfo(ctx); err == nil && dockerInfo != nil {
+		sysInfo = &SystemInfoView{
+			DockerVersion: dockerInfo.ServerVersion,
+			APIVersion:    dockerInfo.APIVersion,
+			OS:            dockerInfo.OS,
+			Arch:          dockerInfo.Architecture,
+			CPUs:          dockerInfo.NCPU,
+			Memory:        dockerInfo.MemTotal,
+			MemoryHuman:   formatBytes(dockerInfo.MemTotal),
+			Hostname:      dockerInfo.Name,
+		}
 	}
-	
+
 	// Calculate stopped containers
 	if pageData.Stats != nil {
 		pageData.Stats.ContainersStopped = pageData.Stats.ContainersTotal - pageData.Stats.ContainersRunning
 	}
-	
+
 	dashboardData := ToTemplDashboardData(pageData, containersList, eventsList, sysInfo)
 	h.renderTempl(w, r, pages.Dashboard(dashboardData))
 }
@@ -317,7 +455,7 @@ func (h *Handler) DashboardTempl(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ContainersTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.preparePageData(r, "Containers", "containers")
-	
+
 	// Parse filters
 	filters := map[string]string{
 		"state":  GetQueryParam(r, "state", ""),
@@ -327,20 +465,20 @@ func (h *Handler) ContainersTempl(w http.ResponseWriter, r *http.Request) {
 	pageData.Filters = filters
 	pageData.SortBy = GetQueryParam(r, "sort", "name")
 	pageData.SortOrder = GetQueryParam(r, "dir", "asc")
-	
+
 	// Get containers
 	containersList, err := h.services.Containers().List(ctx, filters)
 	if err != nil {
 		h.RenderErrorTempl(w, r, http.StatusInternalServerError, "Error", err.Error())
 		return
 	}
-	
+
 	// Pagination
 	page := GetQueryParamInt(r, "page", 1)
 	perPage := GetQueryParamInt(r, "per_page", 20)
 	total := int64(len(containersList))
 	pageData.Pagination = NewPagination(total, page, perPage)
-	
+
 	// Paginate results
 	start := (page - 1) * perPage
 	end := start + perPage
@@ -351,7 +489,7 @@ func (h *Handler) ContainersTempl(w http.ResponseWriter, r *http.Request) {
 		end = len(containersList)
 	}
 	paginatedList := containersList[start:end]
-	
+
 	listData := ToTemplContainersListData(pageData, paginatedList)
 	h.renderTempl(w, r, containers.ContainersList(listData))
 }
@@ -369,7 +507,7 @@ func (h *Handler) ContainerDetailTempl(w http.ResponseWriter, r *http.Request) {
 
 	pageData := h.preparePageData(r, container.Name, "containers")
 	tab := GetQueryParam(r, "tab", "overview")
-	
+
 	detailData := ToTemplContainerDetailData(pageData, container, tab)
 	h.renderTempl(w, r, containers.ContainerDetail(detailData))
 }
@@ -386,11 +524,11 @@ func (h *Handler) ContainerLogsTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pageData := h.preparePageData(r, "Logs: "+container.Name, "logs")
-	
+
 	tail := GetQueryParamInt(r, "tail", 500)
 	since := GetQueryParam(r, "since", "")
 	follow := GetQueryParam(r, "follow", "true") == "true"
-	
+
 	logsData := ToTemplContainerLogsData(pageData, container, tail, since, follow)
 	h.renderTempl(w, r, containers.ContainerLogs(logsData))
 }
@@ -407,9 +545,9 @@ func (h *Handler) ContainerExecTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pageData := h.preparePageData(r, "Terminal: "+container.Name, "containers")
-	
+
 	shell := GetQueryParam(r, "shell", "/bin/sh")
-	
+
 	terminalData := ToTemplContainerTerminalData(pageData, container, shell)
 	h.renderTempl(w, r, containers.ContainerTerminal(terminalData))
 }
@@ -601,7 +739,9 @@ func (h *Handler) ContainerSettingsUpdate(w http.ResponseWriter, r *http.Request
 		Protocol  string `json:"protocol"`
 	}
 	if portsJSON := r.FormValue("ports_json"); portsJSON != "" {
-		json.Unmarshal([]byte(portsJSON), &ports)
+		if err := json.Unmarshal([]byte(portsJSON), &ports); err != nil {
+			h.logger.Warn("invalid ports JSON in container settings", "error", err)
+		}
 	}
 
 	var volumes []struct {
@@ -610,7 +750,9 @@ func (h *Handler) ContainerSettingsUpdate(w http.ResponseWriter, r *http.Request
 		RW        bool   `json:"rw"`
 	}
 	if volJSON := r.FormValue("volumes_json"); volJSON != "" {
-		json.Unmarshal([]byte(volJSON), &volumes)
+		if err := json.Unmarshal([]byte(volJSON), &volumes); err != nil {
+			h.logger.Warn("invalid volumes JSON in container settings", "error", err)
+		}
 	}
 
 	var envVars []struct {
@@ -618,7 +760,9 @@ func (h *Handler) ContainerSettingsUpdate(w http.ResponseWriter, r *http.Request
 		Value string `json:"value"`
 	}
 	if envJSON := r.FormValue("env_json"); envJSON != "" {
-		json.Unmarshal([]byte(envJSON), &envVars)
+		if err := json.Unmarshal([]byte(envJSON), &envVars); err != nil {
+			h.logger.Warn("invalid env JSON in container settings", "error", err)
+		}
 	}
 
 	var devices []struct {
@@ -626,14 +770,18 @@ func (h *Handler) ContainerSettingsUpdate(w http.ResponseWriter, r *http.Request
 		Container string `json:"container"`
 	}
 	if devJSON := r.FormValue("devices_json"); devJSON != "" {
-		json.Unmarshal([]byte(devJSON), &devices)
+		if err := json.Unmarshal([]byte(devJSON), &devices); err != nil {
+			h.logger.Warn("invalid devices JSON in container settings", "error", err)
+		}
 	}
 
 	var caps []struct {
 		Value string `json:"value"`
 	}
 	if capsJSON := r.FormValue("caps_json"); capsJSON != "" {
-		json.Unmarshal([]byte(capsJSON), &caps)
+		if err := json.Unmarshal([]byte(capsJSON), &caps); err != nil {
+			h.logger.Warn("invalid capabilities JSON in container settings", "error", err)
+		}
 	}
 
 	// Build Docker create options
@@ -852,14 +1000,14 @@ func setOrDeleteLabel(labels map[string]string, key, value string) {
 func (h *Handler) RenderErrorTempl(w http.ResponseWriter, r *http.Request, code int, title, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(code)
-	
+
 	errorData := pages.ErrorData{
 		Code:    code,
 		Title:   title,
 		Message: message,
 		Version: h.version,
 	}
-	
+
 	err := pages.Error(errorData).Render(r.Context(), w)
 	if err != nil {
 		// Fallback to simple error if template fails
@@ -876,6 +1024,21 @@ func (h *Handler) RenderServiceNotConfigured(w http.ResponseWriter, r *http.Requ
 	_ = components.ServiceNotConfigured(serviceName, configHint).Render(r.Context(), w)
 }
 
+// requireServiceMiddleware returns Chi middleware that checks if a service is
+// available (non-nil). If not, renders a "service not configured" page.
+// Use this to gate entire route groups for optional services.
+func (h *Handler) requireServiceMiddleware(serviceCheck func() bool, serviceName, configHint string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !serviceCheck() {
+				h.RenderServiceNotConfigured(w, r, serviceName, configHint)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // ============================================================================
 // Partial Handlers (Templ) - For HTMX requests
 // ============================================================================
@@ -883,23 +1046,23 @@ func (h *Handler) RenderServiceNotConfigured(w http.ResponseWriter, r *http.Requ
 // ContainersPartialTempl renders just the container table for HTMX requests.
 func (h *Handler) ContainersPartialTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	limit := GetQueryParamInt(r, "limit", 5)
-	
+
 	containersList, err := h.services.Containers().List(ctx, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Limit results
 	if limit > 0 && len(containersList) > limit {
 		containersList = containersList[:limit]
 	}
-	
+
 	// Render partial HTML
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	
+
 	for _, c := range containersList {
 		// Generate row HTML
 		stateClass := "bg-red-500"
@@ -908,7 +1071,7 @@ func (h *Handler) ContainersPartialTempl(w http.ResponseWriter, r *http.Request)
 		} else if c.State == "paused" {
 			stateClass = "bg-yellow-500"
 		}
-		
+
 		html := `<div class="flex items-center gap-4 p-4 hover:bg-dark-700/50 transition-colors">
 			<div class="w-2.5 h-2.5 rounded-full flex-shrink-0 ` + stateClass + `"></div>
 			<div class="flex-1 min-w-0">
@@ -925,17 +1088,17 @@ func (h *Handler) ContainersPartialTempl(w http.ResponseWriter, r *http.Request)
 // EventsPartialTempl renders recent events for HTMX requests.
 func (h *Handler) EventsPartialTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	limit := GetQueryParamInt(r, "limit", 10)
-	
+
 	eventsList, err := h.services.Events().List(ctx, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	
+
 	if len(eventsList) == 0 {
 		html := `<div class="p-8 text-center text-gray-500">
 			<i class="fas fa-stream text-3xl mb-3 opacity-50"></i>
@@ -944,12 +1107,12 @@ func (h *Handler) EventsPartialTempl(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(html))
 		return
 	}
-	
+
 	for _, e := range eventsList {
 		// Determine icon and color
 		iconClass := "fa-info"
 		colorClass := "bg-gray-500/20 text-gray-400"
-		
+
 		switch e.Action {
 		case "start":
 			iconClass = "fa-play"
@@ -970,7 +1133,7 @@ func (h *Handler) EventsPartialTempl(w http.ResponseWriter, r *http.Request) {
 			iconClass = "fa-download"
 			colorClass = "bg-blue-500/20 text-blue-400"
 		}
-		
+
 		html := `<div class="flex items-start gap-3 p-3 hover:bg-dark-700/50 transition-colors">
 			<div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ` + colorClass + `">
 				<i class="fas ` + iconClass + ` text-xs"></i>
@@ -987,34 +1150,72 @@ func (h *Handler) EventsPartialTempl(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// NotificationsPartialTempl renders notifications dropdown content.
+// NotificationsPartialTempl renders notifications dropdown content (from alert events).
 func (h *Handler) NotificationsPartialTempl(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement notifications service
+	ctx := r.Context()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	
-	html := `<div class="p-4 text-center text-gray-500">
-		<i class="fas fa-bell-slash text-2xl mb-2 opacity-50"></i>
-		<p class="text-sm">No new notifications</p>
-	</div>`
-	w.Write([]byte(html))
+
+	alertSvc := h.getAlertService()
+	if alertSvc == nil {
+		w.Write([]byte(`<div class="p-4 text-center text-gray-500">
+			<i class="fas fa-bell-slash text-2xl mb-2 opacity-50"></i>
+			<p class="text-sm">No new notifications</p>
+		</div>`))
+		return
+	}
+
+	events, _, err := alertSvc.ListEvents(ctx, models.AlertEventListOptions{Limit: 5})
+	if err != nil || len(events) == 0 {
+		w.Write([]byte(`<div class="p-4 text-center text-gray-500">
+			<i class="fas fa-bell-slash text-2xl mb-2 opacity-50"></i>
+			<p class="text-sm">No new notifications</p>
+		</div>`))
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="divide-y divide-dark-600">`)
+	for _, event := range events {
+		icon := "fas fa-info-circle text-blue-400"
+		if event.State == "firing" {
+			icon = "fas fa-exclamation-triangle text-yellow-400"
+		}
+		readClass := ""
+		if event.AcknowledgedAt != nil {
+			readClass = " opacity-50"
+		}
+		b.WriteString(fmt.Sprintf(
+			`<a href="/alerts?tab=events" class="flex items-start gap-3 p-3 hover:bg-dark-700 transition%s">
+				<i class="%s mt-0.5"></i>
+				<div class="flex-1 min-w-0">
+					<p class="text-sm text-white truncate">%s</p>
+					<p class="text-xs text-gray-500">%s</p>
+				</div>
+			</a>`,
+			readClass, icon, event.Message, event.FiredAt.Format("15:04"),
+		))
+	}
+	b.WriteString(`</div>`)
+	b.WriteString(`<a href="/notifications" class="block p-2 text-center text-xs text-primary-400 hover:text-primary-300 border-t border-dark-600">View all</a>`)
+	w.Write([]byte(b.String()))
 }
 
 // SearchPartialTempl handles search results for the header search.
 func (h *Handler) SearchPartialTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	query := r.URL.Query().Get("q")
-	
+
 	if query == "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		return
 	}
-	
+
 	// Search containers
 	filters := map[string]string{"search": query}
 	containersList, _ := h.services.Containers().List(ctx, filters)
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	
+
 	if len(containersList) == 0 {
 		html := `<div class="absolute top-full left-0 right-0 mt-2 bg-dark-800 rounded-lg border border-dark-600 shadow-xl p-4 text-center text-gray-500 text-sm">
 			No results found for "` + query + `"
@@ -1022,22 +1223,22 @@ func (h *Handler) SearchPartialTempl(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(html))
 		return
 	}
-	
+
 	html := `<div class="absolute top-full left-0 right-0 mt-2 bg-dark-800 rounded-lg border border-dark-600 shadow-xl overflow-hidden max-h-80 overflow-y-auto">`
-	
+
 	// Limit to 5 results
 	limit := 5
 	if len(containersList) < limit {
 		limit = len(containersList)
 	}
-	
+
 	for i := 0; i < limit; i++ {
 		c := containersList[i]
 		stateColor := "text-red-400"
 		if c.State == "running" {
 			stateColor = "text-green-400"
 		}
-		
+
 		html += `<a href="/containers/` + c.ID + `" class="flex items-center gap-3 p-3 hover:bg-dark-700 transition-colors">
 			<i class="fas fa-cube ` + stateColor + `"></i>
 			<div class="flex-1 min-w-0">
@@ -1046,13 +1247,13 @@ func (h *Handler) SearchPartialTempl(w http.ResponseWriter, r *http.Request) {
 			</div>
 		</a>`
 	}
-	
+
 	if len(containersList) > 5 {
 		html += `<a href="/containers?search=` + query + `" class="block p-3 text-center text-sm text-primary-400 hover:bg-dark-700 border-t border-dark-600">
 			View all ` + strconv.Itoa(len(containersList)) + ` results
 		</a>`
 	}
-	
+
 	html += `</div>`
 	w.Write([]byte(html))
 }
@@ -1065,19 +1266,19 @@ func (h *Handler) SearchPartialTempl(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ImagesTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.preparePageData(r, "Images", "images")
-	
+
 	imagesList, err := h.services.Images().List(ctx)
 	if err != nil {
 		h.RenderErrorTempl(w, r, http.StatusInternalServerError, "Error", err.Error())
 		return
 	}
-	
+
 	// Calculate total size
 	var totalSize int64
 	for _, img := range imagesList {
 		totalSize += img.Size
 	}
-	
+
 	// Parse filters
 	filters := images.ImageFilters{
 		Search:   GetQueryParam(r, "search", ""),
@@ -1086,19 +1287,19 @@ func (h *Handler) ImagesTempl(w http.ResponseWriter, r *http.Request) {
 		Sort:     GetQueryParam(r, "sort", "name"),
 		Dir:      GetQueryParam(r, "dir", "asc"),
 	}
-	
+
 	// Filter images
 	filteredImages := filterImages(imagesList, filters)
-	
+
 	// Sort images
 	sortImages(filteredImages, filters.Sort, filters.Dir)
-	
+
 	// Pagination
 	page := GetQueryParamInt(r, "page", 1)
 	perPage := GetQueryParamInt(r, "per_page", 20)
 	total := int64(len(filteredImages))
 	pageData.Pagination = NewPagination(total, page, perPage)
-	
+
 	// Paginate results
 	start := (page - 1) * perPage
 	end := start + perPage
@@ -1109,7 +1310,7 @@ func (h *Handler) ImagesTempl(w http.ResponseWriter, r *http.Request) {
 		end = len(filteredImages)
 	}
 	paginatedList := filteredImages[start:end]
-	
+
 	listData := ToTemplImagesListData(pageData, paginatedList, totalSize, filters)
 	h.renderTempl(w, r, images.ImagesList(listData))
 }
@@ -1130,7 +1331,7 @@ func filterImages(imagesList []ImageView, filters images.ImageFilters) []ImageVi
 				continue
 			}
 		}
-		
+
 		// In use filter
 		if filters.InUse == "true" && !img.InUse {
 			continue
@@ -1138,7 +1339,7 @@ func filterImages(imagesList []ImageView, filters images.ImageFilters) []ImageVi
 		if filters.InUse == "false" && img.InUse {
 			continue
 		}
-		
+
 		// Dangling filter
 		if filters.Dangling == "true" && len(img.Tags) > 0 {
 			continue
@@ -1146,7 +1347,7 @@ func filterImages(imagesList []ImageView, filters images.ImageFilters) []ImageVi
 		if filters.Dangling == "false" && len(img.Tags) == 0 {
 			continue
 		}
-		
+
 		result = append(result, img)
 	}
 	return result
@@ -1196,19 +1397,19 @@ func sortVolumes(vols []VolumeView, sortBy, dir string) {
 func (h *Handler) VolumesTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.preparePageData(r, "Volumes", "volumes")
-	
+
 	volumesList, err := h.services.Volumes().List(ctx)
 	if err != nil {
 		h.RenderErrorTempl(w, r, http.StatusInternalServerError, "Error", err.Error())
 		return
 	}
-	
+
 	// Calculate total size
 	var totalSize int64
 	for _, vol := range volumesList {
 		totalSize += vol.Size
 	}
-	
+
 	// Parse filters
 	filters := volumes.VolumeFilters{
 		Search: GetQueryParam(r, "search", ""),
@@ -1217,19 +1418,19 @@ func (h *Handler) VolumesTempl(w http.ResponseWriter, r *http.Request) {
 		Sort:   GetQueryParam(r, "sort", "name"),
 		Dir:    GetQueryParam(r, "dir", "asc"),
 	}
-	
+
 	// Filter volumes
 	filteredVolumes := filterVolumes(volumesList, filters)
-	
+
 	// Sort volumes
 	sortVolumes(filteredVolumes, filters.Sort, filters.Dir)
-	
+
 	// Pagination
 	page := GetQueryParamInt(r, "page", 1)
 	perPage := GetQueryParamInt(r, "per_page", 20)
 	total := int64(len(filteredVolumes))
 	pageData.Pagination = NewPagination(total, page, perPage)
-	
+
 	// Paginate results
 	start := (page - 1) * perPage
 	end := start + perPage
@@ -1240,7 +1441,7 @@ func (h *Handler) VolumesTempl(w http.ResponseWriter, r *http.Request) {
 		end = len(filteredVolumes)
 	}
 	paginatedList := filteredVolumes[start:end]
-	
+
 	listData := ToTemplVolumesListData(pageData, paginatedList, totalSize, filters)
 	h.renderTempl(w, r, volumes.VolumesList(listData))
 }
@@ -1252,12 +1453,12 @@ func filterVolumes(volumesList []VolumeView, filters volumes.VolumeFilters) []Vo
 		if filters.Search != "" && !containsIgnoreCase(vol.Name, filters.Search) {
 			continue
 		}
-		
+
 		// Driver filter
 		if filters.Driver != "" && vol.Driver != filters.Driver {
 			continue
 		}
-		
+
 		// In use filter
 		if filters.InUse == "true" && !vol.InUse {
 			continue
@@ -1265,7 +1466,7 @@ func filterVolumes(volumesList []VolumeView, filters volumes.VolumeFilters) []Vo
 		if filters.InUse == "false" && vol.InUse {
 			continue
 		}
-		
+
 		result = append(result, vol)
 	}
 	return result
@@ -1279,29 +1480,29 @@ func filterVolumes(volumesList []VolumeView, filters volumes.VolumeFilters) []Vo
 func (h *Handler) NetworksTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.preparePageData(r, "Networks", "networks")
-	
+
 	networksList, err := h.services.Networks().List(ctx)
 	if err != nil {
 		h.RenderErrorTempl(w, r, http.StatusInternalServerError, "Error", err.Error())
 		return
 	}
-	
+
 	// Parse filters
 	filters := networks.NetworkFilters{
 		Search: GetQueryParam(r, "search", ""),
 		Driver: GetQueryParam(r, "driver", ""),
 		Scope:  GetQueryParam(r, "scope", ""),
 	}
-	
+
 	// Filter networks
 	filteredNetworks := filterNetworks(networksList, filters)
-	
+
 	// Pagination
 	page := GetQueryParamInt(r, "page", 1)
 	perPage := GetQueryParamInt(r, "per_page", 20)
 	total := int64(len(filteredNetworks))
 	pageData.Pagination = NewPagination(total, page, perPage)
-	
+
 	// Paginate results
 	start := (page - 1) * perPage
 	end := start + perPage
@@ -1312,7 +1513,7 @@ func (h *Handler) NetworksTempl(w http.ResponseWriter, r *http.Request) {
 		end = len(filteredNetworks)
 	}
 	paginatedList := filteredNetworks[start:end]
-	
+
 	listData := ToTemplNetworksListData(pageData, paginatedList, filters)
 	h.renderTempl(w, r, networks.NetworksList(listData))
 }
@@ -1324,17 +1525,17 @@ func filterNetworks(networksList []NetworkView, filters networks.NetworkFilters)
 		if filters.Search != "" && !containsIgnoreCase(net.Name, filters.Search) {
 			continue
 		}
-		
+
 		// Driver filter
 		if filters.Driver != "" && net.Driver != filters.Driver {
 			continue
 		}
-		
+
 		// Scope filter
 		if filters.Scope != "" && net.Scope != filters.Scope {
 			continue
 		}
-		
+
 		result = append(result, net)
 	}
 	return result
@@ -1345,10 +1546,10 @@ func filterNetworks(networksList []NetworkView, filters networks.NetworkFilters)
 // ============================================================================
 
 func containsIgnoreCase(s, substr string) bool {
-	return len(s) >= len(substr) && 
-		(s == substr || 
-		 len(substr) == 0 ||
-		 (len(s) > 0 && containsLower(toLower(s), toLower(substr))))
+	return len(s) >= len(substr) &&
+		(s == substr ||
+			len(substr) == 0 ||
+			(len(s) > 0 && containsLower(toLower(s), toLower(substr))))
 }
 
 func containsLower(s, substr string) bool {
@@ -1420,7 +1621,12 @@ func (h *Handler) SecurityContainerTempl(w http.ResponseWriter, r *http.Request)
 // SecurityScanTempl triggers a full security scan and redirects.
 func (h *Handler) SecurityScanTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	_ = h.services.Security().ScanAll(ctx)
+	if err := h.services.Security().ScanAll(ctx); err != nil {
+		h.logger.Error("security scan failed", "error", err)
+		h.setFlash(w, r, "error", "Security scan failed: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Security scan completed")
+	}
 	h.redirect(w, r, "/security")
 }
 
@@ -1428,7 +1634,12 @@ func (h *Handler) SecurityScanTempl(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SecurityScanContainerTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-	_, _ = h.services.Security().Scan(ctx, id)
+	if _, err := h.services.Security().Scan(ctx, id); err != nil {
+		h.logger.Error("container security scan failed", "container", id, "error", err)
+		h.setFlash(w, r, "error", "Container scan failed: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Container scan completed")
+	}
 
 	// If HTMX request, redirect to refresh the security list
 	if r.Header.Get("HX-Request") == "true" {
@@ -1443,7 +1654,12 @@ func (h *Handler) SecurityScanContainerTempl(w http.ResponseWriter, r *http.Requ
 func (h *Handler) SecurityIssueIgnoreTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-	_ = h.services.Security().IgnoreIssue(ctx, id)
+	if err := h.services.Security().IgnoreIssue(ctx, id); err != nil {
+		h.logger.Error("failed to ignore security issue", "issue", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to ignore issue: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Issue marked as ignored")
+	}
 	h.redirect(w, r, "/security")
 }
 
@@ -1451,7 +1667,12 @@ func (h *Handler) SecurityIssueIgnoreTempl(w http.ResponseWriter, r *http.Reques
 func (h *Handler) SecurityIssueResolveTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-	_ = h.services.Security().ResolveIssue(ctx, id)
+	if err := h.services.Security().ResolveIssue(ctx, id); err != nil {
+		h.logger.Error("failed to resolve security issue", "issue", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to resolve issue: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Issue marked as resolved")
+	}
 	h.redirect(w, r, "/security")
 }
 
@@ -1510,11 +1731,18 @@ func (h *Handler) SecurityReportTempl(w http.ResponseWriter, r *http.Request) {
 // UpdatesTempl renders the updates list page with available updates and history.
 func (h *Handler) UpdatesTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	tab := r.URL.Query().Get("tab")
 
-	available, _ := h.services.Updates().ListAvailable(ctx)
-	history, _ := h.services.Updates().GetHistory(ctx)
+	updatesSvc := h.services.Updates()
 
-	// Get containers for manual update dropdown
+	var available []UpdateView
+	var history []UpdateHistoryView
+	if updatesSvc != nil {
+		available, _ = updatesSvc.ListAvailable(ctx)
+		history, _ = updatesSvc.GetHistory(ctx)
+	}
+
+	// Get containers for manual update dropdown and policy creation
 	var containers []updatestmpl.ContainerBasic
 	containerSvc := h.services.Containers()
 	if containerSvc != nil {
@@ -1532,9 +1760,34 @@ func (h *Handler) UpdatesTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get auto-update policies
+	var policyItems []updatestmpl.PolicyItem
+	if updatesSvc != nil {
+		if policies, err := updatesSvc.ListPolicies(ctx); err == nil {
+			for _, p := range policies {
+				policyItems = append(policyItems, updatestmpl.PolicyItem{
+					ID:                p.ID,
+					TargetName:        p.TargetName,
+					TargetID:          p.TargetID,
+					IsEnabled:         p.IsEnabled,
+					AutoUpdate:        p.AutoUpdate,
+					AutoBackup:        p.AutoBackup,
+					Schedule:          p.Schedule,
+					IncludePrerelease: p.IncludePrerelease,
+					NotifyOnUpdate:    p.NotifyOnUpdate,
+					NotifyOnFailure:   p.NotifyOnFailure,
+					MaxRetries:        p.MaxRetries,
+					HealthCheckWait:   p.HealthCheckWait,
+				})
+			}
+		}
+	}
+
 	p := h.preparePageData(r, "Updates", "updates")
 	data := ToTemplUpdatesListData(p, available, history)
 	data.Containers = containers
+	data.Policies = policyItems
+	data.ActiveTab = tab
 
 	h.renderTempl(w, r, updatestmpl.List(data))
 }
@@ -1542,7 +1795,16 @@ func (h *Handler) UpdatesTempl(w http.ResponseWriter, r *http.Request) {
 // UpdatesCheckTempl triggers a check for all available updates.
 func (h *Handler) UpdatesCheckTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	_ = h.services.Updates().CheckAll(ctx)
+	if updatesSvc := h.services.Updates(); updatesSvc != nil {
+		if err := updatesSvc.CheckAll(ctx); err != nil {
+			h.logger.Error("update check failed", "error", err)
+			h.setFlash(w, r, "error", "Update check failed: "+err.Error())
+		} else {
+			h.setFlash(w, r, "success", "Update check completed")
+		}
+	} else {
+		h.setFlash(w, r, "error", "Updates service is not configured")
+	}
 
 	// If HTMX request with hx-swap="none", send HX-Redirect
 	if r.Header.Get("HX-Request") == "true" {
@@ -1558,9 +1820,16 @@ func (h *Handler) UpdateApplyTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 
+	updatesSvc := h.services.Updates()
+	if updatesSvc == nil {
+		h.setFlash(w, r, "error", "Updates service is not configured")
+		h.redirect(w, r, "/updates")
+		return
+	}
+
 	backup := r.FormValue("backup") != "false"
 	targetVersion := strings.TrimSpace(r.FormValue("target_version"))
-	if err := h.services.Updates().Apply(ctx, id, backup, targetVersion); err != nil {
+	if err := updatesSvc.Apply(ctx, id, backup, targetVersion); err != nil {
 		h.logger.Error("failed to apply update", "container", id, "error", err)
 		h.setFlash(w, r, "error", "Update failed: "+err.Error())
 	} else {
@@ -1589,7 +1858,14 @@ func (h *Handler) UpdateManual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.services.Updates().Apply(ctx, containerID, backup, targetVersion); err != nil {
+	updatesSvc := h.services.Updates()
+	if updatesSvc == nil {
+		h.setFlash(w, r, "error", "Updates service is not configured")
+		http.Redirect(w, r, "/updates", http.StatusSeeOther)
+		return
+	}
+
+	if err := updatesSvc.Apply(ctx, containerID, backup, targetVersion); err != nil {
 		h.logger.Error("failed to apply manual update", "container", containerID, "version", targetVersion, "error", err)
 		h.setFlash(w, r, "error", "Update failed: "+err.Error())
 	} else {
@@ -1604,7 +1880,19 @@ func (h *Handler) UpdateRollbackTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 
-	_ = h.services.Updates().Rollback(ctx, id)
+	updatesSvc := h.services.Updates()
+	if updatesSvc == nil {
+		h.setFlash(w, r, "error", "Updates service is not configured")
+		h.redirect(w, r, "/updates")
+		return
+	}
+
+	if err := updatesSvc.Rollback(ctx, id); err != nil {
+		h.logger.Error("update rollback failed", "container", id, "error", err)
+		h.setFlash(w, r, "error", "Rollback failed: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Rollback completed successfully")
+	}
 
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", "/updates")

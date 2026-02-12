@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,19 +35,22 @@ type Service struct {
 
 	// Background workers
 	stopCh  chan struct{}
-	stopped bool
+	stopped atomic.Bool
 	wg      sync.WaitGroup
 
 	// Concurrency control
 	semaphore chan struct{}
 
 	// License enforcement
+	limitMu       sync.RWMutex
 	limitProvider license.LimitProvider
 }
 
 // SetLimitProvider sets the license limit provider for enforcing MaxBackupDestinations.
 func (s *Service) SetLimitProvider(lp license.LimitProvider) {
+	s.limitMu.Lock()
 	s.limitProvider = lp
+	s.limitMu.Unlock()
 }
 
 // ServiceOption configures the backup Service.
@@ -149,11 +153,10 @@ func (s *Service) Start(ctx context.Context) error {
 
 // Stop stops the backup service.
 func (s *Service) Stop() error {
-	if s.stopped {
+	if !s.stopped.CompareAndSwap(false, true) {
 		return nil
 	}
 
-	s.stopped = true
 	close(s.stopCh)
 
 	// Wait for workers to finish
@@ -368,8 +371,11 @@ func (s *Service) PruneTarget(ctx context.Context, hostID uuid.UUID, targetID st
 // CreateSchedule creates a new backup schedule.
 func (s *Service) CreateSchedule(ctx context.Context, input models.CreateBackupScheduleInput, hostID uuid.UUID, createdBy *uuid.UUID) (*models.BackupSchedule, error) {
 	// Enforce MaxBackupDestinations license limit (schedules count as destinations)
-	if s.limitProvider != nil {
-		limit := s.limitProvider.GetLimits().MaxBackupDestinations
+	s.limitMu.RLock()
+	lp := s.limitProvider
+	s.limitMu.RUnlock()
+	if lp != nil {
+		limit := lp.GetLimits().MaxBackupDestinations
 		if limit > 0 {
 			existing, err := s.repo.ListSchedules(ctx, nil) // nil = all hosts
 			if err == nil && len(existing) >= limit {

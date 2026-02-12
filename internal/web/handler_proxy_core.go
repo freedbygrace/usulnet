@@ -15,6 +15,17 @@ import (
 	proxy "github.com/fr4nsys/usulnet/internal/web/templates/pages/proxy"
 )
 
+// requireProxySvc returns the Proxy service or renders a "not configured" error.
+// Returns nil if the service is unavailable (caller should return early).
+func (h *Handler) requireProxySvc(w http.ResponseWriter, r *http.Request) ProxyService {
+	svc := h.services.Proxy()
+	if svc == nil {
+		h.RenderErrorTempl(w, r, http.StatusServiceUnavailable, "Proxy Not Configured", "The reverse proxy service is not configured. Please configure it in your server settings.")
+		return nil
+	}
+	return svc
+}
+
 // ============================================================================
 // Proxy Setup Handlers (NPM Connection Management)
 // ============================================================================
@@ -24,11 +35,22 @@ func (h *Handler) ProxySetupTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Proxy Setup", "proxy")
 
-	data := proxy.SetupData{
-		PageData: pageData,
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		data := proxy.SetupData{
+			PageData: pageData,
+			Error:    "Proxy service is not configured",
+		}
+		h.renderTempl(w, r, proxy.Setup(data))
+		return
 	}
 
-	conn, err := h.services.Proxy().GetConnection(ctx)
+	data := proxy.SetupData{
+		PageData:  pageData,
+		ProxyMode: proxySvc.Mode(),
+	}
+
+	conn, err := proxySvc.GetConnection(ctx)
 	if err == nil && conn != nil {
 		data.Connected = true
 		data.BaseURL = conn.BaseURL
@@ -43,6 +65,12 @@ func (h *Handler) ProxySetupTempl(w http.ResponseWriter, r *http.Request) {
 // ProxySetupSaveTempl handles POST /proxy/setup to create or update NPM connection.
 func (h *Handler) ProxySetupSaveTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	proxySvc := h.requireProxySvc(w, r)
+	if proxySvc == nil {
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Error parsing form", http.StatusBadRequest)
 		return
@@ -59,7 +87,7 @@ func (h *Handler) ProxySetupSaveTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if connection already exists
-	conn, _ := h.services.Proxy().GetConnection(ctx)
+	conn, _ := proxySvc.GetConnection(ctx)
 	if conn != nil {
 		// Update existing
 		var pURL, pEmail, pPwd *string
@@ -72,7 +100,7 @@ func (h *Handler) ProxySetupSaveTempl(w http.ResponseWriter, r *http.Request) {
 		if password != "" {
 			pPwd = &password
 		}
-		if err := h.services.Proxy().UpdateConnectionConfig(ctx, conn.ID, pURL, pEmail, pPwd, nil, userID); err != nil {
+		if err := proxySvc.UpdateConnectionConfig(ctx, conn.ID, pURL, pEmail, pPwd, nil, userID); err != nil {
 			slog.Error("Failed to update NPM connection", "error", err)
 			pageData := h.prepareTemplPageData(r, "Proxy Setup", "proxy")
 			data := proxy.SetupData{
@@ -91,15 +119,15 @@ func (h *Handler) ProxySetupSaveTempl(w http.ResponseWriter, r *http.Request) {
 		if baseURL == "" || email == "" || password == "" {
 			pageData := h.prepareTemplPageData(r, "Proxy Setup", "proxy")
 			data := proxy.SetupData{
-				PageData: pageData,
-				BaseURL:  baseURL,
+				PageData:   pageData,
+				BaseURL:    baseURL,
 				AdminEmail: email,
-				Error:    "All fields are required for new connection",
+				Error:      "All fields are required for new connection",
 			}
 			h.renderTempl(w, r, proxy.Setup(data))
 			return
 		}
-		if err := h.services.Proxy().SetupConnection(ctx, baseURL, email, password, userID); err != nil {
+		if err := proxySvc.SetupConnection(ctx, baseURL, email, password, userID); err != nil {
 			slog.Error("Failed to setup NPM connection", "error", err)
 			pageData := h.prepareTemplPageData(r, "Proxy Setup", "proxy")
 			data := proxy.SetupData{
@@ -120,13 +148,18 @@ func (h *Handler) ProxySetupSaveTempl(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ProxySetupDeleteTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	conn, err := h.services.Proxy().GetConnection(ctx)
+	proxySvc := h.requireProxySvc(w, r)
+	if proxySvc == nil {
+		return
+	}
+
+	conn, err := proxySvc.GetConnection(ctx)
 	if err != nil || conn == nil {
 		http.Redirect(w, r, "/proxy/setup", http.StatusSeeOther)
 		return
 	}
 
-	if err := h.services.Proxy().DeleteConnection(ctx, conn.ID); err != nil {
+	if err := proxySvc.DeleteConnection(ctx, conn.ID); err != nil {
 		slog.Error("Failed to delete NPM connection", "error", err)
 	}
 
@@ -138,11 +171,21 @@ func (h *Handler) ProxySetupTestTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Proxy Setup", "proxy")
 
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		data := proxy.SetupData{
+			PageData: pageData,
+			Error:    "Proxy service is not configured",
+		}
+		h.renderTempl(w, r, proxy.Setup(data))
+		return
+	}
+
 	data := proxy.SetupData{
 		PageData: pageData,
 	}
 
-	conn, err := h.services.Proxy().GetConnection(ctx)
+	conn, err := proxySvc.GetConnection(ctx)
 	if err != nil || conn == nil {
 		data.Error = "No NPM connection configured"
 		h.renderTempl(w, r, proxy.Setup(data))
@@ -155,7 +198,7 @@ func (h *Handler) ProxySetupTestTempl(w http.ResponseWriter, r *http.Request) {
 	data.ConnID = conn.ID
 
 	// Try to sync (which tests the connection)
-	if err := h.services.Proxy().Sync(ctx); err != nil {
+	if err := proxySvc.Sync(ctx); err != nil {
 		data.Error = "Connection test failed: " + err.Error()
 		data.Health = "unhealthy"
 	} else {
@@ -173,7 +216,12 @@ func (h *Handler) ProxySetupTestTempl(w http.ResponseWriter, r *http.Request) {
 // ProxyNewTempl renders the new proxy host form.
 func (h *Handler) ProxyNewTempl(w http.ResponseWriter, r *http.Request) {
 	pageData := h.prepareTemplPageData(r, "New Proxy Host", "proxy")
-	connected := h.services.Proxy().IsConnected(r.Context())
+
+	proxySvc := h.services.Proxy()
+	connected := false
+	if proxySvc != nil {
+		connected = proxySvc.IsConnected(r.Context())
+	}
 
 	data := proxy.NewData{
 		PageData:  pageData,
@@ -185,6 +233,12 @@ func (h *Handler) ProxyNewTempl(w http.ResponseWriter, r *http.Request) {
 // ProxyHostCreateTempl handles POST /proxy/hosts to create a new proxy host.
 func (h *Handler) ProxyHostCreateTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	proxySvc := h.requireProxySvc(w, r)
+	if proxySvc == nil {
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Error parsing form", http.StatusBadRequest)
 		return
@@ -193,33 +247,52 @@ func (h *Handler) ProxyHostCreateTempl(w http.ResponseWriter, r *http.Request) {
 	domain := r.FormValue("domain")
 	forwardHost := r.FormValue("forward_host")
 	forwardPort, _ := strconv.Atoi(r.FormValue("forward_port"))
-	sslEnabled := r.FormValue("ssl_enabled") == "true"
+	sslEnabled := r.FormValue("ssl_enabled") == "true" || r.FormValue("ssl_enabled") == "on"
+	blockExploits := r.FormValue("block_exploits") == "true" || r.FormValue("block_exploits") == "on"
 
 	if domain == "" || forwardHost == "" || forwardPort == 0 {
 		pageData := h.prepareTemplPageData(r, "New Proxy Host", "proxy")
 		data := proxy.NewData{
 			PageData:  pageData,
-			Connected: h.services.Proxy().IsConnected(ctx),
+			Connected: proxySvc.IsConnected(ctx),
 			Error:     "Domain, forward host, and forward port are required",
 		}
 		h.renderTempl(w, r, proxy.New(data))
 		return
 	}
 
-	host := &ProxyHostView{
-		Domain:      domain,
-		ForwardHost: forwardHost,
-		ForwardPort: forwardPort,
-		SSLEnabled:  sslEnabled,
-		Enabled:     true,
+	// Determine forward scheme from SSL setting
+	forwardScheme := "http"
+	if r.FormValue("forward_scheme") != "" {
+		forwardScheme = r.FormValue("forward_scheme")
 	}
 
-	if err := h.services.Proxy().CreateHost(ctx, host); err != nil {
+	certID, _ := strconv.Atoi(r.FormValue("certificate_id"))
+
+	host := &ProxyHostView{
+		Domain:                domain,
+		ForwardScheme:         forwardScheme,
+		ForwardHost:           forwardHost,
+		ForwardPort:           forwardPort,
+		CertificateID:         certID,
+		SSLEnabled:            sslEnabled,
+		SSLForced:             r.FormValue("ssl_forced") == "on",
+		HSTSEnabled:           r.FormValue("hsts_enabled") == "on",
+		HSTSSubdomains:        r.FormValue("hsts_subdomains") == "on",
+		HTTP2Support:          r.FormValue("http2_support") == "on",
+		BlockExploits:         blockExploits,
+		CachingEnabled:        r.FormValue("caching_enabled") == "on",
+		AllowWebsocketUpgrade: r.FormValue("allow_websocket_upgrade") == "on",
+		AdvancedConfig:        r.FormValue("advanced_config"),
+		Enabled:               true,
+	}
+
+	if err := proxySvc.CreateHost(ctx, host); err != nil {
 		slog.Error("Failed to create proxy host", "domain", domain, "error", err)
 		pageData := h.prepareTemplPageData(r, "New Proxy Host", "proxy")
 		data := proxy.NewData{
 			PageData:  pageData,
-			Connected: h.services.Proxy().IsConnected(ctx),
+			Connected: proxySvc.IsConnected(ctx),
 			Error:     "Failed to create proxy host: " + err.Error(),
 		}
 		h.renderTempl(w, r, proxy.New(data))
@@ -239,10 +312,15 @@ func (h *Handler) ProxyDetailTempl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pageData := h.prepareTemplPageData(r, "Proxy Host", "proxy")
-	connected := h.services.Proxy().IsConnected(ctx)
+	proxySvc := h.requireProxySvc(w, r)
+	if proxySvc == nil {
+		return
+	}
 
-	host, err := h.services.Proxy().GetHost(ctx, id)
+	pageData := h.prepareTemplPageData(r, "Proxy Host", "proxy")
+	connected := proxySvc.IsConnected(ctx)
+
+	host, err := proxySvc.GetHost(ctx, id)
 	if err != nil || host == nil {
 		slog.Error("Failed to get proxy host", "id", id, "error", err)
 		http.Redirect(w, r, "/proxy", http.StatusSeeOther)
@@ -258,8 +336,10 @@ func (h *Handler) ProxyDetailTempl(w http.ResponseWriter, r *http.Request) {
 			ForwardHost:   host.ForwardHost,
 			ForwardPort:   host.ForwardPort,
 			SSLEnabled:    host.SSLEnabled,
+			SSLForced:     host.SSLForced,
 			Enabled:       host.Enabled,
 			ContainerName: host.Container,
+			LastSync:      host.ModifiedOn,
 		},
 	}
 	h.renderTempl(w, r, proxy.Detail(data))
@@ -275,10 +355,15 @@ func (h *Handler) ProxyEditTempl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pageData := h.prepareTemplPageData(r, "Edit Proxy Host", "proxy")
-	connected := h.services.Proxy().IsConnected(ctx)
+	proxySvc := h.requireProxySvc(w, r)
+	if proxySvc == nil {
+		return
+	}
 
-	host, err := h.services.Proxy().GetHost(ctx, id)
+	pageData := h.prepareTemplPageData(r, "Edit Proxy Host", "proxy")
+	connected := proxySvc.IsConnected(ctx)
+
+	host, err := proxySvc.GetHost(ctx, id)
 	if err != nil || host == nil {
 		slog.Error("Failed to get proxy host for edit", "id", id, "error", err)
 		http.Redirect(w, r, "/proxy", http.StatusSeeOther)
@@ -294,8 +379,10 @@ func (h *Handler) ProxyEditTempl(w http.ResponseWriter, r *http.Request) {
 			ForwardHost:   host.ForwardHost,
 			ForwardPort:   host.ForwardPort,
 			SSLEnabled:    host.SSLEnabled,
+			SSLForced:     host.SSLForced,
 			Enabled:       host.Enabled,
 			ContainerName: host.Container,
+			LastSync:      host.ModifiedOn,
 		},
 	}
 	h.renderTempl(w, r, proxy.Edit(data))
@@ -308,6 +395,11 @@ func (h *Handler) ProxyHostUpdateTempl(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Redirect(w, r, "/proxy", http.StatusSeeOther)
+		return
+	}
+
+	proxySvc := h.requireProxySvc(w, r)
+	if proxySvc == nil {
 		return
 	}
 
@@ -325,24 +417,41 @@ func (h *Handler) ProxyHostUpdateTempl(w http.ResponseWriter, r *http.Request) {
 	domain := r.FormValue("domain")
 	forwardHost := r.FormValue("forward_host")
 	forwardPort, _ := strconv.Atoi(r.FormValue("forward_port"))
-	sslEnabled := r.FormValue("ssl_enabled") == "true"
-	enabled := r.FormValue("enabled") == "true"
+	sslEnabled := r.FormValue("ssl_enabled") == "true" || r.FormValue("ssl_enabled") == "on"
+	enabled := r.FormValue("enabled") == "true" || r.FormValue("enabled") == "on"
 
-	host := &ProxyHostView{
-		ID:          id,
-		Domain:      domain,
-		ForwardHost: forwardHost,
-		ForwardPort: forwardPort,
-		SSLEnabled:  sslEnabled,
-		Enabled:     enabled,
+	forwardScheme := "http"
+	if r.FormValue("forward_scheme") != "" {
+		forwardScheme = r.FormValue("forward_scheme")
 	}
 
-	if err := h.services.Proxy().UpdateHost(ctx, host); err != nil {
+	certID, _ := strconv.Atoi(r.FormValue("certificate_id"))
+
+	host := &ProxyHostView{
+		ID:                    id,
+		Domain:                domain,
+		ForwardScheme:         forwardScheme,
+		ForwardHost:           forwardHost,
+		ForwardPort:           forwardPort,
+		CertificateID:         certID,
+		SSLEnabled:            sslEnabled,
+		SSLForced:             r.FormValue("ssl_forced") == "on",
+		HSTSEnabled:           r.FormValue("hsts_enabled") == "on",
+		HSTSSubdomains:        r.FormValue("hsts_subdomains") == "on",
+		HTTP2Support:          r.FormValue("http2_support") == "on",
+		BlockExploits:         r.FormValue("block_exploits") == "on",
+		CachingEnabled:        r.FormValue("caching_enabled") == "on",
+		AllowWebsocketUpgrade: r.FormValue("allow_websocket_upgrade") == "on",
+		AdvancedConfig:        r.FormValue("advanced_config"),
+		Enabled:               enabled,
+	}
+
+	if err := proxySvc.UpdateHost(ctx, host); err != nil {
 		slog.Error("Failed to update proxy host", "id", id, "error", err)
 		pageData := h.prepareTemplPageData(r, "Edit Proxy Host", "proxy")
 		data := proxy.EditData{
 			PageData:  pageData,
-			Connected: h.services.Proxy().IsConnected(ctx),
+			Connected: proxySvc.IsConnected(ctx),
 			Host: proxy.ProxyHost{
 				ID:          idStr,
 				DomainName:  domain,
@@ -373,8 +482,12 @@ func (h *Handler) ProxyHostDeleteTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) proxyHostDeleteByID(w http.ResponseWriter, r *http.Request, id int) {
 	ctx := r.Context()
-	if err := h.services.Proxy().RemoveHost(ctx, id); err != nil {
-		slog.Error("Failed to delete proxy host", "id", id, "error", err)
+
+	proxySvc := h.services.Proxy()
+	if proxySvc != nil {
+		if err := proxySvc.RemoveHost(ctx, id); err != nil {
+			slog.Error("Failed to delete proxy host", "id", id, "error", err)
+		}
 	}
 
 	// HTMX request: return empty for swap
@@ -395,8 +508,10 @@ func (h *Handler) ProxyHostEnableTempl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.services.Proxy().EnableHost(ctx, id); err != nil {
-		slog.Error("Failed to enable proxy host", "id", id, "error", err)
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		if err := proxySvc.EnableHost(ctx, id); err != nil {
+			slog.Error("Failed to enable proxy host", "id", id, "error", err)
+		}
 	}
 
 	http.Redirect(w, r, fmt.Sprintf("/proxy/%s", idStr), http.StatusSeeOther)
@@ -412,8 +527,10 @@ func (h *Handler) ProxyHostDisableTempl(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.services.Proxy().DisableHost(ctx, id); err != nil {
-		slog.Error("Failed to disable proxy host", "id", id, "error", err)
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		if err := proxySvc.DisableHost(ctx, id); err != nil {
+			slog.Error("Failed to disable proxy host", "id", id, "error", err)
+		}
 	}
 
 	http.Redirect(w, r, fmt.Sprintf("/proxy/%s", idStr), http.StatusSeeOther)
@@ -423,8 +540,10 @@ func (h *Handler) ProxyHostDisableTempl(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) ProxySyncTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	if err := h.services.Proxy().Sync(ctx); err != nil {
-		slog.Error("Failed to sync NPM", "error", err)
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		if err := proxySvc.Sync(ctx); err != nil {
+			slog.Error("Failed to sync NPM", "error", err)
+		}
 	}
 
 	http.Redirect(w, r, "/proxy", http.StatusSeeOther)

@@ -45,7 +45,7 @@ func BucketsList(data StorageBucketsData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><!-- Breadcrumb --><div class=\"flex items-center gap-2 text-sm text-gray-400\"><a href=\"/storage\" class=\"hover:text-primary-400 transition-colors\">Storage</a> <i class=\"fas fa-chevron-right text-xs text-gray-600\"></i> <span class=\"text-white\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><!-- Breadcrumb --><div class=\"flex items-center gap-2 text-sm text-gray-400\"><a href=\"/storage\" class=\"hover:text-primary-400 transition-colors\">Storage</a> <i class=\"fas fa-chevron-right text-xs text-gray-400\"></i> <span class=\"text-white\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

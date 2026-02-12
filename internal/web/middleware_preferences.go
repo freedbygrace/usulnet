@@ -7,6 +7,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 // ============================================================================
@@ -22,11 +23,12 @@ const (
 
 // UserInfo represents the authenticated user data available in request context.
 type UserInfo struct {
-	ID       string
-	Username string
-	Email    string
-	Role     string // admin, operator, viewer
-	IsActive bool
+	ID        string
+	Username  string
+	Email     string
+	Role      string // admin, operator, viewer
+	IsActive  bool
+	CreatedAt time.Time
 }
 
 // ============================================================================

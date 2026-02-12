@@ -26,13 +26,16 @@ func (h *Handler) CertListTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "SSL Certificates", "proxy")
 
-	connected := h.services.Proxy().IsConnected(ctx)
+	var connected bool
 	var certs []proxy.CertView
 
-	if connected {
-		if certList, err := h.services.Proxy().ListCertificates(ctx); err == nil {
-			for _, c := range certList {
-				certs = append(certs, certViewToTempl(c))
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		connected = proxySvc.IsConnected(ctx)
+		if connected {
+			if certList, err := proxySvc.ListCertificates(ctx); err == nil {
+				for _, c := range certList {
+					certs = append(certs, certViewToTempl(c))
+				}
 			}
 		}
 	}
@@ -59,6 +62,12 @@ func (h *Handler) CertNewCustomTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CertCreateLE(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/certificates", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/certificates/new/letsencrypt", http.StatusSeeOther)
 		return
@@ -74,18 +83,25 @@ func (h *Handler) CertCreateLE(w http.ResponseWriter, r *http.Request) {
 	dnsCredentials := r.FormValue("dns_credentials")
 	propagation, _ := strconv.Atoi(r.FormValue("propagation_seconds"))
 
-	if err := h.services.Proxy().RequestLECertificate(ctx, domains, email, agree, dnsChallenge, dnsProvider, dnsCredentials, propagation); err != nil {
+	if err := proxySvc.RequestLECertificate(ctx, domains, email, agree, dnsChallenge, dnsProvider, dnsCredentials, propagation); err != nil {
 		slog.Error("Failed to request LE certificate", "error", err)
 		pageData := h.prepareTemplPageData(r, "New Let's Encrypt Certificate", "proxy")
 		data := proxy.CertNewLEData{PageData: pageData, Error: err.Error()}
 		h.renderTempl(w, r, proxy.CertNewLE(data))
 		return
 	}
+	h.setFlash(w, r, "success", "Let's Encrypt certificate requested")
 	http.Redirect(w, r, "/proxy/certificates", http.StatusSeeOther)
 }
 
 func (h *Handler) CertCreateCustom(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/certificates", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
 		http.Redirect(w, r, "/proxy/certificates/new/custom", http.StatusSeeOther)
 		return
@@ -105,13 +121,14 @@ func (h *Handler) CertCreateCustom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.services.Proxy().UploadCustomCertificate(ctx, niceName, certData, keyData, intermediateData); err != nil {
+	if err := proxySvc.UploadCustomCertificate(ctx, niceName, certData, keyData, intermediateData); err != nil {
 		slog.Error("Failed to upload custom certificate", "error", err)
 		pageData := h.prepareTemplPageData(r, "Upload Custom Certificate", "proxy")
 		data := proxy.CertNewCustomData{PageData: pageData, Error: err.Error()}
 		h.renderTempl(w, r, proxy.CertNewCustom(data))
 		return
 	}
+	h.setFlash(w, r, "success", "Custom certificate uploaded")
 	http.Redirect(w, r, "/proxy/certificates", http.StatusSeeOther)
 }
 
@@ -120,8 +137,16 @@ func (h *Handler) CertDetailTempl(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	pageData := h.prepareTemplPageData(r, "Certificate Detail", "proxy")
 
-	cv, err := h.services.Proxy().GetCertificate(ctx, id)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/certificates", http.StatusSeeOther)
+		return
+	}
+
+	cv, err := proxySvc.GetCertificate(ctx, id)
 	if err != nil {
+		h.setFlash(w, r, "error", "Certificate not found")
 		http.Redirect(w, r, "/proxy/certificates", http.StatusSeeOther)
 		return
 	}
@@ -135,20 +160,40 @@ func (h *Handler) CertDetailTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CertRenew(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	if err := h.services.Proxy().RenewCertificate(ctx, id); err != nil {
-		slog.Error("Failed to renew certificate", "error", err)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Proxy service not configured","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := proxySvc.RenewCertificate(ctx, id); err != nil {
+		slog.Error("Failed to renew certificate", "error", err)
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Failed to renew certificate: `+escapeJSON(err.Error())+`","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Header().Set("HX-Trigger", `{"showToast":{"message":"Certificate renewal started","type":"success"}}`)
 	w.Header().Set("HX-Redirect", "/proxy/certificates")
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) CertDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	if err := h.services.Proxy().DeleteCertificate(ctx, id); err != nil {
-		slog.Error("Failed to delete certificate", "error", err)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Proxy service not configured","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := proxySvc.DeleteCertificate(ctx, id); err != nil {
+		slog.Error("Failed to delete certificate", "error", err)
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Failed to delete certificate: `+escapeJSON(err.Error())+`","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Header().Set("HX-Trigger", `{"showToast":{"message":"Certificate deleted","type":"success"}}`)
 	w.Header().Set("HX-Redirect", "/proxy/certificates")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -160,23 +205,27 @@ func (h *Handler) CertDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RedirListTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Redirections", "proxy")
-	connected := h.services.Proxy().IsConnected(ctx)
 
+	var connected bool
 	var redirections []proxy.RedirView
-	if connected {
-		if list, err := h.services.Proxy().ListRedirections(ctx); err == nil {
-			for _, rv := range list {
-				redirections = append(redirections, proxy.RedirView{
-					ID:              rv.ID,
-					DomainNames:     rv.DomainNames,
-					ForwardScheme:   rv.ForwardScheme,
-					ForwardDomain:   rv.ForwardDomain,
-					ForwardHTTPCode: rv.ForwardHTTPCode,
-					PreservePath:    rv.PreservePath,
-					SSLForced:       rv.SSLForced,
-					CertificateID:   rv.CertificateID,
-					Enabled:         rv.Enabled,
-				})
+
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		connected = proxySvc.IsConnected(ctx)
+		if connected {
+			if list, err := proxySvc.ListRedirections(ctx); err == nil {
+				for _, rv := range list {
+					redirections = append(redirections, proxy.RedirView{
+						ID:              rv.ID,
+						DomainNames:     rv.DomainNames,
+						ForwardScheme:   rv.ForwardScheme,
+						ForwardDomain:   rv.ForwardDomain,
+						ForwardHTTPCode: rv.ForwardHTTPCode,
+						PreservePath:    rv.PreservePath,
+						SSLForced:       rv.SSLForced,
+						CertificateID:   rv.CertificateID,
+						Enabled:         rv.Enabled,
+					})
+				}
 			}
 		}
 	}
@@ -194,9 +243,11 @@ func (h *Handler) RedirNewTempl(w http.ResponseWriter, r *http.Request) {
 	pageData := h.prepareTemplPageData(r, "New Redirection", "proxy")
 
 	var certs []proxy.CertView
-	if certList, err := h.services.Proxy().ListCertificates(ctx); err == nil {
-		for _, c := range certList {
-			certs = append(certs, certViewToTempl(c))
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		if certList, err := proxySvc.ListCertificates(ctx); err == nil {
+			for _, c := range certList {
+				certs = append(certs, certViewToTempl(c))
+			}
 		}
 	}
 
@@ -210,6 +261,12 @@ func (h *Handler) RedirNewTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RedirCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/redirections", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/redirections/new", http.StatusSeeOther)
 		return
@@ -228,8 +285,11 @@ func (h *Handler) RedirCreate(w http.ResponseWriter, r *http.Request) {
 		CertificateID:   certID,
 	}
 
-	if err := h.services.Proxy().CreateRedirection(ctx, rv); err != nil {
+	if err := proxySvc.CreateRedirection(ctx, rv); err != nil {
 		slog.Error("Failed to create redirection", "error", err)
+		h.setFlash(w, r, "error", "Failed to create redirection: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Redirection created")
 	}
 	http.Redirect(w, r, "/proxy/redirections", http.StatusSeeOther)
 }
@@ -239,14 +299,22 @@ func (h *Handler) RedirEditTempl(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	pageData := h.prepareTemplPageData(r, "Edit Redirection", "proxy")
 
-	rv, err := h.services.Proxy().GetRedirection(ctx, id)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/redirections", http.StatusSeeOther)
+		return
+	}
+
+	rv, err := proxySvc.GetRedirection(ctx, id)
 	if err != nil {
+		h.setFlash(w, r, "error", "Redirection not found")
 		http.Redirect(w, r, "/proxy/redirections", http.StatusSeeOther)
 		return
 	}
 
 	var certs []proxy.CertView
-	if certList, err := h.services.Proxy().ListCertificates(ctx); err == nil {
+	if certList, err := proxySvc.ListCertificates(ctx); err == nil {
 		for _, c := range certList {
 			certs = append(certs, certViewToTempl(c))
 		}
@@ -275,6 +343,12 @@ func (h *Handler) RedirEditTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RedirUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/redirections", http.StatusSeeOther)
+		return
+	}
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/redirections", http.StatusSeeOther)
@@ -296,18 +370,31 @@ func (h *Handler) RedirUpdate(w http.ResponseWriter, r *http.Request) {
 		Enabled:         r.FormValue("enabled") == "on",
 	}
 
-	if err := h.services.Proxy().UpdateRedirection(ctx, rv); err != nil {
+	if err := proxySvc.UpdateRedirection(ctx, rv); err != nil {
 		slog.Error("Failed to update redirection", "error", err)
+		h.setFlash(w, r, "error", "Failed to update redirection: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Redirection updated")
 	}
 	http.Redirect(w, r, "/proxy/redirections", http.StatusSeeOther)
 }
 
 func (h *Handler) RedirDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	if err := h.services.Proxy().DeleteRedirection(ctx, id); err != nil {
-		slog.Error("Failed to delete redirection", "error", err)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Proxy service not configured","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := proxySvc.DeleteRedirection(ctx, id); err != nil {
+		slog.Error("Failed to delete redirection", "error", err)
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Failed to delete redirection: `+escapeJSON(err.Error())+`","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Header().Set("HX-Trigger", `{"showToast":{"message":"Redirection deleted","type":"success"}}`)
 	w.Header().Set("HX-Redirect", "/proxy/redirections")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -319,21 +406,25 @@ func (h *Handler) RedirDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) StreamListTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Streams", "proxy")
-	connected := h.services.Proxy().IsConnected(ctx)
 
+	var connected bool
 	var streams []proxy.StreamView
-	if connected {
-		if list, err := h.services.Proxy().ListStreams(ctx); err == nil {
-			for _, s := range list {
-				streams = append(streams, proxy.StreamView{
-					ID:             s.ID,
-					IncomingPort:   s.IncomingPort,
-					ForwardingHost: s.ForwardingHost,
-					ForwardingPort: s.ForwardingPort,
-					TCPForwarding:  s.TCPForwarding,
-					UDPForwarding:  s.UDPForwarding,
-					Enabled:        s.Enabled,
-				})
+
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		connected = proxySvc.IsConnected(ctx)
+		if connected {
+			if list, err := proxySvc.ListStreams(ctx); err == nil {
+				for _, s := range list {
+					streams = append(streams, proxy.StreamView{
+						ID:             s.ID,
+						IncomingPort:   s.IncomingPort,
+						ForwardingHost: s.ForwardingHost,
+						ForwardingPort: s.ForwardingPort,
+						TCPForwarding:  s.TCPForwarding,
+						UDPForwarding:  s.UDPForwarding,
+						Enabled:        s.Enabled,
+					})
+				}
 			}
 		}
 	}
@@ -354,6 +445,12 @@ func (h *Handler) StreamNewTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) StreamCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/streams", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/streams/new", http.StatusSeeOther)
 		return
@@ -370,8 +467,11 @@ func (h *Handler) StreamCreate(w http.ResponseWriter, r *http.Request) {
 		UDPForwarding:  r.FormValue("udp_forwarding") == "on",
 	}
 
-	if err := h.services.Proxy().CreateStream(ctx, sv); err != nil {
+	if err := proxySvc.CreateStream(ctx, sv); err != nil {
 		slog.Error("Failed to create stream", "error", err)
+		h.setFlash(w, r, "error", "Failed to create stream: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Stream created")
 	}
 	http.Redirect(w, r, "/proxy/streams", http.StatusSeeOther)
 }
@@ -381,8 +481,16 @@ func (h *Handler) StreamEditTempl(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	pageData := h.prepareTemplPageData(r, "Edit Stream", "proxy")
 
-	sv, err := h.services.Proxy().GetStream(ctx, id)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/streams", http.StatusSeeOther)
+		return
+	}
+
+	sv, err := proxySvc.GetStream(ctx, id)
 	if err != nil {
+		h.setFlash(w, r, "error", "Stream not found")
 		http.Redirect(w, r, "/proxy/streams", http.StatusSeeOther)
 		return
 	}
@@ -407,6 +515,12 @@ func (h *Handler) StreamEditTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) StreamUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/streams", http.StatusSeeOther)
+		return
+	}
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/streams", http.StatusSeeOther)
@@ -426,18 +540,31 @@ func (h *Handler) StreamUpdate(w http.ResponseWriter, r *http.Request) {
 		Enabled:        r.FormValue("enabled") == "on",
 	}
 
-	if err := h.services.Proxy().UpdateStream(ctx, sv); err != nil {
+	if err := proxySvc.UpdateStream(ctx, sv); err != nil {
 		slog.Error("Failed to update stream", "error", err)
+		h.setFlash(w, r, "error", "Failed to update stream: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Stream updated")
 	}
 	http.Redirect(w, r, "/proxy/streams", http.StatusSeeOther)
 }
 
 func (h *Handler) StreamDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	if err := h.services.Proxy().DeleteStream(ctx, id); err != nil {
-		slog.Error("Failed to delete stream", "error", err)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Proxy service not configured","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := proxySvc.DeleteStream(ctx, id); err != nil {
+		slog.Error("Failed to delete stream", "error", err)
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Failed to delete stream: `+escapeJSON(err.Error())+`","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Header().Set("HX-Trigger", `{"showToast":{"message":"Stream deleted","type":"success"}}`)
 	w.Header().Set("HX-Redirect", "/proxy/streams")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -449,19 +576,23 @@ func (h *Handler) StreamDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeadListTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "404 Hosts", "proxy")
-	connected := h.services.Proxy().IsConnected(ctx)
 
+	var connected bool
 	var deadHosts []proxy.DeadHostView
-	if connected {
-		if list, err := h.services.Proxy().ListDeadHosts(ctx); err == nil {
-			for _, d := range list {
-				deadHosts = append(deadHosts, proxy.DeadHostView{
-					ID:          d.ID,
-					DomainNames: d.DomainNames,
-					SSLForced:   d.SSLForced,
-					CertID:      d.CertID,
-					Enabled:     d.Enabled,
-				})
+
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		connected = proxySvc.IsConnected(ctx)
+		if connected {
+			if list, err := proxySvc.ListDeadHosts(ctx); err == nil {
+				for _, d := range list {
+					deadHosts = append(deadHosts, proxy.DeadHostView{
+						ID:          d.ID,
+						DomainNames: d.DomainNames,
+						SSLForced:   d.SSLForced,
+						CertID:      d.CertID,
+						Enabled:     d.Enabled,
+					})
+				}
 			}
 		}
 	}
@@ -479,9 +610,11 @@ func (h *Handler) DeadNewTempl(w http.ResponseWriter, r *http.Request) {
 	pageData := h.prepareTemplPageData(r, "New 404 Host", "proxy")
 
 	var certs []proxy.CertView
-	if certList, err := h.services.Proxy().ListCertificates(ctx); err == nil {
-		for _, c := range certList {
-			certs = append(certs, certViewToTempl(c))
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		if certList, err := proxySvc.ListCertificates(ctx); err == nil {
+			for _, c := range certList {
+				certs = append(certs, certViewToTempl(c))
+			}
 		}
 	}
 
@@ -494,6 +627,12 @@ func (h *Handler) DeadNewTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeadCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/dead-hosts", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/dead-hosts/new", http.StatusSeeOther)
 		return
@@ -508,18 +647,31 @@ func (h *Handler) DeadCreate(w http.ResponseWriter, r *http.Request) {
 		Enabled:     true,
 	}
 
-	if err := h.services.Proxy().CreateDeadHost(ctx, dv); err != nil {
+	if err := proxySvc.CreateDeadHost(ctx, dv); err != nil {
 		slog.Error("Failed to create dead host", "error", err)
+		h.setFlash(w, r, "error", "Failed to create 404 host: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "404 host created")
 	}
 	http.Redirect(w, r, "/proxy/dead-hosts", http.StatusSeeOther)
 }
 
 func (h *Handler) DeadDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	if err := h.services.Proxy().DeleteDeadHost(ctx, id); err != nil {
-		slog.Error("Failed to delete dead host", "error", err)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Proxy service not configured","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := proxySvc.DeleteDeadHost(ctx, id); err != nil {
+		slog.Error("Failed to delete dead host", "error", err)
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Failed to delete 404 host: `+escapeJSON(err.Error())+`","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Header().Set("HX-Trigger", `{"showToast":{"message":"404 host deleted","type":"success"}}`)
 	w.Header().Set("HX-Redirect", "/proxy/dead-hosts")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -531,20 +683,24 @@ func (h *Handler) DeadDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ACLListTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Access Lists", "proxy")
-	connected := h.services.Proxy().IsConnected(ctx)
 
+	var connected bool
 	var accessLists []proxy.ACLView
-	if connected {
-		if list, err := h.services.Proxy().ListAccessLists(ctx); err == nil {
-			for _, al := range list {
-				accessLists = append(accessLists, proxy.ACLView{
-					ID:          al.ID,
-					Name:        al.Name,
-					SatisfyAny:  al.SatisfyAny,
-					PassAuth:    al.PassAuth,
-					ItemCount:   al.ItemCount,
-					ClientCount: al.ClientCount,
-				})
+
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		connected = proxySvc.IsConnected(ctx)
+		if connected {
+			if list, err := proxySvc.ListAccessLists(ctx); err == nil {
+				for _, al := range list {
+					accessLists = append(accessLists, proxy.ACLView{
+						ID:          al.ID,
+						Name:        al.Name,
+						SatisfyAny:  al.SatisfyAny,
+						PassAuth:    al.PassAuth,
+						ItemCount:   al.ItemCount,
+						ClientCount: al.ClientCount,
+					})
+				}
 			}
 		}
 	}
@@ -565,14 +721,23 @@ func (h *Handler) ACLNewTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ACLCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/access-lists", http.StatusSeeOther)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/access-lists/new", http.StatusSeeOther)
 		return
 	}
 
 	av := parseACLForm(r)
-	if err := h.services.Proxy().CreateAccessList(ctx, av); err != nil {
+	if err := proxySvc.CreateAccessList(ctx, av); err != nil {
 		slog.Error("Failed to create access list", "error", err)
+		h.setFlash(w, r, "error", "Failed to create access list: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Access list created")
 	}
 	http.Redirect(w, r, "/proxy/access-lists", http.StatusSeeOther)
 }
@@ -582,8 +747,16 @@ func (h *Handler) ACLEditTempl(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	pageData := h.prepareTemplPageData(r, "Edit Access List", "proxy")
 
-	al, err := h.services.Proxy().GetAccessList(ctx, id)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/access-lists", http.StatusSeeOther)
+		return
+	}
+
+	al, err := proxySvc.GetAccessList(ctx, id)
 	if err != nil {
+		h.setFlash(w, r, "error", "Access list not found")
 		http.Redirect(w, r, "/proxy/access-lists", http.StatusSeeOther)
 		return
 	}
@@ -622,6 +795,12 @@ func (h *Handler) ACLEditTempl(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ACLUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		h.setFlash(w, r, "error", "Proxy service not configured")
+		http.Redirect(w, r, "/proxy/access-lists", http.StatusSeeOther)
+		return
+	}
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/proxy/access-lists", http.StatusSeeOther)
@@ -630,18 +809,31 @@ func (h *Handler) ACLUpdate(w http.ResponseWriter, r *http.Request) {
 
 	av := parseACLForm(r)
 	av.ID = id
-	if err := h.services.Proxy().UpdateAccessList(ctx, av); err != nil {
+	if err := proxySvc.UpdateAccessList(ctx, av); err != nil {
 		slog.Error("Failed to update access list", "error", err)
+		h.setFlash(w, r, "error", "Failed to update access list: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Access list updated")
 	}
 	http.Redirect(w, r, "/proxy/access-lists", http.StatusSeeOther)
 }
 
 func (h *Handler) ACLDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	if err := h.services.Proxy().DeleteAccessList(ctx, id); err != nil {
-		slog.Error("Failed to delete access list", "error", err)
+	proxySvc := h.services.Proxy()
+	if proxySvc == nil {
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Proxy service not configured","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := proxySvc.DeleteAccessList(ctx, id); err != nil {
+		slog.Error("Failed to delete access list", "error", err)
+		w.Header().Set("HX-Trigger", `{"showToast":{"message":"Failed to delete access list: `+escapeJSON(err.Error())+`","type":"error"}}`)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Header().Set("HX-Trigger", `{"showToast":{"message":"Access list deleted","type":"success"}}`)
 	w.Header().Set("HX-Redirect", "/proxy/access-lists")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -653,8 +845,8 @@ func (h *Handler) ACLDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AuditListTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Audit Log", "proxy")
-	connected := h.services.Proxy().IsConnected(ctx)
 
+	var connected bool
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -666,25 +858,28 @@ func (h *Handler) AuditListTempl(w http.ResponseWriter, r *http.Request) {
 	var logs []proxy.AuditLogView
 	totalPages := 1
 
-	if connected {
-		if auditLogs, total, err := h.services.Proxy().ListAuditLogs(ctx, perPage, offset); err == nil {
-			for _, l := range auditLogs {
-				if filter != "" && l.Operation != filter {
-					continue
+	if proxySvc := h.services.Proxy(); proxySvc != nil {
+		connected = proxySvc.IsConnected(ctx)
+		if connected {
+			if auditLogs, total, err := proxySvc.ListAuditLogs(ctx, perPage, offset); err == nil {
+				for _, l := range auditLogs {
+					if filter != "" && l.Operation != filter {
+						continue
+					}
+					logs = append(logs, proxy.AuditLogView{
+						ID:           l.ID,
+						Operation:    l.Operation,
+						ResourceType: l.ResourceType,
+						ResourceID:   l.ResourceID,
+						ResourceName: l.ResourceName,
+						UserName:     l.UserName,
+						CreatedAt:    l.CreatedAt,
+					})
 				}
-				logs = append(logs, proxy.AuditLogView{
-					ID:           l.ID,
-					Operation:    l.Operation,
-					ResourceType: l.ResourceType,
-					ResourceID:   l.ResourceID,
-					ResourceName: l.ResourceName,
-					UserName:     l.UserName,
-					CreatedAt:    l.CreatedAt,
-				})
-			}
-			totalPages = int(math.Ceil(float64(total) / float64(perPage)))
-			if totalPages < 1 {
-				totalPages = 1
+				totalPages = int(math.Ceil(float64(total) / float64(perPage)))
+				if totalPages < 1 {
+					totalPages = 1
+				}
 			}
 		}
 	}

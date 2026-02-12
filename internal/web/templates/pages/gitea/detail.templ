@@ -192,11 +192,11 @@ templ Detail(data RepoDetailData) {
 				<a href="/integrations/gitea" class="hover:text-white transition-colors">
 					<i class="fas fa-code-branch mr-1"></i>Gitea
 				</a>
-				<i class="fas fa-chevron-right text-[10px] text-gray-600"></i>
+				<i class="fas fa-chevron-right text-[10px] text-gray-400"></i>
 				<span class="text-white">{ data.Repo.FullName }</span>
 				if data.CurrentPath != "" {
 					for _, crumb := range pathCrumbs(data.CurrentPath) {
-						<i class="fas fa-chevron-right text-[10px] text-gray-600"></i>
+						<i class="fas fa-chevron-right text-[10px] text-gray-400"></i>
 						if crumb.IsLast {
 							<span class="text-white">{ crumb.Name }</span>
 						} else {
@@ -467,7 +467,7 @@ templ Detail(data RepoDetailData) {
 						var escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 						var lines = escaped.split('\n');
 						var numbered = lines.map(function(line, i) {
-							return '<tr><td class="select-none text-right pr-4 text-gray-600 text-xs w-12 align-top">' + (i+1) + '</td><td class="whitespace-pre">' + (line || ' ') + '</td></tr>';
+							return '<tr><td class="select-none text-right pr-4 text-gray-400 text-xs w-12 align-top">' + (i+1) + '</td><td class="whitespace-pre">' + (line || ' ') + '</td></tr>';
 						}).join('');
 						contentEl.innerHTML = '<div class="overflow-x-auto"><table class="w-full text-sm font-mono text-gray-300"><tbody>' + numbered + '</tbody></table></div>';
 					}

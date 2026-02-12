@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -53,6 +54,10 @@ func NewService(
 		logger:   log.Named("database"),
 	}
 }
+
+// validIdentifier matches valid SQL identifiers (table/schema names).
+// Allows: letters, digits, underscores, and optional schema-qualified names (schema.table).
+var validIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$`)
 
 // ============================================================================
 // Connection CRUD
@@ -331,6 +336,7 @@ func (s *Service) listTablesPostgres(ctx context.Context, db *sql.DB, database s
 		var tableType string
 		var size int64
 		if err := rows.Scan(&t.Name, &tableType, &t.Schema, &t.RowCount, &size); err != nil {
+			s.logger.Warn("failed to scan table row", "error", err)
 			continue
 		}
 		t.Size = size
@@ -368,6 +374,7 @@ func (s *Service) listTablesMySQL(ctx context.Context, db *sql.DB, database stri
 		var tableType string
 		var rowCount, size sql.NullInt64
 		if err := rows.Scan(&t.Name, &tableType, &rowCount, &size); err != nil {
+			s.logger.Warn("failed to scan table row", "error", err)
 			continue
 		}
 		t.RowCount = rowCount.Int64
@@ -449,6 +456,7 @@ func (s *Service) getTableColumnsPostgres(ctx context.Context, db *sql.DB, table
 	for rows.Next() {
 		var col models.DatabaseColumn
 		if err := rows.Scan(&col.Name, &col.Type, &col.Nullable, &col.Default, &col.IsPrimaryKey, &col.IsForeignKey, &col.ForeignKey); err != nil {
+			s.logger.Warn("failed to scan column row", "error", err)
 			continue
 		}
 		columns = append(columns, col)
@@ -479,6 +487,7 @@ func (s *Service) getTableColumnsMySQL(ctx context.Context, db *sql.DB, database
 	for rows.Next() {
 		var col models.DatabaseColumn
 		if err := rows.Scan(&col.Name, &col.Type, &col.Nullable, &col.Default, &col.IsPrimaryKey, &col.IsForeignKey); err != nil {
+			s.logger.Warn("failed to scan column row", "error", err)
 			continue
 		}
 		columns = append(columns, col)
@@ -489,6 +498,11 @@ func (s *Service) getTableColumnsMySQL(ctx context.Context, db *sql.DB, database
 
 // GetTableData returns rows from a table with pagination.
 func (s *Service) GetTableData(ctx context.Context, id uuid.UUID, tableName string, page, pageSize int) ([]map[string]interface{}, int64, error) {
+	// Validate table name to prevent SQL injection
+	if !validIdentifier.MatchString(tableName) {
+		return nil, 0, errors.New(errors.CodeValidation, "invalid table name")
+	}
+
 	conn, err := s.connRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, 0, err
@@ -539,6 +553,7 @@ func (s *Service) GetTableData(ctx context.Context, id uuid.UUID, tableName stri
 		}
 
 		if err := rows.Scan(valuePtrs...); err != nil {
+			s.logger.Warn("failed to scan data row", "error", err)
 			continue
 		}
 
@@ -562,18 +577,6 @@ func (s *Service) ExecuteQuery(ctx context.Context, id uuid.UUID, query string, 
 	start := time.Now()
 	result := &models.DatabaseQueryResult{}
 
-	// Basic SQL injection prevention for read-only mode
-	if !writeMode {
-		lowerQuery := strings.ToLower(strings.TrimSpace(query))
-		dangerousKeywords := []string{"insert", "update", "delete", "drop", "truncate", "alter", "create", "grant", "revoke"}
-		for _, keyword := range dangerousKeywords {
-			if strings.HasPrefix(lowerQuery, keyword) || strings.Contains(lowerQuery, " "+keyword+" ") {
-				result.Error = "Write operations not allowed in read-only mode"
-				return result, nil
-			}
-		}
-	}
-
 	db, err := s.Connect(ctx, id)
 	if err != nil {
 		result.Error = err.Error()
@@ -581,8 +584,20 @@ func (s *Service) ExecuteQuery(ctx context.Context, id uuid.UUID, query string, 
 	}
 	defer db.Close()
 
-	// Execute the query
-	rows, err := db.QueryContext(ctx, query)
+	// Use database-level read-only enforcement instead of keyword filtering
+	var rows *sql.Rows
+	if !writeMode {
+		tx, txErr := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if txErr != nil {
+			result.Error = txErr.Error()
+			return result, nil
+		}
+		defer tx.Rollback() //nolint:errcheck
+
+		rows, err = tx.QueryContext(ctx, query)
+	} else {
+		rows, err = db.QueryContext(ctx, query)
+	}
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
@@ -604,6 +619,7 @@ func (s *Service) ExecuteQuery(ctx context.Context, id uuid.UUID, query string, 
 		}
 
 		if err := rows.Scan(valuePtrs...); err != nil {
+			s.logger.Warn("failed to scan data row", "error", err)
 			continue
 		}
 

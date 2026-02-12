@@ -46,7 +46,7 @@ func AuditLog(data StorageAuditData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><!-- Breadcrumb --><div class=\"flex items-center gap-2 text-sm text-gray-400\"><a href=\"/storage\" class=\"hover:text-primary-400 transition-colors\">Storage</a> <i class=\"fas fa-chevron-right text-xs text-gray-600\"></i> <a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\"><!-- Breadcrumb --><div class=\"flex items-center gap-2 text-sm text-gray-400\"><a href=\"/storage\" class=\"hover:text-primary-400 transition-colors\">Storage</a> <i class=\"fas fa-chevron-right text-xs text-gray-400\"></i> <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -72,7 +72,7 @@ func AuditLog(data StorageAuditData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</a> <i class=\"fas fa-chevron-right text-xs text-gray-600\"></i> <span class=\"text-white\">Audit Log</span></div><div><h1 class=\"text-2xl font-display font-bold text-white\"><i class=\"fas fa-history text-primary-400 mr-2\"></i>Audit Log</h1><p class=\"text-gray-400 mt-1\">Activity history for ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</a> <i class=\"fas fa-chevron-right text-xs text-gray-400\"></i> <span class=\"text-white\">Audit Log</span></div><div><h1 class=\"text-2xl font-display font-bold text-white\"><i class=\"fas fa-history text-primary-400 mr-2\"></i>Audit Log</h1><p class=\"text-gray-400 mt-1\">Activity history for ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -48,26 +48,35 @@ func containerToView(c *models.Container) ContainerView {
 		restartPolicy = *c.RestartPolicy
 	}
 
+	// Extract stack name from Docker Compose labels
+	stack := ""
+	if c.Labels != nil {
+		if project, ok := c.Labels["com.docker.compose.project"]; ok {
+			stack = project
+		}
+	}
+
 	view := ContainerView{
-		ID:            c.ID,
-		ShortID:       shortID(c.ID),
-		HostID:        c.HostID.String(),
-		Name:          c.Name,
-		Image:         c.Image,
-		ImageShort:    shortImage(c.Image),
-		State:         string(c.State),
-		Status:        c.Status,
-		Health:        "", // Not in model
-		Created:       created,
-		CreatedHuman:  humanTime(created),
-		Networks:       networks,
-		NetworkDetails: networkDetails,
-		Labels:         c.Labels,
-		Stack:         "", // Not directly in model
-		RestartPolicy: restartPolicy,
-		Command:       "", // Not in model
-		SecurityScore: c.SecurityScore,
-		SecurityGrade: c.SecurityGrade,
+		ID:              c.ID,
+		ShortID:         shortID(c.ID),
+		HostID:          c.HostID.String(),
+		Name:            c.Name,
+		Image:           c.Image,
+		ImageShort:      shortImage(c.Image),
+		State:           string(c.State),
+		Status:          c.Status,
+		Health:          "",
+		Created:         created,
+		CreatedHuman:    humanTime(created),
+		Networks:        networks,
+		NetworkDetails:  networkDetails,
+		Labels:          c.Labels,
+		Stack:           stack,
+		RestartPolicy:   restartPolicy,
+		Command:         "",
+		SecurityScore:   c.SecurityScore,
+		SecurityGrade:   c.SecurityGrade,
+		UpdateAvailable: c.UpdateAvailable,
 	}
 
 	// Ports
@@ -133,10 +142,18 @@ func volumeToView(v *models.Volume) VolumeView {
 	}
 
 	var size int64
+	var refCount int64
 	inUse := false
 	if v.UsageData != nil {
 		size = v.UsageData.Size
-		inUse = v.UsageData.RefCount > 0
+		refCount = v.UsageData.RefCount
+		inUse = refCount > 0
+	}
+
+	// Build UsedBy slice from RefCount (names not available from volume API)
+	var usedBy []string
+	for i := int64(0); i < refCount; i++ {
+		usedBy = append(usedBy, fmt.Sprintf("container-%d", i+1))
 	}
 
 	return VolumeView{
@@ -150,6 +167,7 @@ func volumeToView(v *models.Volume) VolumeView {
 		InUse:        inUse,
 		Size:         size,
 		SizeHuman:    humanSize(size),
+		UsedBy:       usedBy,
 	}
 }
 
@@ -468,5 +486,3 @@ func splitLines(s string) []string {
 	}
 	return lines
 }
-
-

@@ -326,7 +326,7 @@ func toTemplContainer(c ContainerView) containers.Container {
 		Mounts:        len(c.Mounts),
 		Labels:        c.Labels,
 		SecurityScore: c.SecurityScore,
-		HasUpdates:    false, // TODO: Get from updates service
+		HasUpdates:    c.UpdateAvailable,
 	}
 
 	// Convert ports
@@ -929,12 +929,14 @@ func ToTemplUpdatesListData(p *PageData, available []UpdateView, history []Updat
 	data.History = make([]updatestmpl.UpdateHistoryItem, 0, len(history))
 	for _, h := range history {
 		data.History = append(data.History, updatestmpl.UpdateHistoryItem{
+			ID:            h.ID,
 			ContainerName: h.ContainerName,
 			FromVersion:   h.FromVersion,
 			ToVersion:     h.ToVersion,
 			Status:        h.Status,
 			Duration:      h.Duration,
 			UpdatedAt:     h.UpdatedAt,
+			CanRollback:   h.CanRollback,
 		})
 	}
 

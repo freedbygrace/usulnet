@@ -44,15 +44,40 @@ func (h *Handler) ImageDetailTempl(w http.ResponseWriter, r *http.Request) {
 		SizeHuman:    image.SizeHuman,
 		Created:      image.Created.Format(time.RFC3339),
 		CreatedAgo:   image.CreatedHuman,
-		Architecture: "amd64", // Default, not in basic view
-		OS:           "linux", // Default, not in basic view
+		Architecture: h.getHostArch(ctx),
+		OS:           h.getHostOS(ctx),
 		Labels:       make(map[string]string),
 		InUse:        image.InUse,
 	}
 
-	// Convert containers count to list
+	// Populate container names that use this image
 	if image.Containers > 0 {
-		imgData.Containers = make([]string, image.Containers)
+		if cSvc := h.services.Containers(); cSvc != nil {
+			if containers, err := cSvc.List(ctx, nil); err == nil {
+				for _, c := range containers {
+					match := c.Image == image.PrimaryTag
+					if !match {
+						for _, tag := range image.Tags {
+							if c.Image == tag {
+								match = true
+								break
+							}
+						}
+					}
+					if match {
+						name := c.Name
+						if len(name) > 0 && name[0] == '/' {
+							name = name[1:]
+						}
+						imgData.Containers = append(imgData.Containers, name)
+					}
+				}
+			}
+		}
+		// If no containers found by lookup, show count as placeholder
+		if len(imgData.Containers) == 0 {
+			imgData.Containers = []string{fmt.Sprintf("(%d containers)", image.Containers)}
+		}
 	}
 
 	data := images.ImageDetailData{
@@ -102,11 +127,18 @@ func (h *Handler) VolumeDetailTempl(w http.ResponseWriter, r *http.Request) {
 		SizeHuman:  volume.SizeHuman,
 	}
 
-	// Convert UsedBy to container list
+	// Convert UsedBy to container list with real state lookup
+	containerSvc := h.services.Containers()
 	for _, containerName := range volume.UsedBy {
+		state := "attached"
+		if containerSvc != nil {
+			if c, err := containerSvc.Get(ctx, containerName); err == nil && c != nil {
+				state = c.State
+			}
+		}
 		volData.Containers = append(volData.Containers, volumes.VolumeContainer{
 			Name:      containerName,
-			State:     "unknown",
+			State:     state,
 			MountPath: volume.Mountpoint,
 			Mode:      "rw",
 		})
@@ -176,16 +208,23 @@ func (h *Handler) NetworkDetailTempl(w http.ResponseWriter, r *http.Request) {
 	// Convert container data from network view
 	// network.Containers has names but we need full data from the model
 	// Get the actual network to access container map with IDs and IPs
+	containerSvc := h.services.Containers()
 	if netModel, err := h.services.Networks().GetModel(ctx, id); err == nil && netModel != nil {
 		for containerID, info := range netModel.Containers {
 			name := info.Name
 			if name == "" {
 				name = shortID(containerID)
 			}
+			state := "connected"
+			if containerSvc != nil {
+				if c, cErr := containerSvc.Get(ctx, containerID); cErr == nil && c != nil {
+					state = c.State
+				}
+			}
 			netData.Containers = append(netData.Containers, networks.NetworkContainer{
 				ID:          containerID,
 				Name:        name,
-				State:       "running",
+				State:       state,
 				IPv4Address: info.IPv4Address,
 				IPv6Address: info.IPv6Address,
 				MacAddress:  info.MacAddress,
@@ -196,7 +235,7 @@ func (h *Handler) NetworkDetailTempl(w http.ResponseWriter, r *http.Request) {
 		for _, containerName := range network.Containers {
 			netData.Containers = append(netData.Containers, networks.NetworkContainer{
 				Name:  containerName,
-				State: "unknown",
+				State: "connected",
 			})
 		}
 	}
@@ -285,4 +324,24 @@ func truncateID(id string) string {
 		return id[:12]
 	}
 	return id
+}
+
+// getHostArch returns the Docker host architecture (e.g., "amd64", "arm64")
+func (h *Handler) getHostArch(ctx context.Context) string {
+	if hostSvc := h.services.Hosts(); hostSvc != nil {
+		if info, err := hostSvc.GetDockerInfo(ctx); err == nil && info != nil && info.Architecture != "" {
+			return info.Architecture
+		}
+	}
+	return "amd64"
+}
+
+// getHostOS returns the Docker host OS (e.g., "linux")
+func (h *Handler) getHostOS(ctx context.Context) string {
+	if hostSvc := h.services.Hosts(); hostSvc != nil {
+		if info, err := hostSvc.GetDockerInfo(ctx); err == nil && info != nil && info.OSType != "" {
+			return info.OSType
+		}
+	}
+	return "linux"
 }

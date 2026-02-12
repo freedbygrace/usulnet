@@ -66,6 +66,7 @@ func (h *Handler) AlertsTempl(w http.ResponseWriter, r *http.Request) {
 	rules, total, err := alertSvc.ListRules(ctx, models.AlertListOptions{Limit: 100})
 	if err != nil {
 		slog.Error("Failed to list alert rules", "error", err)
+		h.setFlash(w, r, "warning", "Failed to load alert rules")
 	} else {
 		stats.TotalRules = int(total)
 		for _, rule := range rules {
@@ -128,6 +129,7 @@ func (h *Handler) AlertsTempl(w http.ResponseWriter, r *http.Request) {
 	events, _, err := alertSvc.ListEvents(ctx, models.AlertEventListOptions{Limit: 50})
 	if err != nil {
 		slog.Error("Failed to list alert events", "error", err)
+		h.setFlash(w, r, "warning", "Failed to load alert events")
 	} else {
 		for _, event := range events {
 			item := alerts.AlertEventItem{
@@ -175,6 +177,7 @@ func (h *Handler) AlertsTempl(w http.ResponseWriter, r *http.Request) {
 	silences, err := alertSvc.ListSilences(ctx)
 	if err != nil {
 		slog.Error("Failed to list alert silences", "error", err)
+		h.setFlash(w, r, "warning", "Failed to load alert silences")
 	} else {
 		for _, silence := range silences {
 			item := alerts.AlertSilenceItem{
@@ -352,8 +355,12 @@ func (h *Handler) AlertCreate(w http.ResponseWriter, r *http.Request) {
 	_, err := alertSvc.CreateRule(ctx, input, createdBy)
 	if err != nil {
 		slog.Error("Failed to create alert rule", "name", name, "error", err)
+		h.setFlash(w, r, "error", "Failed to create alert rule: "+err.Error())
+		h.redirect(w, r, "/alerts")
+		return
 	}
 
+	h.setFlash(w, r, "success", "Alert rule '"+name+"' created")
 	h.redirect(w, r, "/alerts")
 }
 
@@ -406,8 +413,12 @@ func (h *Handler) AlertUpdate(w http.ResponseWriter, r *http.Request) {
 	_, err = alertSvc.UpdateRule(ctx, ruleID, input)
 	if err != nil {
 		slog.Error("Failed to update alert rule", "id", ruleID, "error", err)
+		h.setFlash(w, r, "error", "Failed to update alert rule: "+err.Error())
+		h.redirect(w, r, "/alerts/"+idStr)
+		return
 	}
 
+	h.setFlash(w, r, "success", "Alert rule updated")
 	h.redirect(w, r, "/alerts")
 }
 

@@ -41,6 +41,12 @@ type RouterConfig struct {
 
 	// APIKeyAuth is an optional authenticator for API key-based authentication.
 	APIKeyAuth middleware.APIKeyAuthenticator
+
+	// MetricsEnabled controls whether the /metrics endpoint is registered.
+	MetricsEnabled bool
+
+	// MetricsPath is the URL path for the Prometheus metrics endpoint (default "/metrics").
+	MetricsPath string
 }
 
 // DefaultRouterConfig returns a default router configuration.
@@ -52,6 +58,8 @@ func DefaultRouterConfig(jwtSecret string) RouterConfig {
 		RequestTimeout:     30 * time.Second,
 		LicenseProvider:    nil, // Set by app.go with license.NewProvider()
 		EnableDebugLogging: false,
+		MetricsEnabled:     true,
+		MetricsPath:        "/metrics",
 	}
 }
 
@@ -425,8 +433,12 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 	// =========================================================================
 	// Prometheus metrics (no auth for scraping)
 	// =========================================================================
-	if h.System != nil {
-		r.Get("/metrics", h.System.Metrics)
+	if h.System != nil && config.MetricsEnabled {
+		metricsPath := config.MetricsPath
+		if metricsPath == "" {
+			metricsPath = "/metrics"
+		}
+		r.Get(metricsPath, h.System.Metrics)
 	}
 
 	return r

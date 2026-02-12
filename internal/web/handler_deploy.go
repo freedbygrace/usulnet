@@ -22,11 +22,6 @@ type DeployService interface {
 	ListDeployments() []*deploy.DeployResult
 }
 
-// SetDeployService sets the deploy service for agent deployment operations.
-func (h *Handler) SetDeployService(svc DeployService) {
-	h.deployService = svc
-}
-
 // AgentDeployTempl handles POST /nodes/{id}/deploy - starts agent deployment.
 func (h *Handler) AgentDeployTempl(w http.ResponseWriter, r *http.Request) {
 	if h.deployService == nil {

@@ -98,7 +98,9 @@ func (h *Handler) GitCreateConnection(w http.ResponseWriter, r *http.Request) {
 			URL:           url,
 			APIToken:      apiToken,
 			WebhookSecret: webhookSecret,
-			CreatedBy:     userID,
+		}
+		if userID != nil {
+			input.CreatedBy = *userID
 		}
 
 		conn, err := gitSvc.CreateConnection(ctx, input)
@@ -194,10 +196,14 @@ func (h *Handler) GitTestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to Gitea service
-	if _, err := h.services.Gitea().TestConnection(ctx, connID); err != nil {
-		h.setFlash(w, r, "error", fmt.Sprintf("Connection test failed: %v", err))
+	if giteaSvc := h.services.Gitea(); giteaSvc != nil {
+		if _, err := giteaSvc.TestConnection(ctx, connID); err != nil {
+			h.setFlash(w, r, "error", fmt.Sprintf("Connection test failed: %v", err))
+		} else {
+			h.setFlash(w, r, "success", "Connection test successful")
+		}
 	} else {
-		h.setFlash(w, r, "success", "Connection test successful")
+		h.setFlash(w, r, "error", "No Git service configured")
 	}
 
 	http.Redirect(w, r, "/integrations/git", http.StatusSeeOther)
@@ -228,11 +234,15 @@ func (h *Handler) GitSyncRepos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to Gitea service
-	count, err := h.services.Gitea().SyncRepositories(ctx, connID)
-	if err != nil {
-		h.setFlash(w, r, "error", fmt.Sprintf("Sync failed: %v", err))
+	if giteaSvc := h.services.Gitea(); giteaSvc != nil {
+		count, err := giteaSvc.SyncRepositories(ctx, connID)
+		if err != nil {
+			h.setFlash(w, r, "error", fmt.Sprintf("Sync failed: %v", err))
+		} else {
+			h.setFlash(w, r, "success", fmt.Sprintf("Synced %d repositories", count))
+		}
 	} else {
-		h.setFlash(w, r, "success", fmt.Sprintf("Synced %d repositories", count))
+		h.setFlash(w, r, "error", "No Git service configured")
 	}
 
 	http.Redirect(w, r, "/integrations/git", http.StatusSeeOther)
@@ -262,10 +272,14 @@ func (h *Handler) GitDeleteConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to Gitea service
-	if err := h.services.Gitea().DeleteConnection(ctx, connID); err != nil {
-		h.setFlash(w, r, "error", fmt.Sprintf("Failed to delete: %v", err))
+	if giteaSvc := h.services.Gitea(); giteaSvc != nil {
+		if err := giteaSvc.DeleteConnection(ctx, connID); err != nil {
+			h.setFlash(w, r, "error", fmt.Sprintf("Failed to delete: %v", err))
+		} else {
+			h.setFlash(w, r, "success", "Connection deleted")
+		}
 	} else {
-		h.setFlash(w, r, "success", "Connection deleted")
+		h.setFlash(w, r, "error", "No Git service configured")
 	}
 
 	http.Redirect(w, r, "/integrations/git", http.StatusSeeOther)
@@ -467,14 +481,3 @@ func repoToViewItem(repo *models.GiteaRepository, connName, providerType string)
 	}
 }
 
-// getUserID extracts the current user's UUID from the request context.
-func (h *Handler) getUserID(r *http.Request) uuid.UUID {
-	user := GetUserFromContext(r.Context())
-	if user != nil {
-		id, err := uuid.Parse(user.ID)
-		if err == nil {
-			return id
-		}
-	}
-	return uuid.Nil
-}

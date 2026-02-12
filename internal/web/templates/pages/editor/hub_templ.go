@@ -221,7 +221,7 @@ func Hub(data HubData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"p-8 text-center\"><i class=\"fas fa-file-alt text-4xl text-gray-600 mb-3\"></i><p class=\"text-gray-400\">No saved snippets</p><p class=\"text-sm text-gray-500 mt-1\">Create snippets to save code for later</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"p-8 text-center\"><i class=\"fas fa-file-alt text-4xl text-gray-400 mb-3\"></i><p class=\"text-gray-400\">No saved snippets</p><p class=\"text-sm text-gray-500 mt-1\">Create snippets to save code for later</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -320,7 +320,7 @@ func Hub(data HubData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div class=\"card p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-600 mb-3\"></i><p class=\"text-gray-400\">No git providers connected</p><p class=\"text-sm text-gray-500 mt-1\"><a href=\"/integrations/gitea\" class=\"text-blue-400 hover:text-blue-300\">Add a connection</a> to browse remote repositories</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div class=\"card p-8 text-center\"><i class=\"fas fa-plug text-4xl text-gray-400 mb-3\"></i><p class=\"text-gray-400\">No git providers connected</p><p class=\"text-sm text-gray-500 mt-1\"><a href=\"/integrations/gitea\" class=\"text-blue-400 hover:text-blue-300\">Add a connection</a> to browse remote repositories</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

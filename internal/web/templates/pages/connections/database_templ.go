@@ -116,7 +116,7 @@ func DatabaseConnectionsList(data DatabaseConnectionsListData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Connections) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"col-span-full card p-8 text-center\"><i class=\"fas fa-database text-4xl text-gray-600 mb-4\"></i><p class=\"text-gray-400\">No database connections configured</p><button onclick=\"showNewConnectionModal()\" class=\"btn-primary mt-4\"><i class=\"fas fa-plus mr-2\"></i>Add Connection</button></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"col-span-full card p-8 text-center\"><i class=\"fas fa-database text-4xl text-gray-400 mb-4\"></i><p class=\"text-gray-400\">No database connections configured</p><button onclick=\"showNewConnectionModal()\" class=\"btn-primary mt-4\"><i class=\"fas fa-plus mr-2\"></i>Add Connection</button></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -587,7 +587,7 @@ func DatabaseBrowser(data DatabaseBrowserData) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " <span class=\"text-gray-600 font-normal\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " <span class=\"text-gray-400 font-normal\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -711,7 +711,7 @@ func DatabaseBrowser(data DatabaseBrowserData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<div class=\"flex-1 flex items-center justify-center\"><div class=\"text-center\"><i class=\"fas fa-table text-4xl text-gray-600 mb-4\"></i><p class=\"text-gray-400\">Select a table from the sidebar to view data</p></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<div class=\"flex-1 flex items-center justify-center\"><div class=\"text-center\"><i class=\"fas fa-table text-4xl text-gray-400 mb-4\"></i><p class=\"text-gray-400\">Select a table from the sidebar to view data</p></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

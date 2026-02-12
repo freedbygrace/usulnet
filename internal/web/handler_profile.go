@@ -6,6 +6,7 @@ package web
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -416,6 +417,42 @@ func (h *Handler) ExportUserData(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================================
+// Delete Account (DELETE /profile)
+// ============================================================================
+
+// DeleteAccount handles account self-deletion.
+func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	user := GetUserInfo(r.Context())
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Prevent admin from deleting themselves if they are the only admin
+	if user.Role == "admin" {
+		ctx := r.Context()
+		if st, err := h.services.Users().GetStats(ctx); err == nil && st != nil && st.Admins <= 1 {
+			h.setFlash(w, r, "error", "Cannot delete the last admin account")
+			h.redirect(w, r, "/profile")
+			return
+		}
+	}
+
+	if h.userRepo != nil {
+		if err := h.userRepo.DeleteUser(user.ID); err != nil {
+			slog.Error("Failed to delete account", "user_id", user.ID, "error", err)
+			h.setFlash(w, r, "error", "Failed to delete account: "+err.Error())
+			h.redirect(w, r, "/profile")
+			return
+		}
+	}
+
+	// Clear session and redirect to login
+	_ = h.sessionStore.Delete(r, w, "usulnet_session")
+	h.redirect(w, r, "/login")
+}
+
+// ============================================================================
 // Toggle Theme (POST /profile/theme) — Quick toggle endpoint for header button
 // ============================================================================
 
@@ -467,12 +504,16 @@ func (h *Handler) ToggleTheme(w http.ResponseWriter, r *http.Request) {
 //       sessionRepo SessionRepository
 //   }
 
-
-
 // getUserCreated returns the creation date of a user.
-// Note: UserInfo doesn't currently have CreatedAt - would need to extend the interface
+// Falls back to querying sessions if the user repository doesn't provide CreatedAt.
 func (h *Handler) getUserCreated(userID string) time.Time {
-	// TODO: Extend UserRepository and UserInfo to include CreatedAt
+	if h.userRepo != nil {
+		if u, err := h.userRepo.GetUserByID(userID); err == nil && u != nil {
+			if !u.CreatedAt.IsZero() {
+				return u.CreatedAt
+			}
+		}
+	}
 	return time.Time{}
 }
 
@@ -481,9 +522,18 @@ func (h *Handler) getUserLastLogin(userID string, prefs UserPreferences) string 
 	if h.sessionRepo == nil {
 		return ""
 	}
-	// Try to get from session repo - return empty if not available
-	// In real implementation, query the session repository for last login
-	return ""
+	sessions, err := h.sessionRepo.GetUserSessions(userID)
+	if err != nil || len(sessions) == 0 {
+		return ""
+	}
+	// Find the most recent session's LastUsed time
+	var latest string
+	for _, s := range sessions {
+		if s.LastUsed > latest {
+			latest = s.LastUsed
+		}
+	}
+	return latest
 }
 
 // verifyPassword checks if the plain password matches the hash.

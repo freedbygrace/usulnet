@@ -20,65 +20,86 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 
-	"github.com/fr4nsys/usulnet/internal/api"
 	agentpkg "github.com/fr4nsys/usulnet/internal/agent"
+	"github.com/fr4nsys/usulnet/internal/api"
+	"github.com/fr4nsys/usulnet/internal/api/handlers"
+	apimiddleware "github.com/fr4nsys/usulnet/internal/api/middleware"
 	dockerpkg "github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/gateway"
 	giteapkg "github.com/fr4nsys/usulnet/internal/integrations/gitea"
-	licensepkg "github.com/fr4nsys/usulnet/internal/license"
 	"github.com/fr4nsys/usulnet/internal/integrations/npm"
+	licensepkg "github.com/fr4nsys/usulnet/internal/license"
+	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/nats"
 	"github.com/fr4nsys/usulnet/internal/pkg/crypto"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
-	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 	"github.com/fr4nsys/usulnet/internal/repository/redis"
+	"github.com/fr4nsys/usulnet/internal/scheduler"
+	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
 	authsvc "github.com/fr4nsys/usulnet/internal/services/auth"
 	backupsvc "github.com/fr4nsys/usulnet/internal/services/backup"
 	backupstorage "github.com/fr4nsys/usulnet/internal/services/backup/storage"
+	capturesvc "github.com/fr4nsys/usulnet/internal/services/capture"
 	configsvc "github.com/fr4nsys/usulnet/internal/services/config"
 	containersvc "github.com/fr4nsys/usulnet/internal/services/container"
+	databasesvc "github.com/fr4nsys/usulnet/internal/services/database"
+	deploysvc "github.com/fr4nsys/usulnet/internal/services/deploy"
+	gitsvc "github.com/fr4nsys/usulnet/internal/services/git"
 	hostsvc "github.com/fr4nsys/usulnet/internal/services/host"
 	imagesvc "github.com/fr4nsys/usulnet/internal/services/image"
+	ldapbrowsersvc "github.com/fr4nsys/usulnet/internal/services/ldapbrowser"
+	metricssvc "github.com/fr4nsys/usulnet/internal/services/metrics"
+	monitoringsvc "github.com/fr4nsys/usulnet/internal/services/monitoring"
 	networksvc "github.com/fr4nsys/usulnet/internal/services/network"
 	notificationsvc "github.com/fr4nsys/usulnet/internal/services/notification"
 	proxysvc "github.com/fr4nsys/usulnet/internal/services/proxy"
+	rdpsvc "github.com/fr4nsys/usulnet/internal/services/rdp"
 	securitysvc "github.com/fr4nsys/usulnet/internal/services/security"
 	securityanalyzer "github.com/fr4nsys/usulnet/internal/services/security/analyzer"
 	trivypkg "github.com/fr4nsys/usulnet/internal/services/security/trivy"
-	stacksvc "github.com/fr4nsys/usulnet/internal/services/stack"
 	shortcutssvc "github.com/fr4nsys/usulnet/internal/services/shortcuts"
 	sshsvc "github.com/fr4nsys/usulnet/internal/services/ssh"
-	deploysvc "github.com/fr4nsys/usulnet/internal/services/deploy"
-	databasesvc "github.com/fr4nsys/usulnet/internal/services/database"
-	capturesvc "github.com/fr4nsys/usulnet/internal/services/capture"
-	swarmsvc "github.com/fr4nsys/usulnet/internal/services/swarm"
-	ldapbrowsersvc "github.com/fr4nsys/usulnet/internal/services/ldapbrowser"
+	stacksvc "github.com/fr4nsys/usulnet/internal/services/stack"
 	storagesvc "github.com/fr4nsys/usulnet/internal/services/storage"
+	swarmsvc "github.com/fr4nsys/usulnet/internal/services/swarm"
 	teamsvc "github.com/fr4nsys/usulnet/internal/services/team"
-	gitsvc "github.com/fr4nsys/usulnet/internal/services/git"
-	metricssvc "github.com/fr4nsys/usulnet/internal/services/metrics"
-	monitoringsvc "github.com/fr4nsys/usulnet/internal/services/monitoring"
+	// Enterprise Phase 2 services
+	compliancesvc "github.com/fr4nsys/usulnet/internal/services/compliance"
+	imagesignsvc "github.com/fr4nsys/usulnet/internal/services/imagesign"
+	logaggsvc "github.com/fr4nsys/usulnet/internal/services/logagg"
+	// Phase 3: Market Expansion - GitOps
+	ephemeralsvc "github.com/fr4nsys/usulnet/internal/services/ephemeral"
+	gitsyncsvc "github.com/fr4nsys/usulnet/internal/services/gitsync"
+	manifestsvc "github.com/fr4nsys/usulnet/internal/services/manifest"
+	opasvc "github.com/fr4nsys/usulnet/internal/services/opa"
+	runtimesvc "github.com/fr4nsys/usulnet/internal/services/runtime"
 	updatesvc "github.com/fr4nsys/usulnet/internal/services/update"
 	usersvc "github.com/fr4nsys/usulnet/internal/services/user"
 	volumesvc "github.com/fr4nsys/usulnet/internal/services/volume"
-	"github.com/fr4nsys/usulnet/internal/api/handlers"
-	apimiddleware "github.com/fr4nsys/usulnet/internal/api/middleware"
-	"github.com/fr4nsys/usulnet/internal/scheduler"
-	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
 	"github.com/fr4nsys/usulnet/internal/web"
 
 	"go.uber.org/zap"
 )
+
+// standaloneHostID is the well-known host ID used for the local Docker
+// daemon in standalone (non-agent) mode.
+var standaloneHostID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // zapLicenseLogger adapts zap.SugaredLogger to satisfy license.Logger.
 type zapLicenseLogger struct {
 	sugar *zap.SugaredLogger
 }
 
-func (z *zapLicenseLogger) Info(msg string, keysAndValues ...any)  { z.sugar.Infow(msg, keysAndValues...) }
-func (z *zapLicenseLogger) Warn(msg string, keysAndValues ...any)  { z.sugar.Warnw(msg, keysAndValues...) }
-func (z *zapLicenseLogger) Error(msg string, keysAndValues ...any) { z.sugar.Errorw(msg, keysAndValues...) }
+func (z *zapLicenseLogger) Info(msg string, keysAndValues ...any) {
+	z.sugar.Infow(msg, keysAndValues...)
+}
+func (z *zapLicenseLogger) Warn(msg string, keysAndValues ...any) {
+	z.sugar.Warnw(msg, keysAndValues...)
+}
+func (z *zapLicenseLogger) Error(msg string, keysAndValues ...any) {
+	z.sugar.Errorw(msg, keysAndValues...)
+}
 
 // encryptorAdapter wraps *crypto.AESEncryptor to satisfy the web.Encryptor interface
 // which expects Encrypt(string)(string,error) and Decrypt(string)(string,error).
@@ -141,8 +162,17 @@ func Run(cfgFile, mode string) error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Initialize logger
-	log, err := logger.New(cfg.Logging.Level, cfg.Logging.Format)
+	// Initialize logger (supports stdout, stderr, and file with rotation)
+	log, err := logger.NewFromConfig(cfg.Logging.Level, cfg.Logging.Format, logger.OutputConfig{
+		Output: cfg.Logging.Output,
+		File: logger.FileConfig{
+			Path:       cfg.Logging.File.Path,
+			MaxSize:    parseSize(cfg.Logging.File.MaxSize, 100*1024*1024),
+			MaxBackups: cfg.Logging.File.MaxBackups,
+			MaxAge:     cfg.Logging.File.MaxAge,
+			Compress:   cfg.Logging.File.Compress,
+		},
+	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
@@ -161,6 +191,7 @@ func Run(cfgFile, mode string) error {
 		MaxIdleConns:    cfg.Database.MaxIdleConns,
 		ConnMaxLifetime: cfg.Database.ConnMaxLifetime,
 		ConnMaxIdleTime: cfg.Database.ConnMaxIdleTime,
+		QueryTimeout:    cfg.Database.QueryTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
@@ -243,13 +274,15 @@ func Run(cfgFile, mode string) error {
 		log.Info("Connecting to NATS...")
 
 		natsCfg := nats.Config{
-			URL:           cfg.NATS.URL,
-			Name:          cfg.NATS.Name,
-			Token:         cfg.NATS.Token,
-			Username:      cfg.NATS.Username,
-			Password:      cfg.NATS.Password,
-			MaxReconnects: cfg.NATS.MaxReconnects,
-			ReconnectWait: cfg.NATS.ReconnectWait,
+			URL:              cfg.NATS.URL,
+			Name:             cfg.NATS.Name,
+			Token:            cfg.NATS.Token,
+			Username:         cfg.NATS.Username,
+			Password:         cfg.NATS.Password,
+			MaxReconnects:    cfg.NATS.MaxReconnects,
+			ReconnectWait:    cfg.NATS.ReconnectWait,
+			JetStreamEnabled: cfg.NATS.JetStream.Enabled,
+			JetStreamDomain:  cfg.NATS.JetStream.Domain,
 		}
 
 		// Build TLS config if enabled (manual or auto-configured from PKI)
@@ -327,6 +360,16 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	app.Logger.Info("Starting in standalone mode")
 
 	// Initialize API server with RouterConfig
+	routerCfg := api.DefaultRouterConfig(app.Config.Security.JWTSecret)
+	// Wire rate limit from config (default 100 req/min from config.yaml)
+	if app.Config.Server.RateLimitRPS > 0 {
+		routerCfg.RateLimitPerMinute = app.Config.Server.RateLimitRPS
+	}
+	// Wire metrics config
+	routerCfg.MetricsEnabled = app.Config.Metrics.Enabled
+	if app.Config.Metrics.Path != "" {
+		routerCfg.MetricsPath = app.Config.Metrics.Path
+	}
 	serverCfg := api.ServerConfig{
 		Host:            app.Config.Server.Host,
 		Port:            app.Config.Server.Port,
@@ -334,15 +377,25 @@ func (app *Application) startStandalone(ctx context.Context) error {
 		ReadTimeout:     app.Config.Server.ReadTimeout,
 		WriteTimeout:    app.Config.Server.WriteTimeout,
 		IdleTimeout:     app.Config.Server.IdleTimeout,
-		MaxHeaderBytes:  1 << 20, // 1MB default
+		MaxHeaderBytes:  int(parseSize(app.Config.Server.MaxRequestSize, 1<<20)),
 		ShutdownTimeout: app.Config.Server.ShutdownTimeout,
-		RouterConfig:    api.DefaultRouterConfig(app.Config.Security.JWTSecret),
+		RouterConfig:    routerCfg,
 	}
 
 	// Set logger so Recovery middleware actually logs panics
 	serverCfg.RouterConfig.Logger = app.Logger
 	// Increase request timeout - stack deploys (docker compose pull+up) need more than 30s
 	serverCfg.RouterConfig.RequestTimeout = 5 * time.Minute
+
+	// Override CORS if USULNET_CORS_ORIGINS is set (comma-separated origins).
+	// CookieSecure from config is respected for CORS AllowCredentials.
+	if corsOrigins := os.Getenv("USULNET_CORS_ORIGINS"); corsOrigins != "" {
+		serverCfg.RouterConfig.CORSConfig = apimiddleware.CORSFromEnv(corsOrigins, app.Config.Security.CookieSecure)
+		app.Logger.Info("CORS configured from USULNET_CORS_ORIGINS",
+			"origins", corsOrigins,
+			"cookie_secure", app.Config.Security.CookieSecure,
+		)
+	}
 
 	// =========================================================================
 	// HTTPS TLS SETUP (PKI already initialized in Run())
@@ -370,8 +423,11 @@ func (app *Application) startStandalone(ctx context.Context) error {
 		)
 	}
 
+	serverCfg.Version = Version
+	serverCfg.Commit = Commit
+	serverCfg.BuildTime = BuildTime
+	serverCfg.Logger = app.Logger
 	app.Server = api.NewServer(serverCfg)
-	app.Server.SetVersion(Version, Commit, BuildTime)
 	// NOTE: Setup() is called later, after all API handlers are populated
 
 	// =========================================================================
@@ -386,26 +442,36 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	// Create JWT service
 	jwtSecret := app.Config.Security.JWTSecret
 	if jwtSecret == "" {
-		jwtSecret = "usulnet-dev-secret-change-me"
-		app.Logger.Warn("Using default JWT secret - change security.jwt_secret in config for production")
+		// This should never happen — Config.Validate() requires jwt_secret.
+		// Fail hard rather than silently running with an insecure default.
+		return fmt.Errorf("security.jwt_secret is required — set USULNET_JWT_SECRET")
+	}
+	// Wire JWT/refresh expiry from config (defaults: 24h / 168h)
+	accessTTL := app.Config.Security.JWTExpiry
+	if accessTTL <= 0 {
+		accessTTL = 24 * time.Hour
+	}
+	refreshTTL := app.Config.Security.RefreshExpiry
+	if refreshTTL <= 0 {
+		refreshTTL = 7 * 24 * time.Hour
 	}
 	jwtService := authsvc.NewJWTService(authsvc.JWTConfig{
 		Secret:          jwtSecret,
 		Issuer:          "usulnet",
-		AccessTokenTTL:  15 * time.Minute,
-		RefreshTokenTTL: 7 * 24 * time.Hour,
+		AccessTokenTTL:  accessTTL,
+		RefreshTokenTTL: refreshTTL,
 	})
 
-	// Create session service
+	// Create session service (session TTL matches JWT expiry from config)
 	sessionSvc := authsvc.NewSessionService(
 		sessionRepo,
 		jwtService,
 		authsvc.SessionConfig{
 			MaxSessionsPerUser: 10,
-			SessionTTL:         24 * time.Hour,
+			SessionTTL:         accessTTL,
 			CleanupInterval:    1 * time.Hour,
 			ExtendOnActivity:   true,
-			ExtendThreshold:    6 * time.Hour,
+			ExtendThreshold:    accessTTL / 4,
 		},
 		app.Logger,
 	)
@@ -455,7 +521,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	// DOCKER SERVICES INITIALIZATION
 	// =========================================================================
 
-	defaultHostID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	defaultHostID := standaloneHostID
 
 	// Host service in standalone mode with DB-backed repository for host CRUD
 	hostService := hostsvc.NewStandaloneService(hostsvc.DefaultConfig(), app.Logger)
@@ -495,8 +561,12 @@ func (app *Application) startStandalone(ctx context.Context) error {
 
 	// Do initial sync so dashboard has data immediately
 	go func() {
-		// Small delay to let host connection initialize
-		time.Sleep(1 * time.Second)
+		// Small delay to let host connection initialize (cancelable)
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			return
+		}
 		if err := containerService.SyncHost(ctx, defaultHostID); err != nil {
 			app.Logger.Warn("Initial container sync failed (will retry on next interval)", "error", err)
 		} else {
@@ -535,7 +605,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 		app.Logger.Warn("License provider initialization failed, running as CE", "error", err)
 	} else {
 		app.licenseProvider = licenseProvider
-		app.Server.SetLicenseProvider(licenseProvider)
+		app.Server.RegisterLicenseProvider(licenseProvider)
 
 		// Wire limit provider to services created earlier
 		hostService.SetLimitProvider(licenseProvider)
@@ -642,9 +712,13 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	{
 		encKey := app.Config.Security.ConfigEncryptionKey
 		if encKey == "" {
-			// Derive a 32-byte hex key from JWT secret via SHA-256
+			// Derive a 32-byte hex key from JWT secret via SHA-256.
+			// WARNING: changing jwt_secret will invalidate all encrypted data
+			// (TOTP secrets, NPM credentials, config values). Set
+			// USULNET_ENCRYPTION_KEY explicitly for independent key rotation.
 			h := crypto.SHA256String(jwtSecret)
 			encKey = h[:64] // 64 hex chars = 32 bytes
+			app.Logger.Warn("encryption_key not set — deriving from jwt_secret (set USULNET_ENCRYPTION_KEY for independent rotation)")
 		}
 		var encErr error
 		encryptor, encErr = crypto.NewAESEncryptor(encKey)
@@ -665,10 +739,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 		if storageErr != nil {
 			app.Logger.Warn("Failed to initialize backup storage, backup service disabled", "error", storageErr, "path", storagePath)
 		} else {
-			// BackupRepository uses database/sql - bridge from pgx pool via stdlib adapter
-			stdDB := stdlib.OpenDBFromPool(app.DB.Pool())
-
-			backupRepo := postgres.NewBackupRepository(stdDB)
+			backupRepo := postgres.NewBackupRepository(app.DB)
 
 			// Providers bridge backup service to Docker operations
 			volumeProvider := backupsvc.NewDockerVolumeProvider(hostService, volumeService)
@@ -677,8 +748,16 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			// Backup config from app config
 			backupCfg := backupsvc.DefaultConfig()
 			backupCfg.StoragePath = storagePath
+			backupCfg.StorageType = app.Config.Storage.Type
 			if app.Config.Storage.Backup.RetentionDays > 0 {
 				backupCfg.DefaultRetentionDays = app.Config.Storage.Backup.RetentionDays
+			}
+			// Wire compression from config (default zstd / level 3)
+			if comp := app.Config.Storage.Backup.Compression; comp != "" {
+				backupCfg.DefaultCompression = models.BackupCompression(comp)
+			}
+			if app.Config.Storage.Backup.CompressionLevel > 0 {
+				backupCfg.CompressionLevel = app.Config.Storage.Backup.CompressionLevel
 			}
 
 			var bkErr error
@@ -870,11 +949,27 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	// API HANDLERS & ROUTER SETUP
 	// =========================================================================
 
-	// Create user service for API handler
+	// Create user service for API handler (wire password policy from config)
+	userServiceConfig := usersvc.DefaultServiceConfig()
+	if app.Config.Security.PasswordMinLength > 0 {
+		userServiceConfig.PasswordMinLength = app.Config.Security.PasswordMinLength
+	}
+	userServiceConfig.PasswordRequireUpper = app.Config.Security.PasswordRequireUpper
+	userServiceConfig.PasswordRequireNumber = app.Config.Security.PasswordRequireNumber
+	userServiceConfig.PasswordRequireSymbol = app.Config.Security.PasswordRequireSymbol
+	if app.Config.Security.MaxFailedLogins > 0 {
+		userServiceConfig.MaxFailedLogins = app.Config.Security.MaxFailedLogins
+	}
+	if app.Config.Security.LockoutDuration > 0 {
+		userServiceConfig.LockoutDuration = app.Config.Security.LockoutDuration
+	}
+	if app.Config.Security.APIKeyLength > 0 {
+		userServiceConfig.APIKeyLength = app.Config.Security.APIKeyLength
+	}
 	userService := usersvc.NewService(
 		userRepo,
 		apiKeyRepo,
-		usersvc.DefaultServiceConfig(),
+		userServiceConfig,
 		app.Logger,
 	)
 	if licenseProvider != nil {
@@ -937,62 +1032,71 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	// FRONTEND INTEGRATION (Templ templates compiled into binary)
 	// =========================================================================
 
-	// Initialize ServiceRegistry with default host ID for standalone mode
-	serviceRegistry := web.NewServiceRegistry(defaultHostID)
+	// -------------------------------------------------------------------------
+	// Build ServiceRegistry + Handler deps incrementally (constructor injection)
+	// -------------------------------------------------------------------------
 
-	// Inject all services
-	serviceRegistry.SetAuthService(authService)
-	serviceRegistry.SetUserRepository(userRepo)
-	serviceRegistry.SetHostService(hostService)
-	serviceRegistry.SetContainerService(containerService)
-	serviceRegistry.SetImageService(imageService)
-	serviceRegistry.SetVolumeService(volumeService)
-	serviceRegistry.SetNetworkService(networkService)
-	serviceRegistry.SetStackService(stackService)
-	serviceRegistry.SetTeamService(teamService)
-	serviceRegistry.SetSecurityService(securityService)
-	serviceRegistry.SetUpdateService(updateService)
-	if backupService != nil {
-		serviceRegistry.SetBackupService(backupService)
-	}
-	if configService != nil {
-		serviceRegistry.SetConfigService(configService)
+	// ServiceRegistry deps — core services
+	regDeps := web.ServiceRegistryDeps{
+		DefaultHostID:    defaultHostID,
+		AuthService:      authService,
+		UserRepository:   userRepo,
+		HostService:      hostService,
+		ContainerService: containerService,
+		ImageService:     imageService,
+		VolumeService:    volumeService,
+		NetworkService:   networkService,
+		StackService:     stackService,
+		TeamService:      teamService,
+		SecurityService:  securityService,
+		UpdateService:    updateService,
+		BackupService:    backupService,  // nil-safe
+		ConfigService:    configService,  // nil-safe
 	}
 
-	// Create session store
+	// Create session store (reused later for session repo adapter)
 	var sessionStore web.SessionStore
 	var webSessionStore *web.WebSessionStore
+	var redisSessionStore *redis.SessionStore
 	if app.Redis != nil {
-		redisSessionStore := redis.NewSessionStore(app.Redis, 24*time.Hour)
-		webSessionStore = web.NewWebSessionStore(redisSessionStore, 24*time.Hour)
+		redisSessionStore = redis.NewSessionStore(app.Redis, accessTTL)
+		cookieCfg := web.CookieConfig{
+			Secure:   app.Config.Security.CookieSecure,
+			SameSite: parseSameSite(app.Config.Security.CookieSameSite),
+			Domain:   app.Config.Security.CookieDomain,
+		}
+		webSessionStore = web.NewWebSessionStore(redisSessionStore, accessTTL, cookieCfg)
 		sessionStore = webSessionStore
-		
-		// Set session store in registry for auth validation
-		serviceRegistry.SetSessionStore(webSessionStore)
+		regDeps.SessionStore = webSessionStore
 	} else {
 		sessionStore = web.NewNullSessionStore()
 	}
 
-	// Create web handler using Templ (all templates compiled into binary)
-	webHandler := web.NewTemplHandler(serviceRegistry, Version, sessionStore)
+	// Handler deps — start with core fields, populated incrementally below
+	hdlDeps := web.HandlerDeps{
+		Version:         Version,
+		SessionStore:    sessionStore,
+		BaseURL:         app.Config.Server.BaseURL,
+		TerminalEnabled: app.Config.Terminal.Enabled,
+		TerminalUser:    app.Config.Terminal.User,
+		TerminalShell:   app.Config.Terminal.Shell,
+		Logger:          app.Logger,
+	}
 
-	// Wire license provider to web handler (initialized earlier, before router Setup)
 	if licenseProvider != nil {
-		webHandler.SetLicenseProvider(licenseProvider)
+		hdlDeps.LicenseProvider = licenseProvider
 	}
 
 	// TOTP and NPM use the encryptor created earlier
-
-	// Setup TOTP 2FA support and encryptor for web handler
 	if encryptor != nil {
-		serviceRegistry.SetEncryptor(encryptor)
-		webHandler.SetEncryptor(&encryptorAdapter{enc: encryptor})
-		webHandler.SetTOTPSigningKey([]byte(jwtSecret))
+		regDeps.Encryptor = encryptor
+		hdlDeps.Encryptor = &encryptorAdapter{enc: encryptor}
+		hdlDeps.TOTPSigningKey = []byte(jwtSecret)
 		app.Logger.Info("TOTP 2FA support enabled")
 	}
 
-	// Setup NPM Integration (manual connection via Settings UI)
-	if encryptor != nil {
+	// Setup NPM Integration (manual connection via Settings UI, gated by npm.enabled)
+	if encryptor != nil && app.Config.NPM.Enabled {
 		npmConnRepo := postgres.NewNPMConnectionRepository(app.DB)
 		npmMappingRepo := postgres.NewContainerProxyMappingRepository(app.DB)
 		npmAuditRepo := postgres.NewNPMAuditLogRepository(app.DB)
@@ -1004,12 +1108,12 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			encryptor,
 			app.Logger.Base(),
 		)
-		serviceRegistry.SetNPMService(npmService)
+		regDeps.NPMService = npmService
 		app.Logger.Info("NPM integration available (connect via Settings)")
 	}
 
-	// Setup Caddy Proxy Service (manual connection via Settings UI)
-	if encryptor != nil {
+	// Setup Caddy Proxy Service (manual connection via Settings UI, gated by caddy.enabled)
+	if encryptor != nil && app.Config.Caddy.Enabled {
 		proxyHostRepo := postgres.NewProxyHostRepository(app.DB, app.Logger)
 		proxyHeaderRepo := postgres.NewProxyHeaderRepository(app.DB)
 		proxyCertRepo := postgres.NewProxyCertificateRepository(app.DB, app.Logger)
@@ -1034,11 +1138,11 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			proxyCfg,
 			app.Logger,
 		)
-		serviceRegistry.SetProxyService(proxyService)
+		regDeps.ProxyService = proxyService
 		app.Logger.Info("Caddy proxy service available (connect via Settings)")
 	}
 
-	// Setup Storage Service (S3/MinIO - manual connection via Settings UI)
+	// Setup Storage Service (S3, Azure, GCS, B2, SFTP, Local — requires encryption key)
 	if encryptor != nil {
 		storageConnRepo := postgres.NewStorageConnectionRepository(app.DB, app.Logger)
 		storageBucketRepo := postgres.NewStorageBucketRepository(app.DB, app.Logger)
@@ -1056,11 +1160,11 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			storageCfg,
 			app.Logger,
 		)
-		serviceRegistry.SetStorageService(storageService)
+		regDeps.StorageService = storageService
 		if licenseProvider != nil {
 			storageService.SetLimitProvider(licenseProvider)
 		}
-		app.Logger.Info("Storage service (S3/MinIO) available (connect via Settings)")
+		app.Logger.Info("Storage service available (S3, Azure, GCS, B2, SFTP, Local)")
 	}
 
 	// Setup Gitea Integration
@@ -1076,20 +1180,20 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			encryptor,
 			app.Logger,
 		)
-		serviceRegistry.SetGiteaService(giteaService)
+		regDeps.GiteaService = giteaService
 		app.Logger.Info("Gitea integration service enabled")
 
 		// Setup unified Git service (multi-provider: Gitea, GitHub, GitLab)
 		gitConnRepo := postgres.NewGitConnectionRepository(app.DB)
 		gitRepoRepo := postgres.NewGitRepositoryRepository(app.DB)
-		
+
 		gitService := gitsvc.NewService(
 			gitConnRepo,
 			gitRepoRepo,
 			encryptor,
 			app.Logger,
 		)
-		serviceRegistry.SetGitService(gitService)
+		regDeps.GitService = gitService
 		if licenseProvider != nil {
 			gitService.SetLimitProvider(licenseProvider)
 		}
@@ -1111,8 +1215,8 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			app.Logger,
 		)
 		sshService.SetTunnelRepo(sshTunnelRepo)
-		serviceRegistry.SetSSHService(sshService)
-		webHandler.SetSSHService(sshService)
+		regDeps.SSHService = sshService
+		hdlDeps.SSHService = sshService
 		apiHandlers.SSH = handlers.NewSSHHandler(sshService, app.Logger)
 		app.Logger.Info("SSH service enabled with tunnel support")
 	}
@@ -1120,7 +1224,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	// Setup Agent Deploy Service (requires PKI for TLS cert generation)
 	{
 		deploySvc := deploysvc.NewService(app.pkiManager, app.Logger)
-		webHandler.SetDeployService(deploySvc)
+		hdlDeps.DeployService = deploySvc
 		app.Logger.Info("Agent deploy service enabled",
 			"pki_available", app.pkiManager != nil,
 		)
@@ -1136,7 +1240,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			categoryRepo,
 			app.Logger,
 		)
-		webHandler.SetShortcutsService(shortcutsService)
+		hdlDeps.ShortcutsService = shortcutsService
 		app.Logger.Info("Shortcuts service enabled")
 	}
 
@@ -1148,7 +1252,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			encryptor,
 			app.Logger,
 		)
-		webHandler.SetDatabaseService(databaseService)
+		hdlDeps.DatabaseService = databaseService
 		app.Logger.Info("Database connections service enabled")
 
 		// LDAP Browser Service
@@ -1158,127 +1262,237 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			encryptor,
 			app.Logger,
 		)
-		webHandler.SetLDAPBrowserService(ldapBrowserService)
+		hdlDeps.LDAPBrowserService = ldapBrowserService
 		app.Logger.Info("LDAP browser service enabled")
+
+		// RDP Connection Service
+		rdpConnRepo := postgres.NewRDPConnectionRepository(app.DB, app.Logger)
+		rdpService := rdpsvc.NewService(rdpConnRepo, encryptor, app.Logger)
+		hdlDeps.RDPService = rdpService
+		app.Logger.Info("RDP connections service enabled")
 	}
 
 	// Setup Packet Capture Service
 	{
 		captureRepo := postgres.NewCaptureRepository(app.DB, app.Logger)
 		captureService := capturesvc.NewService(captureRepo, app.Logger)
-		webHandler.SetCaptureService(captureService)
+		hdlDeps.CaptureService = captureService
 		app.Logger.Info("Packet capture service enabled")
 	}
 
 	// Swarm service - wraps Docker Swarm operations with business logic
 	swarmService := swarmsvc.NewService(hostService, app.Logger)
-	webHandler.SetSwarmService(swarmService)
+	hdlDeps.SwarmService = swarmService
 	app.Logger.Info("Swarm service enabled")
 
 	// Notification config repository for web handler
 	notificationConfigRepo := postgres.NewNotificationConfigRepository(app.DB)
-	webHandler.SetNotificationConfigRepo(notificationConfigRepo)
+	hdlDeps.NotificationConfigRepo = notificationConfigRepo
 	app.Logger.Info("Notification config repository enabled")
 
 	// Inject repositories for admin pages (roles, oauth, ldap)
 	roleRepo := postgres.NewRoleRepository(app.DB, app.Logger)
-	webHandler.SetRoleRepo(roleRepo)
+	hdlDeps.RoleRepo = roleRepo
 	app.Logger.Info("Role repository enabled for web handler")
 
 	oauthConfigRepo := postgres.NewOAuthConfigRepository(app.DB, app.Logger)
-	webHandler.SetOAuthConfigRepo(oauthConfigRepo)
+	hdlDeps.OAuthConfigRepo = oauthConfigRepo
 	app.Logger.Info("OAuth config repository enabled for web handler")
 
 	ldapConfigRepo := postgres.NewLDAPConfigRepository(app.DB, app.Logger)
-	webHandler.SetLDAPConfigRepo(ldapConfigRepo)
+	hdlDeps.LDAPConfigRepo = ldapConfigRepo
 	app.Logger.Info("LDAP config repository enabled for web handler")
 
-	// Snippet repository (requires database/sql adapter)
-	stdDBSnippets := stdlib.OpenDBFromPool(app.DB.Pool())
-	snippetRepo := postgres.NewSnippetRepository(stdDBSnippets)
-	webHandler.SetSnippetRepo(snippetRepo)
+	snippetRepo := postgres.NewSnippetRepository(app.DB)
+	hdlDeps.SnippetRepo = snippetRepo
 	app.Logger.Info("Snippet repository enabled for web handler")
 
 	// Custom log upload repository
 	customLogUploadRepo := postgres.NewCustomLogUploadRepository(app.DB, app.Logger)
-	webHandler.SetCustomLogUploadRepo(customLogUploadRepo)
+	hdlDeps.CustomLogUploadRepo = customLogUploadRepo
 	app.Logger.Info("Custom log upload repository enabled for web handler")
 
 	// Preferences repository
 	prefsRepo := postgres.NewPreferencesRepo(app.DB.Pool())
-	webHandler.SetPrefsRepo(prefsRepo)
+	hdlDeps.PrefsRepo = prefsRepo
 	app.Logger.Info("Preferences repository enabled for web handler")
 
 	// H1: User repository adapter for profile update/password change
-	webHandler.SetUserRepo(&webUserRepoAdapter{repo: userRepo})
+	hdlDeps.UserRepo = &webUserRepoAdapter{repo: userRepo}
 	app.Logger.Info("User repository adapter enabled for web handler")
 
 	// H2: Session repository adapter for profile active sessions list
-	if app.Redis != nil {
-		redisSessionStore := redis.NewSessionStore(app.Redis, 24*time.Hour)
-		webHandler.SetSessionRepo(&webSessionRepoAdapter{redisStore: redisSessionStore})
+	if redisSessionStore != nil {
+		hdlDeps.SessionRepo = &webSessionRepoAdapter{redisStore: redisSessionStore}
 		app.Logger.Info("Session repository adapter enabled for web handler")
 	}
 
 	// H3: Terminal session repository for terminal history API
 	terminalSessionRepo := postgres.NewTerminalSessionRepository(app.DB, app.Logger)
-	webHandler.SetTerminalSessionRepo(&webTerminalSessionRepoAdapter{repo: terminalSessionRepo})
+	hdlDeps.TerminalSessionRepo = &webTerminalSessionRepoAdapter{repo: terminalSessionRepo}
 	app.Logger.Info("Terminal session repository enabled for web handler")
 
 	// Registry, Webhook, Runbook, AutoDeploy repositories
 	registryRepo := postgres.NewRegistryRepository(app.DB)
-	webHandler.SetRegistryRepo(registryRepo)
+	hdlDeps.RegistryRepo = registryRepo
 	app.Logger.Info("Registry repository enabled for web handler")
 
 	webhookRepo := postgres.NewOutgoingWebhookRepository(app.DB)
-	webHandler.SetWebhookRepo(webhookRepo)
+	hdlDeps.WebhookRepo = webhookRepo
 	app.Logger.Info("Outgoing webhook repository enabled for web handler")
 
 	runbookRepo := postgres.NewRunbookRepository(app.DB)
-	webHandler.SetRunbookRepo(runbookRepo)
+	hdlDeps.RunbookRepo = runbookRepo
 	app.Logger.Info("Runbook repository enabled for web handler")
 
 	autoDeployRepo := postgres.NewAutoDeployRuleRepository(app.DB)
-	webHandler.SetAutoDeployRepo(autoDeployRepo)
+	hdlDeps.AutoDeployRepo = autoDeployRepo
 	app.Logger.Info("Auto-deploy rule repository enabled for web handler")
+
+	// Persistent feature repositories (compliance, secrets, lifecycle, maintenance, gitops, quotas, templates, vulns)
+	complianceRepo := postgres.NewComplianceRepository(app.DB)
+	hdlDeps.ComplianceRepo = complianceRepo
+	app.Logger.Info("Compliance repository enabled for web handler")
+
+	managedSecretRepo := postgres.NewManagedSecretRepository(app.DB)
+	hdlDeps.ManagedSecretRepo = managedSecretRepo
+	app.Logger.Info("Managed secret repository enabled for web handler")
+
+	lifecycleRepo := postgres.NewLifecycleRepository(app.DB)
+	hdlDeps.LifecycleRepo = lifecycleRepo
+	app.Logger.Info("Lifecycle repository enabled for web handler")
+
+	maintenanceRepo := postgres.NewMaintenanceRepository(app.DB)
+	hdlDeps.MaintenanceRepo = maintenanceRepo
+	app.Logger.Info("Maintenance repository enabled for web handler")
+
+	gitOpsRepo := postgres.NewGitOpsRepository(app.DB)
+	hdlDeps.GitOpsRepo = gitOpsRepo
+	app.Logger.Info("GitOps repository enabled for web handler")
+
+	resourceQuotaRepo := postgres.NewResourceQuotaRepository(app.DB)
+	hdlDeps.ResourceQuotaRepo = resourceQuotaRepo
+	app.Logger.Info("Resource quota repository enabled for web handler")
+
+	containerTemplateRepo := postgres.NewContainerTemplateRepository(app.DB)
+	hdlDeps.ContainerTemplateRepo = containerTemplateRepo
+	app.Logger.Info("Container template repository enabled for web handler")
+
+	trackedVulnRepo := postgres.NewTrackedVulnerabilityRepository(app.DB)
+	hdlDeps.TrackedVulnRepo = trackedVulnRepo
+	app.Logger.Info("Tracked vulnerability repository enabled for web handler")
 
 	// H4: Docker client for events page
 	if dockerClient != nil {
-		serviceRegistry.SetDockerClient(dockerClient)
+		regDeps.DockerClient = dockerClient
 		app.Logger.Info("Docker events enabled for events page")
 	}
-
-	// M2: Logger for OAuth/LDAP admin, connections, roles, etc.
-	webHandler.SetLogger(app.Logger)
 
 	// Metrics service
 	metricsRepo := postgres.NewMetricsRepository(app.DB, app.Logger)
 	metricsCollector := metricssvc.NewCollector(hostService, app.Logger)
 	metricsService := metricssvc.NewService(metricsRepo, metricsCollector, app.Logger)
-	serviceRegistry.SetMetricsService(metricsService)
+	regDeps.MetricsService = metricsService
 	schedulerDeps.MetricsService = metricsService
 	app.Logger.Info("Metrics service enabled")
 
-	// Alert monitoring service
+	// Alert monitoring service — wire MetricsProvider and NotificationSender adapters
 	alertRepo := postgres.NewAlertRepository(app.DB)
+	var alertMetrics monitoringsvc.MetricsProvider
+	if metricsService != nil {
+		alertMetrics = &alertMetricsProviderAdapter{
+			metrics: metricsService,
+			hostID:  defaultHostID,
+		}
+	}
+	var alertNotifier monitoringsvc.NotificationSender
+	if notificationService != nil {
+		alertNotifier = &alertNotificationSenderAdapter{svc: notificationService}
+	}
 	alertSvc := monitoringsvc.NewAlertService(
 		alertRepo,
-		nil, // MetricsProvider: connected when host metrics are available
-		nil, // NotificationSender: connected when notification dispatch is available
+		alertMetrics,
+		alertNotifier,
 		monitoringsvc.DefaultAlertConfig(),
 		app.Logger,
 	)
-	serviceRegistry.SetAlertService(alertSvc)
+	regDeps.AlertService = alertSvc
 	if err := alertSvc.Start(ctx); err != nil {
 		app.Logger.Error("Failed to start alert service", "error", err)
 	} else {
-		app.Logger.Info("Alert monitoring service started")
+		app.Logger.Info("Alert monitoring service started",
+			"metrics_provider", alertMetrics != nil,
+			"notification_sender", alertNotifier != nil,
+		)
 	}
 
-	// Set scheduler service in registry for web handlers
+	// =========================================================================
+	// Enterprise Phase 2: Compliance, OPA, Log Aggregation, Image Signing, Runtime Security
+	// =========================================================================
+
+	// Log aggregation service
+	logRepo := postgres.NewLogRepository(app.DB, app.Logger)
+	logAggService := logaggsvc.NewService(logRepo, hostService, logaggsvc.DefaultConfig(), app.Logger)
+	hdlDeps.LogAggSvc = logAggService
+	app.Logger.Info("Log aggregation service enabled")
+
+	// Compliance framework service
+	complianceFrameworkRepo := postgres.NewComplianceFrameworkRepository(app.DB)
+	complianceService := compliancesvc.NewService(complianceFrameworkRepo, app.Logger)
+	hdlDeps.ComplianceFrameworkSvc = complianceService
+	app.Logger.Info("Compliance framework service enabled")
+
+	// OPA policy engine service
+	opaRepo := postgres.NewOPARepository(app.DB)
+	opaService := opasvc.NewService(opaRepo, opasvc.DefaultConfig(), app.Logger)
+	hdlDeps.OPASvc = opaService
+	app.Logger.Info("OPA policy engine service enabled")
+
+	// Image signing service
+	imageSignRepo := postgres.NewImageSigningRepository(app.DB)
+	imageSignService := imagesignsvc.NewService(imageSignRepo, imagesignsvc.DefaultConfig(), app.Logger)
+	hdlDeps.ImageSignSvc = imageSignService
+	app.Logger.Info("Image signing service enabled")
+
+	// Runtime security service
+	runtimeSecRepo := postgres.NewRuntimeSecurityRepository(app.DB, app.Logger)
+	runtimeSecService := runtimesvc.NewService(runtimeSecRepo, hostService, runtimesvc.DefaultConfig(), app.Logger)
+	hdlDeps.RuntimeSecSvc = runtimeSecService
+	app.Logger.Info("Runtime security service enabled")
+
+	// =========================================================================
+	// Phase 3: Market Expansion - GitOps
+	// =========================================================================
+
+	// Bidirectional Git sync service
+	gitSyncRepo := postgres.NewGitSyncRepository(app.DB, app.Logger)
+	gitSyncService := gitsyncsvc.NewService(gitSyncRepo, gitsyncsvc.DefaultConfig(), app.Logger)
+	hdlDeps.GitSyncSvc = gitSyncService
+	app.Logger.Info("Git sync service enabled")
+
+	// Ephemeral environments service
+	ephemeralRepo := postgres.NewEphemeralEnvironmentRepository(app.DB, app.Logger)
+	ephemeralService := ephemeralsvc.NewService(ephemeralRepo, ephemeralsvc.DefaultConfig(), app.Logger)
+	hdlDeps.EphemeralSvc = ephemeralService
+	app.Logger.Info("Ephemeral environments service enabled")
+
+	// Manifest builder service
+	manifestRepo := postgres.NewManifestBuilderRepository(app.DB, app.Logger)
+	manifestService := manifestsvc.NewService(manifestRepo, manifestsvc.DefaultConfig(), app.Logger)
+	hdlDeps.ManifestSvc = manifestService
+	app.Logger.Info("Manifest builder service enabled")
+
+	// Set scheduler service in registry deps
 	if sched != nil {
-		serviceRegistry.SetSchedulerService(sched)
+		regDeps.SchedulerService = sched
 	}
+
+	// -------------------------------------------------------------------------
+	// Construct ServiceRegistry + Handler (all deps collected above)
+	// -------------------------------------------------------------------------
+	serviceRegistry := web.NewServiceRegistry(regDeps)
+	hdlDeps.Services = serviceRegistry
+	webHandler := web.NewTemplHandler(hdlDeps)
 
 	// Create middleware
 	webMiddleware := web.NewMiddleware(
@@ -1298,6 +1512,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 
 	// Register web routes (all Templ handlers)
 	webMiddleware.SetScopeProvider(teamService)
+	webMiddleware.SetRoleProvider(&roleProviderAdapter{repo: roleRepo})
 	web.RegisterFrontendRoutes(app.Server.Router(), webHandler, webMiddleware)
 
 	app.Logger.Info("Web frontend initialized",

@@ -303,7 +303,7 @@ func CheatSheet(data CheatSheetData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					if cmd.Example != "" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"mt-2 text-xs text-gray-500\"><span class=\"text-gray-600\">Example:</span> <code class=\"text-gray-400 ml-1\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"mt-2 text-xs text-gray-500\"><span class=\"text-gray-400\">Example:</span> <code class=\"text-gray-400 ml-1\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}

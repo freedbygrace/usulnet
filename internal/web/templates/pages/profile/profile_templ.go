@@ -158,7 +158,7 @@ func Profile(data ProfilePageData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</span> <span class=\"text-gray-600\">&middot;</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</span> <span class=\"text-gray-400\">&middot;</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -403,7 +403,7 @@ func profileInfoTab(data ProfilePageData) templ.Component {
 			templ_7745c5c3_Var16 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<div class=\"grid grid-cols-1 lg:grid-cols-3 gap-6\"><!-- Main form --><div class=\"lg:col-span-2\"><form hx-put=\"/profile\" hx-swap=\"none\" class=\"bg-dark-800 rounded-xl border border-dark-600 p-6 space-y-5\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<div class=\"grid grid-cols-1 lg:grid-cols-3 gap-6\"><!-- Main form --><div class=\"lg:col-span-2\"><form hx-post=\"/profile\" hx-swap=\"none\" class=\"bg-dark-800 rounded-xl border border-dark-600 p-6 space-y-5\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -483,7 +483,7 @@ func profileInfoTab(data ProfilePageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<span class=\"text-gray-600\">—</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<span class=\"text-gray-400\">—</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -917,7 +917,7 @@ func securityTab(data ProfilePageData) templ.Component {
 			templ_7745c5c3_Var33 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<div class=\"space-y-6\"><!-- Change Password --><form hx-put=\"/profile/password\" hx-swap=\"none\" class=\"bg-dark-800 rounded-xl border border-dark-600 p-6 space-y-5\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<div class=\"space-y-6\"><!-- Change Password --><form hx-post=\"/profile/password\" hx-swap=\"none\" class=\"bg-dark-800 rounded-xl border border-dark-600 p-6 space-y-5\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1013,7 +1013,7 @@ func securityTab(data ProfilePageData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "</div><div class=\"text-[10px] text-gray-600\">Created ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "</div><div class=\"text-[10px] text-gray-400\">Created ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1064,7 +1064,7 @@ func securityTab(data ProfilePageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "</div><!-- Two-Factor Authentication (placeholder) --><div class=\"bg-dark-800 rounded-xl border border-dark-600 p-6\"><div class=\"flex items-center justify-between\"><div><h2 class=\"text-base font-semibold text-white\">Two-Factor Authentication</h2><p class=\"text-sm text-gray-400 mt-1\">Add an extra layer of security to your account.</p></div><span class=\"px-2.5 py-1 text-xs font-medium text-gray-500 bg-dark-700 rounded-lg border border-dark-600\">Coming Soon</span></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "</div><!-- Two-Factor Authentication (placeholder) --><div class=\"bg-dark-800 rounded-xl border border-dark-600 p-6\"><div class=\"flex items-center justify-between\"><div><h2 class=\"text-base font-semibold text-white\">Two-Factor Authentication</h2><p class=\"text-sm text-gray-400 mt-1\">Add an extra layer of security to your account.</p></div><span class=\"px-2.5 py-1 text-xs font-medium text-yellow-400 bg-yellow-900/30 rounded-lg border border-yellow-800/50\">Planned</span></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

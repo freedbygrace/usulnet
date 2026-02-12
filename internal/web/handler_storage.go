@@ -6,6 +6,7 @@ package web
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -24,7 +25,7 @@ import (
 func (h *Handler) StorageTempl(w http.ResponseWriter, r *http.Request) {
 	svc := h.services.Storage()
 	if svc == nil {
-		h.RenderServiceNotConfigured(w, r, "S3 Storage", "minio")
+		h.RenderServiceNotConfigured(w, r, "Storage", "encryption_key")
 		return
 	}
 
@@ -66,7 +67,7 @@ func (h *Handler) StorageTempl(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) StorageBucketsTempl(w http.ResponseWriter, r *http.Request) {
 	svc := h.services.Storage()
 	if svc == nil {
-		h.RenderServiceNotConfigured(w, r, "S3 Storage", "minio")
+		h.RenderServiceNotConfigured(w, r, "Storage", "encryption_key")
 		return
 	}
 
@@ -117,7 +118,7 @@ func (h *Handler) StorageBucketsTempl(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) StorageBrowserTempl(w http.ResponseWriter, r *http.Request) {
 	svc := h.services.Storage()
 	if svc == nil {
-		h.RenderServiceNotConfigured(w, r, "S3 Storage", "minio")
+		h.RenderServiceNotConfigured(w, r, "Storage", "encryption_key")
 		return
 	}
 
@@ -174,7 +175,7 @@ func (h *Handler) StorageBrowserTempl(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) StorageAuditTempl(w http.ResponseWriter, r *http.Request) {
 	svc := h.services.Storage()
 	if svc == nil {
-		h.RenderServiceNotConfigured(w, r, "S3 Storage", "minio")
+		h.RenderServiceNotConfigured(w, r, "Storage", "encryption_key")
 		return
 	}
 
@@ -226,6 +227,7 @@ func (h *Handler) StorageAuditTempl(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 // StorageCreateConnection handles POST /storage/connections.
+// Supports multiple storage types: s3, azure, gcs, b2, sftp, local.
 func (h *Handler) StorageCreateConnection(w http.ResponseWriter, r *http.Request) {
 	svc := h.services.Storage()
 	if svc == nil {
@@ -233,17 +235,56 @@ func (h *Handler) StorageCreateConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	storageType := r.FormValue("storage_type")
+	if storageType == "" {
+		storageType = "s3"
+	}
 	name := r.FormValue("name")
-	endpoint := r.FormValue("endpoint")
-	region := r.FormValue("region")
-	accessKey := r.FormValue("access_key")
-	secretKey := r.FormValue("secret_key")
-	usePathStyle := r.FormValue("use_path_style") == "on"
-	useSSL := r.FormValue("use_ssl") == "on"
 	isDefault := r.FormValue("is_default") == "on"
 	userID := h.getCurrentUsername(r)
 
-	_, err := svc.CreateConnection(r.Context(), name, endpoint, region, accessKey, secretKey, usePathStyle, useSSL, isDefault, userID)
+	var err error
+	switch storageType {
+	case "s3":
+		endpoint := r.FormValue("endpoint")
+		region := r.FormValue("region")
+		accessKey := r.FormValue("access_key")
+		secretKey := r.FormValue("secret_key")
+		usePathStyle := r.FormValue("use_path_style") == "on"
+		useSSL := r.FormValue("use_ssl") == "on"
+		_, err = svc.CreateConnection(r.Context(), name, endpoint, region, accessKey, secretKey, usePathStyle, useSSL, isDefault, userID)
+	case "azure":
+		accountName := r.FormValue("azure_account_name")
+		accountKey := r.FormValue("azure_account_key")
+		container := r.FormValue("azure_container")
+		_, err = svc.CreateConnection(r.Context(), name, accountName, container, accountKey, "", false, true, isDefault, userID)
+	case "gcs":
+		projectID := r.FormValue("gcs_project_id")
+		bucket := r.FormValue("gcs_bucket")
+		credentials := r.FormValue("gcs_credentials")
+		_, err = svc.CreateConnection(r.Context(), name, projectID, bucket, credentials, "", false, true, isDefault, userID)
+	case "b2":
+		keyID := r.FormValue("b2_key_id")
+		appKey := r.FormValue("b2_app_key")
+		bucket := r.FormValue("b2_bucket")
+		_, err = svc.CreateConnection(r.Context(), name, bucket, "", keyID, appKey, false, true, isDefault, userID)
+	case "sftp":
+		host := r.FormValue("sftp_host")
+		port := r.FormValue("sftp_port")
+		username := r.FormValue("sftp_username")
+		password := r.FormValue("sftp_password")
+		remotePath := r.FormValue("sftp_path")
+		endpoint := host + ":" + port
+		_, err = svc.CreateConnection(r.Context(), name, endpoint, remotePath, username, password, false, false, isDefault, userID)
+	case "local":
+		localPath := r.FormValue("local_path")
+		_, err = svc.CreateConnection(r.Context(), name, "localhost", localPath, "", "", false, false, isDefault, userID)
+	default:
+		h.setFlash(w, r, "error", "Unknown storage type: "+storageType)
+		http.Redirect(w, r, "/storage", http.StatusSeeOther)
+		return
+	}
+
 	if err != nil {
 		h.setFlash(w, r, "error", "Failed to create connection: "+err.Error())
 	} else {
@@ -520,6 +561,8 @@ func (h *Handler) setFlash(w http.ResponseWriter, r *http.Request, msgType, mess
 			Type:    msgType,
 			Message: message,
 		}
-		_ = h.sessionStore.Save(r, w, session)
+		if err := h.sessionStore.Save(r, w, session); err != nil {
+			slog.Warn("failed to save flash message to session", "error", err)
+		}
 	}
 }

@@ -27,11 +27,11 @@ type Client struct {
 	logger     *zap.Logger
 
 	// Authentication
-	token      string
-	tokenExp   time.Time
-	email      string
-	password   string
-	mu         sync.RWMutex
+	token    string
+	tokenExp time.Time
+	email    string
+	password string
+	mu       sync.RWMutex
 }
 
 // Config holds the NPM client configuration.
@@ -179,26 +179,26 @@ func (c *Client) doRequestOnce(ctx context.Context, method, path string, body in
 
 // ProxyHost represents an NPM proxy host.
 type ProxyHost struct {
-	ID                   int                    `json:"id,omitempty"`
-	CreatedOn            string                 `json:"created_on,omitempty"`
-	ModifiedOn           string                 `json:"modified_on,omitempty"`
-	DomainNames          []string               `json:"domain_names"`
-	ForwardScheme        string                 `json:"forward_scheme"`
-	ForwardHost          string                 `json:"forward_host"`
-	ForwardPort          int                    `json:"forward_port"`
-	CertificateID        interface{}            `json:"certificate_id"` // int, "new", or null
-	SSLForced            bool                   `json:"ssl_forced"`
-	HSTSEnabled          bool                   `json:"hsts_enabled"`
-	HSTSSubdomains       bool                   `json:"hsts_subdomains"`
-	HTTP2Support         bool                   `json:"http2_support"`
-	BlockExploits        bool                   `json:"block_exploits"`
-	CachingEnabled       bool                   `json:"caching_enabled"`
-	AllowWebsocketUpgrade bool                  `json:"allow_websocket_upgrade"`
-	AccessListID         int                    `json:"access_list_id"`
-	AdvancedConfig       string                 `json:"advanced_config"`
-	Enabled              bool                   `json:"enabled"`
-	Locations            []ProxyHostLocation    `json:"locations,omitempty"`
-	Meta                 map[string]interface{} `json:"meta,omitempty"`
+	ID                    int                    `json:"id,omitempty"`
+	CreatedOn             string                 `json:"created_on,omitempty"`
+	ModifiedOn            string                 `json:"modified_on,omitempty"`
+	DomainNames           []string               `json:"domain_names"`
+	ForwardScheme         string                 `json:"forward_scheme"`
+	ForwardHost           string                 `json:"forward_host"`
+	ForwardPort           int                    `json:"forward_port"`
+	CertificateID         interface{}            `json:"certificate_id"` // int, "new", or null
+	SSLForced             bool                   `json:"ssl_forced"`
+	HSTSEnabled           bool                   `json:"hsts_enabled"`
+	HSTSSubdomains        bool                   `json:"hsts_subdomains"`
+	HTTP2Support          bool                   `json:"http2_support"`
+	BlockExploits         bool                   `json:"block_exploits"`
+	CachingEnabled        bool                   `json:"caching_enabled"`
+	AllowWebsocketUpgrade bool                   `json:"allow_websocket_upgrade"`
+	AccessListID          int                    `json:"access_list_id"`
+	AdvancedConfig        string                 `json:"advanced_config"`
+	Enabled               bool                   `json:"enabled"`
+	Locations             []ProxyHostLocation    `json:"locations,omitempty"`
+	Meta                  map[string]interface{} `json:"meta,omitempty"`
 	// Expanded fields (when using ?expand=...)
 	Certificate *Certificate `json:"certificate,omitempty"`
 	AccessList  *AccessList  `json:"access_list,omitempty"`
@@ -215,39 +215,39 @@ type ProxyHostLocation struct {
 
 // ProxyHostCreate is the input for creating a proxy host.
 type ProxyHostCreate struct {
-	DomainNames     []string    `json:"domain_names"`
-	ForwardScheme   string      `json:"forward_scheme"`
-	ForwardHost     string      `json:"forward_host"`
-	ForwardPort     int         `json:"forward_port"`
-	CertificateID   interface{} `json:"certificate_id,omitempty"`
-	SSLForced       bool        `json:"ssl_forced,omitempty"`
-	HSTSEnabled     bool        `json:"hsts_enabled,omitempty"`
-	HSTSSubdomains  bool        `json:"hsts_subdomains,omitempty"`
-	HTTP2Support    bool        `json:"http2_support,omitempty"`
-	BlockExploits   bool        `json:"block_exploits,omitempty"`
-	CachingEnabled  bool        `json:"caching_enabled,omitempty"`
-	AllowWebsocket  bool        `json:"allow_websocket_upgrade,omitempty"`
-	AccessListID    int         `json:"access_list_id,omitempty"`
-	AdvancedConfig  string      `json:"advanced_config,omitempty"`
+	DomainNames    []string    `json:"domain_names"`
+	ForwardScheme  string      `json:"forward_scheme"`
+	ForwardHost    string      `json:"forward_host"`
+	ForwardPort    int         `json:"forward_port"`
+	CertificateID  interface{} `json:"certificate_id,omitempty"`
+	SSLForced      bool        `json:"ssl_forced,omitempty"`
+	HSTSEnabled    bool        `json:"hsts_enabled,omitempty"`
+	HSTSSubdomains bool        `json:"hsts_subdomains,omitempty"`
+	HTTP2Support   bool        `json:"http2_support,omitempty"`
+	BlockExploits  bool        `json:"block_exploits,omitempty"`
+	CachingEnabled bool        `json:"caching_enabled,omitempty"`
+	AllowWebsocket bool        `json:"allow_websocket_upgrade,omitempty"`
+	AccessListID   int         `json:"access_list_id,omitempty"`
+	AdvancedConfig string      `json:"advanced_config,omitempty"`
 }
 
 // ProxyHostUpdate is the input for updating a proxy host.
 type ProxyHostUpdate struct {
-	DomainNames    []string     `json:"domain_names,omitempty"`
-	ForwardScheme  *string      `json:"forward_scheme,omitempty"`
-	ForwardHost    *string      `json:"forward_host,omitempty"`
-	ForwardPort    *int         `json:"forward_port,omitempty"`
-	CertificateID  interface{}  `json:"certificate_id,omitempty"`
-	SSLForced      *bool        `json:"ssl_forced,omitempty"`
-	HSTSEnabled    *bool        `json:"hsts_enabled,omitempty"`
-	HSTSSubdomains *bool        `json:"hsts_subdomains,omitempty"`
-	HTTP2Support   *bool        `json:"http2_support,omitempty"`
-	BlockExploits  *bool        `json:"block_exploits,omitempty"`
-	CachingEnabled *bool        `json:"caching_enabled,omitempty"`
-	AllowWebsocket *bool        `json:"allow_websocket_upgrade,omitempty"`
-	AccessListID   *int         `json:"access_list_id,omitempty"`
-	AdvancedConfig *string      `json:"advanced_config,omitempty"`
-	Enabled        *bool        `json:"enabled,omitempty"`
+	DomainNames    []string    `json:"domain_names,omitempty"`
+	ForwardScheme  *string     `json:"forward_scheme,omitempty"`
+	ForwardHost    *string     `json:"forward_host,omitempty"`
+	ForwardPort    *int        `json:"forward_port,omitempty"`
+	CertificateID  interface{} `json:"certificate_id,omitempty"`
+	SSLForced      *bool       `json:"ssl_forced,omitempty"`
+	HSTSEnabled    *bool       `json:"hsts_enabled,omitempty"`
+	HSTSSubdomains *bool       `json:"hsts_subdomains,omitempty"`
+	HTTP2Support   *bool       `json:"http2_support,omitempty"`
+	BlockExploits  *bool       `json:"block_exploits,omitempty"`
+	CachingEnabled *bool       `json:"caching_enabled,omitempty"`
+	AllowWebsocket *bool       `json:"allow_websocket_upgrade,omitempty"`
+	AccessListID   *int        `json:"access_list_id,omitempty"`
+	AdvancedConfig *string     `json:"advanced_config,omitempty"`
+	Enabled        *bool       `json:"enabled,omitempty"`
 }
 
 // ListProxyHosts returns all proxy hosts.
@@ -384,24 +384,24 @@ func (c *Client) DisableProxyHost(ctx context.Context, id int) error {
 
 // RedirectionHost represents an NPM redirection host.
 type RedirectionHost struct {
-	ID                int      `json:"id,omitempty"`
-	CreatedOn         string   `json:"created_on,omitempty"`
-	ModifiedOn        string   `json:"modified_on,omitempty"`
-	DomainNames       []string `json:"domain_names"`
-	ForwardScheme     string   `json:"forward_scheme"`
-	ForwardDomainName string   `json:"forward_domain_name"`
-	ForwardHTTPCode   int      `json:"forward_http_code"`
-	PreservePath      bool     `json:"preserve_path"`
-	CertificateID     interface{} `json:"certificate_id"`
-	SSLForced         bool     `json:"ssl_forced"`
-	HSTSEnabled       bool     `json:"hsts_enabled"`
-	HSTSSubdomains    bool     `json:"hsts_subdomains"`
-	HTTP2Support      bool     `json:"http2_support"`
-	BlockExploits     bool     `json:"block_exploits"`
-	AdvancedConfig    string   `json:"advanced_config"`
-	Enabled           bool     `json:"enabled"`
+	ID                int                    `json:"id,omitempty"`
+	CreatedOn         string                 `json:"created_on,omitempty"`
+	ModifiedOn        string                 `json:"modified_on,omitempty"`
+	DomainNames       []string               `json:"domain_names"`
+	ForwardScheme     string                 `json:"forward_scheme"`
+	ForwardDomainName string                 `json:"forward_domain_name"`
+	ForwardHTTPCode   int                    `json:"forward_http_code"`
+	PreservePath      bool                   `json:"preserve_path"`
+	CertificateID     interface{}            `json:"certificate_id"`
+	SSLForced         bool                   `json:"ssl_forced"`
+	HSTSEnabled       bool                   `json:"hsts_enabled"`
+	HSTSSubdomains    bool                   `json:"hsts_subdomains"`
+	HTTP2Support      bool                   `json:"http2_support"`
+	BlockExploits     bool                   `json:"block_exploits"`
+	AdvancedConfig    string                 `json:"advanced_config"`
+	Enabled           bool                   `json:"enabled"`
 	Meta              map[string]interface{} `json:"meta,omitempty"`
-	Certificate       *Certificate `json:"certificate,omitempty"`
+	Certificate       *Certificate           `json:"certificate,omitempty"`
 }
 
 // RedirectionCreate is the input for creating a redirection host.
@@ -524,18 +524,18 @@ func (c *Client) DeleteRedirectionHost(ctx context.Context, id int) error {
 
 // Stream represents an NPM stream.
 type Stream struct {
-	ID             int         `json:"id,omitempty"`
-	CreatedOn      string      `json:"created_on,omitempty"`
-	ModifiedOn     string      `json:"modified_on,omitempty"`
-	IncomingPort   int         `json:"incoming_port"`
-	ForwardingHost string      `json:"forwarding_host"`
-	ForwardingPort int         `json:"forwarding_port"`
-	TCPForwarding  bool        `json:"tcp_forwarding"`
-	UDPForwarding  bool        `json:"udp_forwarding"`
-	CertificateID  interface{} `json:"certificate_id"`
-	Enabled        bool        `json:"enabled"`
+	ID             int                    `json:"id,omitempty"`
+	CreatedOn      string                 `json:"created_on,omitempty"`
+	ModifiedOn     string                 `json:"modified_on,omitempty"`
+	IncomingPort   int                    `json:"incoming_port"`
+	ForwardingHost string                 `json:"forwarding_host"`
+	ForwardingPort int                    `json:"forwarding_port"`
+	TCPForwarding  bool                   `json:"tcp_forwarding"`
+	UDPForwarding  bool                   `json:"udp_forwarding"`
+	CertificateID  interface{}            `json:"certificate_id"`
+	Enabled        bool                   `json:"enabled"`
 	Meta           map[string]interface{} `json:"meta,omitempty"`
-	Certificate    *Certificate `json:"certificate,omitempty"`
+	Certificate    *Certificate           `json:"certificate,omitempty"`
 }
 
 // ListStreams returns all streams.
@@ -642,19 +642,19 @@ func (c *Client) DeleteStream(ctx context.Context, id int) error {
 
 // DeadHost represents an NPM dead host (404 page).
 type DeadHost struct {
-	ID             int         `json:"id,omitempty"`
-	CreatedOn      string      `json:"created_on,omitempty"`
-	ModifiedOn     string      `json:"modified_on,omitempty"`
-	DomainNames    []string    `json:"domain_names"`
-	CertificateID  interface{} `json:"certificate_id"`
-	SSLForced      bool        `json:"ssl_forced"`
-	HSTSEnabled    bool        `json:"hsts_enabled"`
-	HSTSSubdomains bool        `json:"hsts_subdomains"`
-	HTTP2Support   bool        `json:"http2_support"`
-	AdvancedConfig string      `json:"advanced_config"`
-	Enabled        bool        `json:"enabled"`
+	ID             int                    `json:"id,omitempty"`
+	CreatedOn      string                 `json:"created_on,omitempty"`
+	ModifiedOn     string                 `json:"modified_on,omitempty"`
+	DomainNames    []string               `json:"domain_names"`
+	CertificateID  interface{}            `json:"certificate_id"`
+	SSLForced      bool                   `json:"ssl_forced"`
+	HSTSEnabled    bool                   `json:"hsts_enabled"`
+	HSTSSubdomains bool                   `json:"hsts_subdomains"`
+	HTTP2Support   bool                   `json:"http2_support"`
+	AdvancedConfig string                 `json:"advanced_config"`
+	Enabled        bool                   `json:"enabled"`
 	Meta           map[string]interface{} `json:"meta,omitempty"`
-	Certificate    *Certificate `json:"certificate,omitempty"`
+	Certificate    *Certificate           `json:"certificate,omitempty"`
 }
 
 // ListDeadHosts returns all dead hosts.
@@ -718,26 +718,26 @@ func (c *Client) DeleteDeadHost(ctx context.Context, id int) error {
 
 // Certificate represents an NPM certificate.
 type Certificate struct {
-	ID             int                    `json:"id,omitempty"`
-	CreatedOn      string                 `json:"created_on,omitempty"`
-	ModifiedOn     string                 `json:"modified_on,omitempty"`
-	Provider       string                 `json:"provider"` // letsencrypt, other
-	NiceName       string                 `json:"nice_name"`
-	DomainNames    []string               `json:"domain_names"`
-	ExpiresOn      string                 `json:"expires_on,omitempty"`
-	Meta           map[string]interface{} `json:"meta,omitempty"`
+	ID          int                    `json:"id,omitempty"`
+	CreatedOn   string                 `json:"created_on,omitempty"`
+	ModifiedOn  string                 `json:"modified_on,omitempty"`
+	Provider    string                 `json:"provider"` // letsencrypt, other
+	NiceName    string                 `json:"nice_name"`
+	DomainNames []string               `json:"domain_names"`
+	ExpiresOn   string                 `json:"expires_on,omitempty"`
+	Meta        map[string]interface{} `json:"meta,omitempty"`
 }
 
 // CertificateRequest represents a request to create a Let's Encrypt certificate.
 type CertificateRequest struct {
-	DomainNames          []string               `json:"domain_names"`
-	Meta                 map[string]interface{} `json:"meta,omitempty"`
-	LetsencryptEmail     string                 `json:"letsencrypt_email,omitempty"`
-	LetsencryptAgree     bool                   `json:"letsencrypt_agree,omitempty"`
-	DNSChallenge         bool                   `json:"dns_challenge,omitempty"`
-	DNSProvider          string                 `json:"dns_provider,omitempty"`
-	DNSProviderCredentials string               `json:"dns_provider_credentials,omitempty"`
-	PropagationSeconds   int                    `json:"propagation_seconds,omitempty"`
+	DomainNames            []string               `json:"domain_names"`
+	Meta                   map[string]interface{} `json:"meta,omitempty"`
+	LetsencryptEmail       string                 `json:"letsencrypt_email,omitempty"`
+	LetsencryptAgree       bool                   `json:"letsencrypt_agree,omitempty"`
+	DNSChallenge           bool                   `json:"dns_challenge,omitempty"`
+	DNSProvider            string                 `json:"dns_provider,omitempty"`
+	DNSProviderCredentials string                 `json:"dns_provider_credentials,omitempty"`
+	PropagationSeconds     int                    `json:"propagation_seconds,omitempty"`
 }
 
 // ListCertificates returns all certificates.
@@ -803,6 +803,36 @@ func (c *Client) RequestLetsEncryptCertificate(ctx context.Context, req *Certifi
 	return &cert, nil
 }
 
+// UploadCustomCertificate uploads a custom SSL certificate to NPM.
+func (c *Client) UploadCustomCertificate(ctx context.Context, niceName string, cert, key, intermediate []byte) (*Certificate, error) {
+	payload := map[string]interface{}{
+		"nice_name": niceName,
+		"provider":  "other",
+		"meta": map[string]interface{}{
+			"certificate":              string(cert),
+			"certificate_key":          string(key),
+			"intermediate_certificate": string(intermediate),
+		},
+	}
+
+	resp, err := c.doRequest(ctx, "POST", "/api/nginx/certificates", payload)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, c.handleError(resp)
+	}
+
+	var result Certificate
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, errors.CodeInternal, "failed to decode certificate response")
+	}
+
+	return &result, nil
+}
+
 // RenewCertificate renews a certificate.
 func (c *Client) RenewCertificate(ctx context.Context, id int) (*Certificate, error) {
 	resp, err := c.doRequest(ctx, "POST", fmt.Sprintf("/api/nginx/certificates/%d/renew", id), nil)
@@ -844,15 +874,15 @@ func (c *Client) DeleteCertificate(ctx context.Context, id int) error {
 
 // AccessList represents an NPM access list.
 type AccessList struct {
-	ID              int                    `json:"id,omitempty"`
-	CreatedOn       string                 `json:"created_on,omitempty"`
-	ModifiedOn      string                 `json:"modified_on,omitempty"`
-	Name            string                 `json:"name"`
-	SatisfyAny      bool                   `json:"satisfy_any"`
-	PassAuth        bool                   `json:"pass_auth"`
-	Items           []AccessListItem       `json:"items,omitempty"`
-	Clients         []AccessListClient     `json:"clients,omitempty"`
-	Meta            map[string]interface{} `json:"meta,omitempty"`
+	ID         int                    `json:"id,omitempty"`
+	CreatedOn  string                 `json:"created_on,omitempty"`
+	ModifiedOn string                 `json:"modified_on,omitempty"`
+	Name       string                 `json:"name"`
+	SatisfyAny bool                   `json:"satisfy_any"`
+	PassAuth   bool                   `json:"pass_auth"`
+	Items      []AccessListItem       `json:"items,omitempty"`
+	Clients    []AccessListClient     `json:"clients,omitempty"`
+	Meta       map[string]interface{} `json:"meta,omitempty"`
 }
 
 // AccessListItem represents an authorization item (username/password).
@@ -863,7 +893,7 @@ type AccessListItem struct {
 
 // AccessListClient represents a client IP rule.
 type AccessListClient struct {
-	Address string `json:"address"`
+	Address   string `json:"address"`
 	Directive string `json:"directive"` // allow or deny
 }
 
@@ -1012,10 +1042,10 @@ func (c *Client) GetHostsCount(ctx context.Context) (*HostsCount, error) {
 
 // Setting represents an NPM setting.
 type Setting struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Value       interface{} `json:"value"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Value       interface{}            `json:"value"`
 	Meta        map[string]interface{} `json:"meta"`
 }
 

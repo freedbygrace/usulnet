@@ -709,8 +709,12 @@ func (r *HostRepository) ListWithOptions(ctx context.Context, opts HostListOptio
 		return nil, 0, errors.Wrap(err, errors.CodeInternal, "failed to count hosts")
 	}
 
+	allowedSortFields := map[string]bool{
+		"name": true, "display_name": true, "status": true,
+		"endpoint_type": true, "created_at": true, "updated_at": true,
+	}
 	orderBy := "name"
-	if opts.OrderBy != "" {
+	if opts.OrderBy != "" && allowedSortFields[opts.OrderBy] {
 		orderBy = opts.OrderBy
 	}
 	orderDir := "ASC"

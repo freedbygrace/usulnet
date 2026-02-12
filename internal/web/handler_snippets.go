@@ -28,11 +28,6 @@ type SnippetRepository interface {
 	Count(ctx context.Context, userID uuid.UUID) (int, error)
 }
 
-// SetSnippetRepo sets the snippet repository.
-func (h *Handler) SetSnippetRepo(repo SnippetRepository) {
-	h.snippetRepo = repo
-}
-
 // ============================================================================
 // Snippet Handlers (Editor file storage)
 // ============================================================================

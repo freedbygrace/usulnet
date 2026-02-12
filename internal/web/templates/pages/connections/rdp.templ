@@ -334,15 +334,16 @@ templ RDPConnectionDetail(data RDPConnectionDetailData) {
 					</div>
 				</button>
 				<a
-					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", data.Connection.ID)) }
+					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)) }
 					class="card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors"
+					download
 				>
 					<div class="w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center">
 						<i class="fas fa-desktop text-primary-400"></i>
 					</div>
 					<div>
 						<p class="text-white font-medium">Connect</p>
-						<p class="text-xs text-gray-400">Open Remote Desktop</p>
+						<p class="text-xs text-gray-400">Download .rdp file</p>
 					</div>
 				</a>
 			</div>

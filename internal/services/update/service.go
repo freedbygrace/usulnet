@@ -41,6 +41,9 @@ type Service struct {
 	// Running updates tracking
 	runningUpdates map[uuid.UUID]*runningUpdate
 	runningMu      sync.RWMutex
+
+	// Semaphore to enforce MaxConcurrentUpdates
+	updateSem chan struct{}
 }
 
 // ServiceConfig holds configuration for the update service
@@ -197,6 +200,11 @@ func NewService(
 		config = DefaultServiceConfig()
 	}
 
+	maxConcurrent := config.MaxConcurrentUpdates
+	if maxConcurrent <= 0 {
+		maxConcurrent = 3
+	}
+
 	return &Service{
 		repo:              repo,
 		checker:          checker,
@@ -208,6 +216,7 @@ func NewService(
 		logger:           log.Named("update-service"),
 		config:           config,
 		runningUpdates:   make(map[uuid.UUID]*runningUpdate),
+		updateSem:        make(chan struct{}, maxConcurrent),
 	}
 }
 
@@ -392,7 +401,9 @@ func (s *Service) UpdateContainer(ctx context.Context, hostID uuid.UUID, opts *m
 	// If dry run, stop here
 	if opts.DryRun {
 		update.Status = models.UpdateStatusSkipped
-		s.repo.Update(ctx, update)
+		if err := s.repo.Update(ctx, update); err != nil {
+			s.logger.Warn("failed to persist dry-run update status", "error", err)
+		}
 		return &models.UpdateResult{
 			Update:      update,
 			Success:     true,
@@ -400,6 +411,14 @@ func (s *Service) UpdateContainer(ctx context.Context, hostID uuid.UUID, opts *m
 			ToVersion:   update.ToVersion,
 			DryRun:      true,
 		}, nil
+	}
+
+	// Acquire semaphore to enforce MaxConcurrentUpdates
+	select {
+	case s.updateSem <- struct{}{}:
+		defer func() { <-s.updateSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 
 	// Execute the update
@@ -489,7 +508,9 @@ func (s *Service) executeUpdate(ctx context.Context, update *models.Update, cont
 	if err := s.dockerClient.ContainerRename(ctx, update.TargetID, backupName); err != nil {
 		log.Error("Container rename failed", "error", err)
 		// Try to restart the old container
-		s.dockerClient.ContainerStart(ctx, update.TargetID)
+		if startErr := s.dockerClient.ContainerStart(ctx, update.TargetID); startErr != nil {
+			log.Error("rollback: failed to restart container after rename failure", "error", startErr)
+		}
 		return s.failUpdate(ctx, update, result, "container rename failed: "+err.Error())
 	}
 
@@ -501,8 +522,12 @@ func (s *Service) executeUpdate(ctx context.Context, update *models.Update, cont
 	if err != nil {
 		log.Error("Container create failed", "error", err)
 		// Rollback: rename old container back
-		s.dockerClient.ContainerRename(ctx, update.TargetID, oldName)
-		s.dockerClient.ContainerStart(ctx, update.TargetID)
+		if renameErr := s.dockerClient.ContainerRename(ctx, update.TargetID, oldName); renameErr != nil {
+			log.Error("rollback: failed to rename container back", "error", renameErr)
+		}
+		if startErr := s.dockerClient.ContainerStart(ctx, update.TargetID); startErr != nil {
+			log.Error("rollback: failed to restart original container", "error", startErr)
+		}
 		return s.failUpdate(ctx, update, result, "container create failed: "+err.Error())
 	}
 	result.NewContainerID = newContainerID
@@ -555,7 +580,9 @@ func (s *Service) executeUpdate(ctx context.Context, update *models.Update, cont
 	}
 
 	// 10. Cleanup old container
-	s.dockerClient.ContainerRemove(ctx, update.TargetID, true)
+	if err := s.dockerClient.ContainerRemove(ctx, update.TargetID, true); err != nil {
+		log.Warn("failed to remove old container during cleanup", "error", err)
+	}
 
 	// Complete
 	completedAt := time.Now()
@@ -564,7 +591,9 @@ func (s *Service) executeUpdate(ctx context.Context, update *models.Update, cont
 	durationMs := completedAt.Sub(startTime).Milliseconds()
 	update.DurationMs = &durationMs
 
-	s.repo.Update(ctx, update)
+	if err := s.repo.Update(ctx, update); err != nil {
+		log.Error("failed to persist final update status", "error", err)
+	}
 
 	result.Success = true
 	result.HealthPassed = true
@@ -585,11 +614,17 @@ func (s *Service) rollbackContainer(ctx context.Context, update *models.Update, 
 
 	// Stop and remove new container
 	timeout := 10
-	s.dockerClient.ContainerStop(ctx, newContainerID, &timeout)
-	s.dockerClient.ContainerRemove(ctx, newContainerID, true)
+	if err := s.dockerClient.ContainerStop(ctx, newContainerID, &timeout); err != nil {
+		log.Error("rollback: failed to stop new container", "error", err)
+	}
+	if err := s.dockerClient.ContainerRemove(ctx, newContainerID, true); err != nil {
+		log.Error("rollback: failed to remove new container", "error", err)
+	}
 
 	// Rename original back
-	s.dockerClient.ContainerRename(ctx, update.TargetID, originalName)
+	if err := s.dockerClient.ContainerRename(ctx, update.TargetID, originalName); err != nil {
+		log.Error("rollback: failed to rename original container back", "error", err)
+	}
 
 	// Start original
 	if err := s.dockerClient.ContainerStart(ctx, update.TargetID); err != nil {
@@ -599,6 +634,9 @@ func (s *Service) rollbackContainer(ctx context.Context, update *models.Update, 
 
 // waitForHealthy waits for a container to become healthy
 func (s *Service) waitForHealthy(ctx context.Context, containerID string, wait time.Duration, maxRetries int) bool {
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
 	ticker := time.NewTicker(wait / time.Duration(maxRetries))
 	defer ticker.Stop()
 

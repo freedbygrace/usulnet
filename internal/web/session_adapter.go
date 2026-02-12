@@ -13,17 +13,29 @@ import (
 	redisrepo "github.com/fr4nsys/usulnet/internal/repository/redis"
 )
 
+// CookieConfig holds session cookie settings wired from app config.
+type CookieConfig struct {
+	Secure   bool           // Force Secure flag (overrides TLS auto-detection)
+	SameSite http.SameSite  // SameSite attribute (default Lax)
+	Domain   string         // Cookie Domain (empty = browser default)
+}
+
 // WebSessionStore adapts redis.SessionStore to the web.SessionStore interface.
 type WebSessionStore struct {
 	redisStore *redisrepo.SessionStore
 	ttl        time.Duration
+	cookie     CookieConfig
 }
 
 // NewWebSessionStore creates a new web session store backed by Redis.
-func NewWebSessionStore(redisStore *redisrepo.SessionStore, ttl time.Duration) *WebSessionStore {
+func NewWebSessionStore(redisStore *redisrepo.SessionStore, ttl time.Duration, cookie CookieConfig) *WebSessionStore {
+	if cookie.SameSite == 0 {
+		cookie.SameSite = http.SameSiteLaxMode
+	}
 	return &WebSessionStore{
 		redisStore: redisStore,
 		ttl:        ttl,
+		cookie:     cookie,
 	}
 }
 
@@ -107,14 +119,15 @@ func (s *WebSessionStore) Save(r *http.Request, w http.ResponseWriter, session *
 		}
 	}
 
-	// Set cookie
+	// Set cookie (Secure flag from config, falls back to TLS auto-detection)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "usulnet_session",
 		Value:    session.ID,
 		Path:     "/",
+		Domain:   s.cookie.Domain,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   s.cookie.Secure || r.TLS != nil,
+		SameSite: s.cookie.SameSite,
 		MaxAge:   int(s.ttl.Seconds()),
 	})
 

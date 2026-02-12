@@ -115,6 +115,10 @@ type ClientAPI interface {
 	MultiContainerStats(ctx context.Context, containerIDs []string) (map[string]*ContainerStats, error)
 	AllContainerStats(ctx context.Context) (map[string]*ContainerStats, error)
 
+	// Event operations
+	GetEvents(ctx context.Context, since time.Time) ([]DockerEvent, error)
+	StreamEvents(ctx context.Context) (<-chan DockerEvent, <-chan error)
+
 	// Swarm operations
 	SwarmInit(ctx context.Context, listenAddr, advertiseAddr string, forceNewCluster bool) (string, error)
 	SwarmJoin(ctx context.Context, remoteAddr, joinToken, listenAddr string) error

@@ -7,11 +7,10 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/errors"
@@ -19,11 +18,11 @@ import (
 
 // SnippetRepository implements snippet storage for PostgreSQL.
 type SnippetRepository struct {
-	db *sql.DB
+	db *DB
 }
 
 // NewSnippetRepository creates a new snippet repository.
-func NewSnippetRepository(db *sql.DB) *SnippetRepository {
+func NewSnippetRepository(db *DB) *SnippetRepository {
 	return &SnippetRepository{db: db}
 }
 
@@ -44,7 +43,7 @@ func (r *SnippetRepository) Create(ctx context.Context, userID uuid.UUID, input 
 		RETURNING id, user_id, name, path, language, content, description, tags, is_public, created_at, updated_at`
 
 	snippet := &models.UserSnippet{}
-	err := r.db.QueryRowContext(ctx, query,
+	err := r.db.QueryRow(ctx, query,
 		id,
 		userID,
 		input.Name,
@@ -52,7 +51,7 @@ func (r *SnippetRepository) Create(ctx context.Context, userID uuid.UUID, input 
 		input.Language,
 		input.Content,
 		snippetNilIfEmpty(input.Description),
-		pq.Array(input.Tags),
+		input.Tags,
 	).Scan(
 		&snippet.ID,
 		&snippet.UserID,
@@ -68,7 +67,7 @@ func (r *SnippetRepository) Create(ctx context.Context, userID uuid.UUID, input 
 	)
 
 	if err != nil {
-		if snippetIsUniqueViolation(err) {
+		if IsDuplicateKeyError(err) {
 			return nil, errors.AlreadyExists("snippet")
 		}
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to create snippet")
@@ -85,7 +84,7 @@ func (r *SnippetRepository) Get(ctx context.Context, userID, snippetID uuid.UUID
 		WHERE id = $1 AND user_id = $2`
 
 	snippet := &models.UserSnippet{}
-	err := r.db.QueryRowContext(ctx, query, snippetID, userID).Scan(
+	err := r.db.QueryRow(ctx, query, snippetID, userID).Scan(
 		&snippet.ID,
 		&snippet.UserID,
 		&snippet.Name,
@@ -99,7 +98,7 @@ func (r *SnippetRepository) Get(ctx context.Context, userID, snippetID uuid.UUID
 		&snippet.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		return nil, errors.NotFound("snippet")
 	}
 	if err != nil {
@@ -124,7 +123,7 @@ func (r *SnippetRepository) Update(ctx context.Context, userID, snippetID uuid.U
 		RETURNING id, user_id, name, path, language, content, description, tags, is_public, created_at, updated_at`
 
 	snippet := &models.UserSnippet{}
-	err := r.db.QueryRowContext(ctx, query,
+	err := r.db.QueryRow(ctx, query,
 		snippetID,
 		userID,
 		input.Name,
@@ -132,7 +131,7 @@ func (r *SnippetRepository) Update(ctx context.Context, userID, snippetID uuid.U
 		input.Language,
 		input.Content,
 		input.Description,
-		pq.Array(input.Tags),
+		input.Tags,
 	).Scan(
 		&snippet.ID,
 		&snippet.UserID,
@@ -147,11 +146,11 @@ func (r *SnippetRepository) Update(ctx context.Context, userID, snippetID uuid.U
 		&snippet.UpdatedAt,
 	)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		return nil, errors.NotFound("snippet")
 	}
 	if err != nil {
-		if snippetIsUniqueViolation(err) {
+		if IsDuplicateKeyError(err) {
 			return nil, errors.AlreadyExists("snippet")
 		}
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to update snippet")
@@ -164,13 +163,12 @@ func (r *SnippetRepository) Update(ctx context.Context, userID, snippetID uuid.U
 func (r *SnippetRepository) Delete(ctx context.Context, userID, snippetID uuid.UUID) error {
 	query := `DELETE FROM user_snippets WHERE id = $1 AND user_id = $2`
 
-	result, err := r.db.ExecContext(ctx, query, snippetID, userID)
+	result, err := r.db.Exec(ctx, query, snippetID, userID)
 	if err != nil {
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to delete snippet")
 	}
 
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	if result.RowsAffected() == 0 {
 		return errors.NotFound("snippet")
 	}
 
@@ -225,7 +223,7 @@ func (r *SnippetRepository) List(ctx context.Context, userID uuid.UUID, opts *mo
 	query += ` ORDER BY updated_at DESC LIMIT $` + strconv.Itoa(argIdx) + ` OFFSET $` + strconv.Itoa(argIdx+1)
 	args = append(args, opts.Limit, opts.Offset)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to list snippets")
 	}
@@ -259,7 +257,7 @@ func (r *SnippetRepository) ListPaths(ctx context.Context, userID uuid.UUID) ([]
 		WHERE user_id = $1 AND path != ''
 		ORDER BY path`
 
-	rows, err := r.db.QueryContext(ctx, query, userID)
+	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to list paths")
 	}
@@ -280,7 +278,7 @@ func (r *SnippetRepository) ListPaths(ctx context.Context, userID uuid.UUID) ([]
 // Count returns total snippet count for a user.
 func (r *SnippetRepository) Count(ctx context.Context, userID uuid.UUID) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx, 
+	err := r.db.QueryRow(ctx,
 		`SELECT COUNT(*) FROM user_snippets WHERE user_id = $1`,
 		userID,
 	).Scan(&count)
@@ -299,11 +297,4 @@ func snippetNilIfEmpty(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func snippetIsUniqueViolation(err error) bool {
-	if pqErr, ok := err.(*pq.Error); ok {
-		return pqErr.Code == "23505"
-	}
-	return false
 }

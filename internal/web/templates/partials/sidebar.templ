@@ -37,6 +37,7 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 				<p class="px-3 mb-2 text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Overview</p>
 				<div class="space-y-1">
 					@navItem("Dashboard", "fa-th-large", "/", active == "dashboard", 0)
+					@navItem("Infrastructure", "fa-globe", "/overview", active == "overview", 0)
 					@navItem("Nodes", "fa-server", "/nodes", active == "nodes", 0)
 					@navItem("Swarm", "fa-network-wired", "/swarm", active == "swarm", 0)
 				</div>
@@ -51,6 +52,8 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 					@navItem("Volumes", "fa-hdd", "/volumes", active == "volumes", 0)
 					@navItem("Networks", "fa-network-wired", "/networks", active == "networks", 0)
 					@navItem("Stacks", "fa-cubes", "/stacks", active == "stacks", 0)
+					@navItem("Templates", "fa-clone", "/container-templates", active == "container-templates", 0)
+					@navItem("Ports", "fa-plug", "/ports", active == "ports", 0)
 				</div>
 			</div>
 
@@ -59,9 +62,15 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 				<p class="px-3 mb-2 text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Operations</p>
 				<div class="space-y-1">
 					@navItemDanger("Security", "fa-shield-alt", "/security", active == "security", getBadge(stats, "security"))
+					@navItem("Vulnerabilities", "fa-bug", "/vulnerabilities", active == "vulnerabilities", 0)
+					@navItem("Compliance", "fa-check-double", "/compliance", active == "compliance", 0)
 					@navItemPrimary("Updates", "fa-sync-alt", "/updates", active == "updates", getBadge(stats, "updates"))
 					@navItem("Backups", "fa-archive", "/backups", active == "backups", 0)
 					@navItem("Config", "fa-cogs", "/config", active == "config", 0)
+					@navItem("Secrets", "fa-lock", "/secrets", active == "secrets", 0)
+					@navItem("Lifecycle", "fa-recycle", "/lifecycle", active == "lifecycle", 0)
+					@navItem("Maintenance", "fa-wrench", "/maintenance", active == "maintenance", 0)
+					@navItem("Bulk Operations", "fa-th-list", "/bulk-ops", active == "bulk-ops", 0)
 				</div>
 			</div>
 
@@ -96,7 +105,8 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 				<div class="space-y-1">
 					@navItem("Reverse Proxy", "fa-random", "/proxy", active == "proxy", 0)
 					@navItem("Repositories", "fa-code-branch", "/integrations/gitea", active == "gitea", 0)
-					@navItem("S3 Storage", "fa-database", "/storage", active == "storage", 0)
+					@navItem("GitOps", "fa-code-branch", "/gitops", active == "gitops", 0)
+					@navItem("Storage", "fa-database", "/storage", active == "storage", 0)
 					@navItem("Notifications", "fa-bell", "/notifications", active == "notifications", 0)
 				</div>
 			</div>
@@ -105,11 +115,14 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 			<div>
 				<p class="px-3 mb-2 text-[10px] font-semibold text-gray-500 uppercase tracking-widest">Monitoring</p>
 				<div class="space-y-1">
+					@navItem("Metrics", "fa-chart-line", "/monitoring", active == "monitoring", 0)
 					@navItem("Alerts", "fa-bell", "/alerts", active == "alerts", 0)
+					@navItem("Health", "fa-heartbeat", "/health-dashboard", active == "health", 0)
 					@navItem("Logs", "fa-file-alt", "/logs", active == "logs", 0)
 					@navItem("Log Analysis", "fa-search-plus", "/logs/management", active == "log-management", 0)
 					@navItem("Events", "fa-stream", "/events", active == "events", 0)
 					@navItem("Topology", "fa-project-diagram", "/topology", active == "topology", 0)
+					@navItem("Dependencies", "fa-sitemap", "/dependencies", active == "dependencies", 0)
 				</div>
 			</div>
 			
@@ -121,6 +134,11 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 						@navItem("Teams", "fa-users-cog", "/teams", active == "teams", 0)
 						@navItem("Users", "fa-users", "/users", active == "users", 0)
 						@navItem("Roles", "fa-user-shield", "/admin/roles", active == "roles", 0)
+						@navItem("OAuth", "fa-sign-in-alt", "/admin/oauth", active == "oauth-providers", 0)
+						@navItem("LDAP", "fa-address-book", "/admin/ldap", active == "ldap-providers", 0)
+						@navItem("Channels", "fa-paper-plane", "/admin/notifications/channels", active == "notification-channels", 0)
+						@navItem("Quotas", "fa-tachometer-alt", "/quotas", active == "quotas", 0)
+						@navItem("Access Audit", "fa-clipboard-check", "/access-audit", active == "access-audit", 0)
 						@navItem("Settings", "fa-sliders-h", "/settings", active == "settings", 0)
 						@navItem("Webhooks", "fa-plug", "/webhooks", active == "webhooks", 0)
 						@navItem("Runbooks", "fa-book-open", "/runbooks", active == "runbooks", 0)
@@ -134,7 +152,7 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 		
 		<!-- Edition Info -->
 		<div class="px-4 py-2 border-t border-dark-600">
-			<a href="/license" class="flex items-center gap-2 text-[10px] text-gray-600 hover:text-gray-400 transition-colors">
+			<a href="/license" class="flex items-center gap-2 text-[10px] text-gray-400 hover:text-gray-400 transition-colors">
 				if edition == "biz" {
 					<span class="font-medium uppercase tracking-wide text-blue-500/60">Business</span>
 				} else if edition == "ee" {

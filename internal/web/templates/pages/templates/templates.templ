@@ -1,0 +1,387 @@
+package templates
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+// ContainerTemplatesData holds all data for the container templates page.
+type ContainerTemplatesData struct {
+	PageData   layouts.PageData
+	Templates  []ContainerTemplateView
+	Categories []string
+	Stats      TemplateStats
+}
+
+// ContainerTemplateView represents a reusable container template.
+type ContainerTemplateView struct {
+	ID          string
+	Name        string
+	Description string
+	Category    string
+	Image       string
+	Tag         string
+	Ports       []string
+	Volumes     []string
+	EnvVars     []EnvVarView
+	Network     string
+	RestartPolicy string
+	Command     string
+	IsPublic    bool
+	UsageCount  int
+	CreatedAt   string
+	CreatedBy   string
+}
+
+// EnvVarView represents an environment variable in a template.
+type EnvVarView struct {
+	Key         string
+	Value       string
+	Description string
+	Required    bool
+}
+
+// TemplateStats for the dashboard.
+type TemplateStats struct {
+	TotalTemplates int
+	PublicTemplates int
+	Categories     int
+	TotalDeploys   int
+}
+
+templ ContainerTemplates(data ContainerTemplatesData) {
+	@layouts.Base(data.PageData) {
+		<div class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">Container Templates</h1>
+					<p class="text-gray-400 mt-1">Reusable container configurations for quick deployment</p>
+				</div>
+				<button onclick="document.getElementById('createTemplateModal').classList.remove('hidden')" class="btn-primary flex items-center gap-2">
+					<i class="fas fa-plus"></i>
+					New Template
+				</button>
+			</div>
+
+			<!-- Stats -->
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+				@templateStat("Templates", fmt.Sprintf("%d", data.Stats.TotalTemplates), "fas fa-box-open", "primary")
+				@templateStat("Public", fmt.Sprintf("%d", data.Stats.PublicTemplates), "fas fa-globe", "blue")
+				@templateStat("Categories", fmt.Sprintf("%d", data.Stats.Categories), "fas fa-folder", "yellow")
+				@templateStat("Total Deploys", fmt.Sprintf("%d", data.Stats.TotalDeploys), "fas fa-rocket", "green")
+			</div>
+
+			<!-- Category Filter -->
+			if len(data.Categories) > 0 {
+				<div x-data="{ filter: 'all' }" class="space-y-4">
+					<div class="flex gap-2 flex-wrap">
+						<button @click="filter = 'all'" :class="filter === 'all' ? 'bg-primary-600 text-white' : 'bg-dark-700 text-gray-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">
+							All
+						</button>
+						for _, cat := range data.Categories {
+							<button @click={ fmt.Sprintf("filter = '%s'", cat) } :class={ fmt.Sprintf("filter === '%s' ? 'bg-primary-600 text-white' : 'bg-dark-700 text-gray-400 hover:text-white'", cat) } class="px-3 py-1.5 rounded-lg text-sm transition-colors">
+								{ cat }
+							</button>
+						}
+					</div>
+
+					<!-- Templates Grid -->
+					if len(data.Templates) == 0 {
+						<div class="card p-12 text-center">
+							<i class="fas fa-box-open text-4xl text-gray-400 mb-4"></i>
+							<h3 class="text-lg font-medium text-white mb-2">No Container Templates</h3>
+							<p class="text-gray-400 mb-4">Create reusable container configurations for quick deployment</p>
+						</div>
+					} else {
+						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+							for _, tmpl := range data.Templates {
+								<div x-show={ fmt.Sprintf("filter === 'all' || filter === '%s'", tmpl.Category) } x-cloak>
+									@templateCard(tmpl, data.PageData.CSRFToken)
+								</div>
+							}
+						</div>
+					}
+				</div>
+			} else {
+				if len(data.Templates) == 0 {
+					<div class="card p-12 text-center">
+						<i class="fas fa-box-open text-4xl text-gray-400 mb-4"></i>
+						<h3 class="text-lg font-medium text-white mb-2">No Container Templates</h3>
+						<p class="text-gray-400 mb-4">Create reusable container configurations for quick deployment</p>
+					</div>
+				} else {
+					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+						for _, tmpl := range data.Templates {
+							@templateCard(tmpl, data.PageData.CSRFToken)
+						}
+					</div>
+				}
+			}
+
+			<!-- Create Template Modal -->
+			@createTemplateModal(data.PageData.CSRFToken)
+		</div>
+	}
+}
+
+templ templateStat(label, value, icon, color string) {
+	<div class="card p-4 text-center">
+		<i class={ icon, tmplStatColor(color), "text-xl mb-2" }></i>
+		<p class="text-2xl font-bold text-white">{ value }</p>
+		<p class="text-xs text-gray-400">{ label }</p>
+	</div>
+}
+
+templ templateCard(tmpl ContainerTemplateView, csrfToken string) {
+	<div class="card p-4 flex flex-col">
+		<div class="flex items-start justify-between mb-3">
+			<div class="flex items-center gap-3">
+				<div class={ "w-10 h-10 rounded-lg flex items-center justify-center", categoryBg(tmpl.Category) }>
+					<i class={ categoryIcon(tmpl.Category), categoryColor(tmpl.Category) }></i>
+				</div>
+				<div>
+					<h3 class="font-medium text-white">{ tmpl.Name }</h3>
+					<span class="text-xs text-gray-500">{ tmpl.Category }</span>
+				</div>
+			</div>
+			<div class="flex items-center gap-1">
+				if tmpl.IsPublic {
+					<span class="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded">Public</span>
+				}
+			</div>
+		</div>
+		if tmpl.Description != "" {
+			<p class="text-sm text-gray-400 mb-3 line-clamp-2">{ tmpl.Description }</p>
+		}
+		<div class="space-y-2 mb-3 flex-1">
+			<div class="flex items-center gap-2 text-xs text-gray-500">
+				<i class="fas fa-docker"></i>
+				<span class="text-gray-300">{ tmpl.Image }:{ tmpl.Tag }</span>
+			</div>
+			if len(tmpl.Ports) > 0 {
+				<div class="flex items-center gap-2 text-xs text-gray-500">
+					<i class="fas fa-network-wired"></i>
+					<span class="text-gray-300">
+						for i, port := range tmpl.Ports {
+							if i > 0 {
+								{ ", " }
+							}
+							{ port }
+						}
+					</span>
+				</div>
+			}
+			if len(tmpl.Volumes) > 0 {
+				<div class="flex items-center gap-2 text-xs text-gray-500">
+					<i class="fas fa-hdd"></i>
+					<span class="text-gray-300">{ fmt.Sprintf("%d volume(s)", len(tmpl.Volumes)) }</span>
+				</div>
+			}
+			if len(tmpl.EnvVars) > 0 {
+				<div class="flex items-center gap-2 text-xs text-gray-500">
+					<i class="fas fa-cog"></i>
+					<span class="text-gray-300">{ fmt.Sprintf("%d env var(s)", len(tmpl.EnvVars)) }</span>
+				</div>
+			}
+		</div>
+		<div class="flex items-center justify-between pt-3 border-t border-dark-600">
+			<div class="flex items-center gap-2 text-xs text-gray-500">
+				<span><i class="fas fa-rocket mr-1"></i>{ fmt.Sprintf("%d deploys", tmpl.UsageCount) }</span>
+				<span><i class="fas fa-clock mr-1"></i>{ tmpl.CreatedAt }</span>
+			</div>
+			<div class="flex items-center gap-1">
+				<form method="POST" action={ templ.SafeURL("/container-templates/" + tmpl.ID + "/deploy") }>
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
+					<button type="submit" class="p-1.5 text-gray-400 hover:text-green-400 transition-colors" title="Deploy">
+						<i class="fas fa-play text-sm"></i>
+					</button>
+				</form>
+				<form method="POST" action={ templ.SafeURL("/container-templates/" + tmpl.ID + "/delete") } onsubmit="return confirm('Delete this template?')">
+					<input type="hidden" name="csrf_token" value={ csrfToken }/>
+					<button type="submit" class="p-1.5 text-gray-400 hover:text-red-400 transition-colors" title="Delete">
+						<i class="fas fa-trash text-sm"></i>
+					</button>
+				</form>
+			</div>
+		</div>
+	</div>
+}
+
+templ createTemplateModal(csrfToken string) {
+	<div id="createTemplateModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+		<div class="bg-dark-800 rounded-xl shadow-xl border border-dark-600 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+			<div class="flex items-center justify-between p-6 border-b border-dark-600 sticky top-0 bg-dark-800 z-10">
+				<h2 class="text-lg font-display font-bold text-white">Create Container Template</h2>
+				<button onclick="document.getElementById('createTemplateModal').classList.add('hidden')" class="text-gray-400 hover:text-white">
+					<i class="fas fa-times"></i>
+				</button>
+			</div>
+			<form method="POST" action="/container-templates" class="p-6 space-y-4">
+				<input type="hidden" name="csrf_token" value={ csrfToken }/>
+
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Template Name</label>
+						<input type="text" name="name" required class="input w-full" placeholder="e.g., Nginx Reverse Proxy"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Category</label>
+						<select name="category" class="input w-full">
+							<option value="web">Web Server</option>
+							<option value="database">Database</option>
+							<option value="cache">Cache</option>
+							<option value="monitoring">Monitoring</option>
+							<option value="devtools">Dev Tools</option>
+							<option value="storage">Storage</option>
+							<option value="messaging">Messaging</option>
+							<option value="other">Other</option>
+						</select>
+					</div>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Description</label>
+					<textarea name="description" rows="2" class="input w-full" placeholder="Brief description of this template"></textarea>
+				</div>
+
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Docker Image</label>
+						<input type="text" name="image" required class="input w-full" placeholder="e.g., nginx"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Tag</label>
+						<input type="text" name="tag" class="input w-full" placeholder="latest" value="latest"/>
+					</div>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Ports <span class="text-xs text-gray-500">(one per line, e.g., 8080:80)</span></label>
+					<textarea name="ports" rows="2" class="input w-full font-mono text-sm" placeholder="8080:80&#10;8443:443"></textarea>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Volumes <span class="text-xs text-gray-500">(one per line, e.g., /data:/var/lib/data)</span></label>
+					<textarea name="volumes" rows="2" class="input w-full font-mono text-sm" placeholder="/host/path:/container/path"></textarea>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Environment Variables <span class="text-xs text-gray-500">(KEY=VALUE, one per line)</span></label>
+					<textarea name="env_vars" rows="3" class="input w-full font-mono text-sm" placeholder="MYSQL_ROOT_PASSWORD=secret&#10;MYSQL_DATABASE=mydb"></textarea>
+				</div>
+
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Network</label>
+						<input type="text" name="network" class="input w-full" placeholder="default (optional)"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-300 mb-1">Restart Policy</label>
+						<select name="restart_policy" class="input w-full">
+							<option value="unless-stopped">Unless Stopped</option>
+							<option value="always">Always</option>
+							<option value="on-failure">On Failure</option>
+							<option value="no">No</option>
+						</select>
+					</div>
+				</div>
+
+				<div>
+					<label class="block text-sm font-medium text-gray-300 mb-1">Command (optional)</label>
+					<input type="text" name="command" class="input w-full font-mono text-sm" placeholder="Custom command override"/>
+				</div>
+
+				<label class="flex items-center gap-2">
+					<input type="checkbox" name="is_public" value="on" checked class="form-checkbox rounded bg-dark-700 border-dark-500"/>
+					<span class="text-sm text-gray-300">Make template available to all users</span>
+				</label>
+
+				<div class="flex justify-end gap-3 pt-4 border-t border-dark-600">
+					<button type="button" onclick="document.getElementById('createTemplateModal').classList.add('hidden')" class="btn-secondary">Cancel</button>
+					<button type="submit" class="btn-primary">
+						<i class="fas fa-plus mr-2"></i>Create Template
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+}
+
+func tmplStatColor(color string) string {
+	switch color {
+	case "primary":
+		return "text-primary-400"
+	case "green":
+		return "text-green-400"
+	case "blue":
+		return "text-blue-400"
+	case "yellow":
+		return "text-yellow-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func categoryIcon(category string) string {
+	switch category {
+	case "web":
+		return "fas fa-globe"
+	case "database":
+		return "fas fa-database"
+	case "cache":
+		return "fas fa-bolt"
+	case "monitoring":
+		return "fas fa-chart-line"
+	case "devtools":
+		return "fas fa-code"
+	case "storage":
+		return "fas fa-hdd"
+	case "messaging":
+		return "fas fa-envelope"
+	default:
+		return "fas fa-box"
+	}
+}
+
+func categoryBg(category string) string {
+	switch category {
+	case "web":
+		return "bg-blue-500/20"
+	case "database":
+		return "bg-purple-500/20"
+	case "cache":
+		return "bg-yellow-500/20"
+	case "monitoring":
+		return "bg-green-500/20"
+	case "devtools":
+		return "bg-cyan-500/20"
+	case "storage":
+		return "bg-orange-500/20"
+	case "messaging":
+		return "bg-pink-500/20"
+	default:
+		return "bg-gray-500/20"
+	}
+}
+
+func categoryColor(category string) string {
+	switch category {
+	case "web":
+		return "text-blue-400"
+	case "database":
+		return "text-purple-400"
+	case "cache":
+		return "text-yellow-400"
+	case "monitoring":
+		return "text-green-400"
+	case "devtools":
+		return "text-cyan-400"
+	case "storage":
+		return "text-orange-400"
+	case "messaging":
+		return "text-pink-400"
+	default:
+		return "text-gray-400"
+	}
+}

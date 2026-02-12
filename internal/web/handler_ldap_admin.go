@@ -34,14 +34,9 @@ type LDAPConfigRepository interface {
 	CountEnabled(ctx context.Context) (int64, error)
 }
 
-// SetLDAPConfigRepo sets the LDAP config repository.
-func (h *Handler) SetLDAPConfigRepo(repo LDAPConfigRepository) {
-	h.ldapConfigRepo = repo
-}
-
 // LDAPProvidersTempl renders the LDAP providers list page.
 func (h *Handler) LDAPProvidersTempl(w http.ResponseWriter, r *http.Request) {
-	pageData := h.preparePageData(r, "LDAP Providers", "settings")
+	pageData := h.preparePageData(r, "LDAP Providers", "ldap-providers")
 
 	providers, err := h.ldapConfigRepo.List(r.Context())
 	if err != nil {
@@ -86,7 +81,7 @@ func (h *Handler) LDAPProvidersTempl(w http.ResponseWriter, r *http.Request) {
 
 // LDAPProviderEditTempl renders the LDAP provider edit page.
 func (h *Handler) LDAPProviderEditTempl(w http.ResponseWriter, r *http.Request) {
-	pageData := h.preparePageData(r, "Edit LDAP Provider", "settings")
+	pageData := h.preparePageData(r, "Edit LDAP Provider", "ldap-providers")
 
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)

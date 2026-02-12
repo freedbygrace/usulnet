@@ -55,6 +55,11 @@ type Config struct {
 	MaxPingsOut int
 	// ReconnectBufSize is the size of the reconnect buffer in bytes
 	ReconnectBufSize int
+
+	// JetStreamEnabled controls whether JetStream is available (default true)
+	JetStreamEnabled bool
+	// JetStreamDomain is the JetStream domain for multi-tenant setups (empty = default)
+	JetStreamDomain string
 }
 
 // DefaultConfig returns a default NATS configuration.
@@ -68,6 +73,7 @@ func DefaultConfig() Config {
 		PingInterval:     2 * time.Minute,
 		MaxPingsOut:      3,
 		ReconnectBufSize: 8 * 1024 * 1024, // 8MB
+		JetStreamEnabled: true,
 	}
 }
 

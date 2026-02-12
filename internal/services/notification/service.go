@@ -25,6 +25,7 @@ type Service struct {
 	throttler     *Throttler
 	templates     *TemplateEngine
 	repository    Repository
+	limitMu       sync.RWMutex
 	limitProvider license.LimitProvider
 
 	mu       sync.RWMutex
@@ -34,8 +35,11 @@ type Service struct {
 }
 
 // SetLimitProvider sets the license limit provider for resource cap enforcement.
+// Thread-safe: may be called while goroutines read limitProvider.
 func (s *Service) SetLimitProvider(lp license.LimitProvider) {
+	s.limitMu.Lock()
 	s.limitProvider = lp
+	s.limitMu.Unlock()
 }
 
 // Repository interface for notification persistence.

@@ -69,7 +69,7 @@ templ LDAPConnectionsList(data LDAPConnectionsListData) {
 			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 				if len(data.Connections) == 0 {
 					<div class="col-span-full card p-8 text-center">
-						<i class="fas fa-sitemap text-4xl text-gray-600 mb-4"></i>
+						<i class="fas fa-sitemap text-4xl text-gray-400 mb-4"></i>
 						<p class="text-gray-400">No LDAP connections configured</p>
 						<button onclick="showNewLDAPModal()" class="btn-primary mt-4">
 							<i class="fas fa-plus mr-2"></i>Add Connection
@@ -348,7 +348,7 @@ templ LDAPBrowser(data LDAPBrowserData) {
 										<div class="w-48 flex-shrink-0">
 											<span class="text-gray-400 text-sm font-medium">{ attr.Name }</span>
 											if attr.Binary {
-												<span class="ml-1 text-xs text-gray-600">(binary)</span>
+												<span class="ml-1 text-xs text-gray-400">(binary)</span>
 											}
 										</div>
 										<div class="flex-1 min-w-0">
@@ -391,7 +391,7 @@ templ LDAPBrowser(data LDAPBrowserData) {
 				} else {
 					<div class="flex-1 flex items-center justify-center">
 						<div class="text-center">
-							<i class="fas fa-sitemap text-4xl text-gray-600 mb-4"></i>
+							<i class="fas fa-sitemap text-4xl text-gray-400 mb-4"></i>
 							<p class="text-gray-400">Select an entry from the tree to view details</p>
 						</div>
 					</div>

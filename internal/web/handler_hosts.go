@@ -264,7 +264,9 @@ func (h *Handler) SwitchHost(w http.ResponseWriter, r *http.Request) {
 		session.Values = make(map[string]interface{})
 	}
 	session.Values["active_host_id"] = hostID
-	_ = h.sessionStore.Save(r, w, session)
+	if err := h.sessionStore.Save(r, w, session); err != nil {
+		h.logger.Warn("failed to save session after host switch", "error", err)
+	}
 
 	// Redirect back to the referring page, or dashboard
 	referer := r.Header.Get("Referer")

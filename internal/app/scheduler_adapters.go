@@ -496,6 +496,14 @@ func (a *schedulerRetentionAdapter) CleanupOldNotificationLogs(ctx context.Conte
 	return a.callRetentionFunc(ctx, "cleanup_old_notification_logs", retentionDays)
 }
 
+func (a *schedulerRetentionAdapter) CleanupOldRuntimeSecurityEvents(ctx context.Context, retentionDays int) (int64, error) {
+	return a.callRetentionFunc(ctx, "cleanup_old_runtime_security_events", retentionDays)
+}
+
+func (a *schedulerRetentionAdapter) CleanupOldAlertEvents(ctx context.Context, retentionDays int) (int64, error) {
+	return a.callRetentionFunc(ctx, "cleanup_old_alert_events", retentionDays)
+}
+
 func (a *schedulerRetentionAdapter) CleanupExpiredSessions(ctx context.Context) (int64, error) {
 	return a.callRetentionFuncNoArgs(ctx, "cleanup_expired_sessions")
 }

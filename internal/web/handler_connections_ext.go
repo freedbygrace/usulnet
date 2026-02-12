@@ -8,14 +8,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/fr4nsys/usulnet/internal/models"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+	"github.com/fr4nsys/usulnet/internal/web/templates/pages/connections"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/fr4nsys/usulnet/internal/models"
-	"github.com/fr4nsys/usulnet/internal/web/templates/pages/connections"
 )
 
 // ============================================================================
@@ -36,11 +39,6 @@ type DatabaseService interface {
 	ExecuteQuery(ctx context.Context, id uuid.UUID, query string, writeMode bool) (*models.DatabaseQueryResult, error)
 }
 
-// SetDatabaseService sets the database service.
-func (h *Handler) SetDatabaseService(svc DatabaseService) {
-	h.databaseService = svc
-}
-
 // ============================================================================
 // LDAP Browser Service Interface
 // ============================================================================
@@ -58,9 +56,18 @@ type LDAPBrowserService interface {
 	Search(ctx context.Context, id uuid.UUID, baseDN, filter string, scope int, attributes []string) (*models.LDAPSearchResult, error)
 }
 
-// SetLDAPBrowserService sets the LDAP browser service.
-func (h *Handler) SetLDAPBrowserService(svc LDAPBrowserService) {
-	h.ldapBrowserService = svc
+// ============================================================================
+// RDP Service Interface
+// ============================================================================
+
+// RDPService interface for managing RDP connections.
+type RDPService interface {
+	CreateConnection(ctx context.Context, input models.CreateRDPConnectionInput, userID uuid.UUID) (*models.RDPConnection, error)
+	GetConnection(ctx context.Context, id uuid.UUID) (*models.RDPConnection, error)
+	ListConnections(ctx context.Context, userID uuid.UUID) ([]*models.RDPConnection, error)
+	UpdateConnection(ctx context.Context, id uuid.UUID, input models.UpdateRDPConnectionInput) error
+	DeleteConnection(ctx context.Context, id uuid.UUID) error
+	TestConnection(ctx context.Context, id uuid.UUID) (bool, string, time.Duration, error)
 }
 
 // ============================================================================
@@ -72,7 +79,7 @@ func (h *Handler) SSHTunnelsTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	connIDStr := chi.URLParam(r, "id")
 
-	pageData := h.prepareTemplPageData(r, "SSH Tunnels", "connections")
+	pageData := h.prepareTemplPageData(r, "SSH Tunnels", "connections-ssh")
 
 	connID, err := uuid.Parse(connIDStr)
 	if err != nil {
@@ -107,6 +114,8 @@ func (h *Handler) SSHTunnelsTempl(w http.ResponseWriter, r *http.Request) {
 				Type:       string(t.Type),
 			})
 		}
+	} else if err != nil {
+		pageData.Flash = &layouts.FlashData{Type: "warning", Message: "Failed to load tunnels: " + err.Error()}
 	}
 
 	data := connections.SSHTunnelsPageData{
@@ -334,12 +343,20 @@ func (h *Handler) DatabaseConnectionCreate(w http.ResponseWriter, r *http.Reques
 		SSL:      r.FormValue("ssl") == "on" || r.FormValue("ssl") == "true",
 	}
 
-	_, err = h.databaseService.CreateConnection(ctx, input, userID)
-	if err != nil {
-		http.Error(w, "Failed to create connection: "+err.Error(), http.StatusInternalServerError)
+	if input.Name == "" || input.Host == "" {
+		h.setFlash(w, r, "error", "Name and host are required")
+		http.Redirect(w, r, "/connections/database/new", http.StatusSeeOther)
 		return
 	}
 
+	_, err = h.databaseService.CreateConnection(ctx, input, userID)
+	if err != nil {
+		h.setFlash(w, r, "error", "Failed to create connection: "+err.Error())
+		http.Redirect(w, r, "/connections/database/new", http.StatusSeeOther)
+		return
+	}
+
+	h.setFlash(w, r, "success", "Database connection created")
 	http.Redirect(w, r, "/connections/database", http.StatusSeeOther)
 }
 
@@ -490,13 +507,35 @@ func (h *Handler) DatabaseConnectionDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	h.jsonSuccess(w, map[string]interface{}{
+		"message": "Connection deleted",
+	})
 }
 
 // DatabaseWriteModeToggle toggles write mode for database browser.
 func (h *Handler) DatabaseWriteModeToggle(w http.ResponseWriter, r *http.Request) {
-	// Write mode stored in session/cookie - for now just acknowledge
-	w.WriteHeader(http.StatusOK)
+	connID := chi.URLParam(r, "id")
+	cookieName := "db_write_mode_" + connID
+
+	// Toggle: if currently enabled, disable and vice versa
+	current := false
+	if c, err := r.Cookie(cookieName); err == nil {
+		current = c.Value == "true"
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    fmt.Sprintf("%t", !current),
+		Path:     "/connections/database/" + connID,
+		MaxAge:   3600, // 1 hour
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"write_mode": !current,
+	})
 }
 
 // DatabaseQueryTempl renders the database query page.
@@ -665,12 +704,20 @@ func (h *Handler) LDAPConnectionCreate(w http.ResponseWriter, r *http.Request) {
 		BaseDN:        r.FormValue("base_dn"),
 	}
 
-	_, err = h.ldapBrowserService.CreateConnection(ctx, input, userID)
-	if err != nil {
-		http.Error(w, "Failed to create connection: "+err.Error(), http.StatusInternalServerError)
+	if input.Name == "" || input.Host == "" {
+		h.setFlash(w, r, "error", "Name and host are required")
+		http.Redirect(w, r, "/connections/ldap/new", http.StatusSeeOther)
 		return
 	}
 
+	_, err = h.ldapBrowserService.CreateConnection(ctx, input, userID)
+	if err != nil {
+		h.setFlash(w, r, "error", "Failed to create connection: "+err.Error())
+		http.Redirect(w, r, "/connections/ldap/new", http.StatusSeeOther)
+		return
+	}
+
+	h.setFlash(w, r, "success", "LDAP connection created")
 	http.Redirect(w, r, "/connections/ldap", http.StatusSeeOther)
 }
 
@@ -800,12 +847,34 @@ func (h *Handler) LDAPConnectionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	h.jsonSuccess(w, map[string]interface{}{
+		"message": "Connection deleted",
+	})
 }
 
 // LDAPWriteModeToggle toggles write mode for LDAP browser.
 func (h *Handler) LDAPWriteModeToggle(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
+	connID := chi.URLParam(r, "id")
+	cookieName := "ldap_write_mode_" + connID
+
+	current := false
+	if c, err := r.Cookie(cookieName); err == nil {
+		current = c.Value == "true"
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    fmt.Sprintf("%t", !current),
+		Path:     "/connections/ldap/" + connID,
+		MaxAge:   3600,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"write_mode": !current,
+	})
 }
 
 // LDAPSearchTempl renders the LDAP search page.
@@ -861,11 +930,26 @@ func (h *Handler) LDAPSearchExecute(w http.ResponseWriter, r *http.Request) {
 
 // RDPConnectionsTempl renders the RDP connections list page.
 func (h *Handler) RDPConnectionsTempl(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "RDP Connections", "connections-rdp")
+	userData := h.getUserData(r)
+
+	var connData []connections.RDPConnectionData
+	if h.rdpService != nil && userData != nil {
+		userID, err := uuid.Parse(userData.ID)
+		if err == nil {
+			conns, err := h.rdpService.ListConnections(ctx, userID)
+			if err == nil {
+				for _, conn := range conns {
+					connData = append(connData, toRDPConnectionData(conn))
+				}
+			}
+		}
+	}
 
 	data := connections.RDPConnectionsListData{
 		PageData:    pageData,
-		Connections: nil, // RDP service not yet implemented
+		Connections: connData,
 	}
 
 	h.renderTempl(w, r, connections.RDPConnectionsList(data))
@@ -884,37 +968,106 @@ func (h *Handler) RDPConnectionNewTempl(w http.ResponseWriter, r *http.Request) 
 
 // RDPConnectionCreate creates a new RDP connection.
 func (h *Handler) RDPConnectionCreate(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid form data", http.StatusBadRequest)
+	ctx := r.Context()
+	userData := h.getUserData(r)
+
+	if h.rdpService == nil {
+		h.setFlash(w, r, "error", "RDP service not available")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
 		return
 	}
 
-	// TODO: Implement RDP service backend to persist connections
+	if userData == nil {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+
+	userID, err := uuid.Parse(userData.ID)
+	if err != nil {
+		h.setFlash(w, r, "error", "Invalid user session")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		h.setFlash(w, r, "error", "Invalid form data")
+		http.Redirect(w, r, "/connections/rdp/new", http.StatusSeeOther)
+		return
+	}
+
+	port, _ := strconv.Atoi(r.FormValue("port"))
+	if port == 0 {
+		port = 3389
+	}
+
+	input := models.CreateRDPConnectionInput{
+		Name:       r.FormValue("name"),
+		Host:       r.FormValue("host"),
+		Port:       port,
+		Username:   r.FormValue("username"),
+		Domain:     r.FormValue("domain"),
+		Password:   r.FormValue("password"),
+		Resolution: r.FormValue("resolution"),
+		ColorDepth: r.FormValue("color_depth"),
+		Security:   models.RDPSecurityMode(r.FormValue("security")),
+	}
+
+	if tags := r.FormValue("tags"); tags != "" {
+		for _, t := range strings.Split(tags, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				input.Tags = append(input.Tags, t)
+			}
+		}
+	}
+
+	if input.Name == "" || input.Host == "" {
+		h.setFlash(w, r, "error", "Name and host are required")
+		http.Redirect(w, r, "/connections/rdp/new", http.StatusSeeOther)
+		return
+	}
+
+	_, err = h.rdpService.CreateConnection(ctx, input, userID)
+	if err != nil {
+		h.setFlash(w, r, "error", "Failed to create connection: "+err.Error())
+		http.Redirect(w, r, "/connections/rdp/new", http.StatusSeeOther)
+		return
+	}
+
+	h.setFlash(w, r, "success", "RDP connection created")
 	http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
 }
 
 // RDPConnectionDetailTempl renders the RDP connection detail page.
 func (h *Handler) RDPConnectionDetailTempl(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
-	pageData := h.prepareTemplPageData(r, "RDP Connection", "connections-rdp")
+	ctx := r.Context()
+	connIDStr := chi.URLParam(r, "id")
 
-	// Placeholder: return a stub connection for now
-	shortID := connID
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
+	connID, err := uuid.Parse(connIDStr)
+	if err != nil {
+		h.setFlash(w, r, "error", "Invalid connection ID")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
+		return
 	}
+
+	if h.rdpService == nil {
+		h.setFlash(w, r, "error", "RDP service not available")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
+		return
+	}
+
+	conn, err := h.rdpService.GetConnection(ctx, connID)
+	if err != nil {
+		h.setFlash(w, r, "error", "Connection not found")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
+		return
+	}
+
+	pageData := h.prepareTemplPageData(r, conn.Name, "connections-rdp")
+
 	data := connections.RDPConnectionDetailData{
-		PageData: pageData,
-		Connection: connections.RDPConnectionData{
-			ID:         connID,
-			Name:       "Connection " + shortID,
-			Host:       "unknown",
-			Port:       3389,
-			Status:     "unknown",
-			Resolution: "1920x1080",
-			ColorDepth: "32",
-			Security:   "any",
-		},
+		PageData:   pageData,
+		Connection: toRDPConnectionData(conn),
 	}
 
 	h.renderTempl(w, r, connections.RDPConnectionDetail(data))
@@ -922,31 +1075,262 @@ func (h *Handler) RDPConnectionDetailTempl(w http.ResponseWriter, r *http.Reques
 
 // RDPConnectionUpdate updates an RDP connection.
 func (h *Handler) RDPConnectionUpdate(w http.ResponseWriter, r *http.Request) {
-	connID := chi.URLParam(r, "id")
+	ctx := r.Context()
+	connIDStr := chi.URLParam(r, "id")
 
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid form data", http.StatusBadRequest)
+	connID, err := uuid.Parse(connIDStr)
+	if err != nil {
+		h.setFlash(w, r, "error", "Invalid connection ID")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
 		return
 	}
 
-	// TODO: Implement RDP service backend to update connections
-	http.Redirect(w, r, "/connections/rdp/"+connID, http.StatusSeeOther)
+	if h.rdpService == nil {
+		h.setFlash(w, r, "error", "RDP service not available")
+		http.Redirect(w, r, "/connections/rdp/"+connIDStr, http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		h.setFlash(w, r, "error", "Invalid form data")
+		http.Redirect(w, r, "/connections/rdp/"+connIDStr, http.StatusSeeOther)
+		return
+	}
+
+	input := models.UpdateRDPConnectionInput{}
+	if name := r.FormValue("name"); name != "" {
+		input.Name = &name
+	}
+	if host := r.FormValue("host"); host != "" {
+		input.Host = &host
+	}
+	if portStr := r.FormValue("port"); portStr != "" {
+		if p, _ := strconv.Atoi(portStr); p > 0 {
+			input.Port = &p
+		}
+	}
+	if r.Form.Has("username") {
+		username := r.FormValue("username")
+		input.Username = &username
+	}
+	if r.Form.Has("domain") {
+		domain := r.FormValue("domain")
+		input.Domain = &domain
+	}
+	if password := r.FormValue("password"); password != "" {
+		input.Password = &password
+	}
+	if resolution := r.FormValue("resolution"); resolution != "" {
+		input.Resolution = &resolution
+	}
+	if colorDepth := r.FormValue("color_depth"); colorDepth != "" {
+		input.ColorDepth = &colorDepth
+	}
+	if security := r.FormValue("security"); security != "" {
+		sec := models.RDPSecurityMode(security)
+		input.Security = &sec
+	}
+
+	if err := h.rdpService.UpdateConnection(ctx, connID, input); err != nil {
+		h.setFlash(w, r, "error", "Failed to update connection: "+err.Error())
+		http.Redirect(w, r, "/connections/rdp/"+connIDStr, http.StatusSeeOther)
+		return
+	}
+
+	h.setFlash(w, r, "success", "Connection updated successfully")
+	http.Redirect(w, r, "/connections/rdp/"+connIDStr, http.StatusSeeOther)
 }
 
 // RDPConnectionDelete deletes an RDP connection.
 func (h *Handler) RDPConnectionDelete(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement RDP service backend to delete connections
-	w.WriteHeader(http.StatusOK)
+	ctx := r.Context()
+	connIDStr := chi.URLParam(r, "id")
+
+	connID, err := uuid.Parse(connIDStr)
+	if err != nil {
+		h.jsonError(w, "invalid connection ID", http.StatusBadRequest)
+		return
+	}
+
+	if h.rdpService == nil {
+		h.jsonError(w, "RDP service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := h.rdpService.DeleteConnection(ctx, connID); err != nil {
+		h.jsonError(w, "failed to delete connection: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.jsonSuccess(w, map[string]interface{}{
+		"message": "Connection deleted",
+	})
 }
 
-// RDPConnectionTest tests an RDP connection (TCP connectivity check).
+// RDPConnectionTest tests an RDP connection via TCP dial to the specified host:port.
 func (h *Handler) RDPConnectionTest(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement TCP dial test to RDP port
+	ctx := r.Context()
 	w.Header().Set("Content-Type", "application/json")
+
+	// If we have a persisted connection, test via service
+	connIDStr := chi.URLParam(r, "id")
+	if connIDStr != "" && h.rdpService != nil {
+		connID, err := uuid.Parse(connIDStr)
+		if err == nil {
+			success, message, latency, err := h.rdpService.TestConnection(ctx, connID)
+			if err != nil {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": err.Error(),
+				})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":    success,
+				"message":    message,
+				"latency_ms": latency.Milliseconds(),
+			})
+			return
+		}
+	}
+
+	// Fallback: parse host/port from query/form for ad-hoc testing
+	host := r.URL.Query().Get("host")
+	portStr := r.URL.Query().Get("port")
+	if host == "" {
+		r.ParseForm()
+		host = r.FormValue("host")
+		portStr = r.FormValue("port")
+	}
+
+	if host == "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": "Host is required",
+		})
+		return
+	}
+
+	port := 3389
+	if portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+			port = p
+		}
+	}
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("Connection to %s failed: %s", addr, err.Error()),
+		})
+		return
+	}
+	conn.Close()
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": false,
-		"message": "RDP service not yet implemented",
+		"success": true,
+		"message": fmt.Sprintf("Successfully connected to %s (RDP port open)", addr),
 	})
+}
+
+// RDPConnectionDownload generates and serves a .rdp file for the connection.
+func (h *Handler) RDPConnectionDownload(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	connIDStr := chi.URLParam(r, "id")
+
+	connID, err := uuid.Parse(connIDStr)
+	if err != nil {
+		h.setFlash(w, r, "error", "Invalid connection ID")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
+		return
+	}
+
+	if h.rdpService == nil {
+		h.setFlash(w, r, "error", "RDP service not available")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
+		return
+	}
+
+	conn, err := h.rdpService.GetConnection(ctx, connID)
+	if err != nil {
+		h.setFlash(w, r, "error", "Connection not found")
+		http.Redirect(w, r, "/connections/rdp", http.StatusSeeOther)
+		return
+	}
+
+	// Parse resolution
+	resW, resH := "1920", "1080"
+	if parts := strings.SplitN(conn.Resolution, "x", 2); len(parts) == 2 {
+		resW = parts[0]
+		resH = parts[1]
+	}
+
+	// Map color depth
+	colorDepth := conn.ColorDepth
+	if colorDepth == "" {
+		colorDepth = "32"
+	}
+
+	// Map security mode to RDP security layer value
+	// 0=negotiate, 1=TLS, 2=RDP, 3=NLA
+	securityLayer := "0"
+	enableCredSSP := "1"
+	switch conn.Security {
+	case models.RDPSecurityNLA:
+		securityLayer = "0"
+		enableCredSSP = "1"
+	case models.RDPSecurityTLS:
+		securityLayer = "1"
+		enableCredSSP = "0"
+	case models.RDPSecurityRDP:
+		securityLayer = "2"
+		enableCredSSP = "0"
+	default: // "any" - negotiate
+		securityLayer = "0"
+		enableCredSSP = "1"
+	}
+
+	// Build full address with port
+	fullAddress := conn.Host
+	if conn.Port != 0 && conn.Port != 3389 {
+		fullAddress = fmt.Sprintf("%s:%d", conn.Host, conn.Port)
+	}
+
+	// Build .rdp file content
+	var rdp strings.Builder
+	rdp.WriteString("full address:s:" + fullAddress + "\r\n")
+	if conn.Username != "" {
+		rdp.WriteString("username:s:" + conn.Username + "\r\n")
+	}
+	if conn.Domain != "" {
+		rdp.WriteString("domain:s:" + conn.Domain + "\r\n")
+	}
+	rdp.WriteString("desktopwidth:i:" + resW + "\r\n")
+	rdp.WriteString("desktopheight:i:" + resH + "\r\n")
+	rdp.WriteString("session bpp:i:" + colorDepth + "\r\n")
+	rdp.WriteString("negotiatesecuritylayer:i:" + securityLayer + "\r\n")
+	rdp.WriteString("enablecredsspsupport:i:" + enableCredSSP + "\r\n")
+	rdp.WriteString("prompt for credentials:i:1\r\n")
+	rdp.WriteString("autoreconnection enabled:i:1\r\n")
+	rdp.WriteString("compression:i:1\r\n")
+	rdp.WriteString("displayconnectionbar:i:1\r\n")
+
+	// Sanitize filename
+	safeName := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, conn.Name)
+	if safeName == "" {
+		safeName = "connection"
+	}
+
+	w.Header().Set("Content-Type", "application/x-rdp")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.rdp"`, safeName))
+	w.Write([]byte(rdp.String()))
 }
 
 // LDAPConnectionSettingsTempl renders the LDAP connection settings/edit page.
@@ -1012,9 +1396,9 @@ func (h *Handler) LDAPConnectionSettingsUpdate(w http.ResponseWriter, r *http.Re
 		Port:          &port,
 		BaseDN:        strPtr(r.FormValue("base_dn")),
 		BindDN:        strPtr(r.FormValue("bind_dn")),
-		UseTLS:        boolPtr(r.FormValue("use_tls") == "on"),
-		StartTLS:      boolPtr(r.FormValue("start_tls") == "on"),
-		SkipTLSVerify: boolPtr(r.FormValue("skip_tls_verify") == "on"),
+		UseTLS:        boolPtr(r.FormValue("use_tls") == "on" || r.FormValue("use_tls") == "true"),
+		StartTLS:      boolPtr(r.FormValue("start_tls") == "on" || r.FormValue("start_tls") == "true"),
+		SkipTLSVerify: boolPtr(r.FormValue("skip_tls_verify") == "on" || r.FormValue("skip_tls_verify") == "true"),
 	}
 
 	if pw := r.FormValue("bind_password"); pw != "" {
@@ -1022,10 +1406,12 @@ func (h *Handler) LDAPConnectionSettingsUpdate(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.ldapBrowserService.UpdateConnection(ctx, connID, input); err != nil {
-		http.Error(w, "Failed to update connection: "+err.Error(), http.StatusInternalServerError)
+		h.setFlash(w, r, "error", "Failed to update connection: "+err.Error())
+		http.Redirect(w, r, "/connections/ldap/"+connIDStr+"/settings", http.StatusSeeOther)
 		return
 	}
 
+	h.setFlash(w, r, "success", "LDAP connection updated")
 	http.Redirect(w, r, "/connections/ldap/"+connIDStr+"/settings", http.StatusSeeOther)
 }
 
@@ -1048,6 +1434,30 @@ func toLDAPConnectionData(conn *models.LDAPConnection) connections.LDAPConnectio
 
 	if conn.LastChecked != nil {
 		data.LastChecked = formatTimeAgo(*conn.LastChecked)
+	}
+
+	return data
+}
+
+// toRDPConnectionData converts an RDP connection model to template data.
+func toRDPConnectionData(conn *models.RDPConnection) connections.RDPConnectionData {
+	data := connections.RDPConnectionData{
+		ID:         conn.ID.String(),
+		Name:       conn.Name,
+		Host:       conn.Host,
+		Port:       conn.Port,
+		Username:   conn.Username,
+		Domain:     conn.Domain,
+		Status:     string(conn.Status),
+		Resolution: conn.Resolution,
+		ColorDepth: conn.ColorDepth,
+		Security:   string(conn.Security),
+		Tags:       conn.Tags,
+		CreatedAt:  conn.CreatedAt.Format("2006-01-02 15:04"),
+	}
+
+	if conn.LastConnected != nil {
+		data.LastUsed = formatTimeAgo(*conn.LastConnected)
 	}
 
 	return data

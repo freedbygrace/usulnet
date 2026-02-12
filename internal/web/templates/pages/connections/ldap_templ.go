@@ -97,7 +97,7 @@ func LDAPConnectionsList(data LDAPConnectionsListData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Connections) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"col-span-full card p-8 text-center\"><i class=\"fas fa-sitemap text-4xl text-gray-600 mb-4\"></i><p class=\"text-gray-400\">No LDAP connections configured</p><button onclick=\"showNewLDAPModal()\" class=\"btn-primary mt-4\"><i class=\"fas fa-plus mr-2\"></i>Add Connection</button></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"col-span-full card p-8 text-center\"><i class=\"fas fa-sitemap text-4xl text-gray-400 mb-4\"></i><p class=\"text-gray-400\">No LDAP connections configured</p><button onclick=\"showNewLDAPModal()\" class=\"btn-primary mt-4\"><i class=\"fas fa-plus mr-2\"></i>Add Connection</button></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -588,7 +588,7 @@ func LDAPBrowser(data LDAPBrowserData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					if attr.Binary {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<span class=\"ml-1 text-xs text-gray-600\">(binary)</span>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<span class=\"ml-1 text-xs text-gray-400\">(binary)</span>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -694,7 +694,7 @@ func LDAPBrowser(data LDAPBrowserData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<div class=\"flex-1 flex items-center justify-center\"><div class=\"text-center\"><i class=\"fas fa-sitemap text-4xl text-gray-600 mb-4\"></i><p class=\"text-gray-400\">Select an entry from the tree to view details</p></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<div class=\"flex-1 flex items-center justify-center\"><div class=\"text-center\"><i class=\"fas fa-sitemap text-4xl text-gray-400 mb-4\"></i><p class=\"text-gray-400\">Select an entry from the tree to view details</p></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

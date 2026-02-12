@@ -150,7 +150,7 @@ func ShortcutsList(data ShortcutsListData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"card p-12 text-center\"><i class=\"fas fa-external-link-alt text-4xl text-gray-600 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No shortcuts yet</h3><p class=\"text-gray-400 mb-4\">Create shortcuts to quickly access your favorite websites and services</p><a href=\"/connections/shortcuts/new\" class=\"inline-flex items-center gap-2 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-colors\"><i class=\"fas fa-plus\"></i> Create Shortcut</a></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"card p-12 text-center\"><i class=\"fas fa-external-link-alt text-4xl text-gray-400 mb-4\"></i><h3 class=\"text-lg font-medium text-white mb-2\">No shortcuts yet</h3><p class=\"text-gray-400 mb-4\">Create shortcuts to quickly access your favorite websites and services</p><a href=\"/connections/shortcuts/new\" class=\"inline-flex items-center gap-2 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-colors\"><i class=\"fas fa-plus\"></i> Create Shortcut</a></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

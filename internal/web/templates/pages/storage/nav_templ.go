@@ -174,7 +174,7 @@ func navTab(href string, label string, icon string, isActive bool, enabled bool)
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<span class=\"flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 border-transparent text-gray-600 cursor-not-allowed whitespace-nowrap\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<span class=\"flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 border-transparent text-gray-400 cursor-not-allowed whitespace-nowrap\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

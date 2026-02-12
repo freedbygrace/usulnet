@@ -1,0 +1,324 @@
+package healthdash
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+// HealthDashData holds all data for the health check dashboard page.
+type HealthDashData struct {
+	PageData   layouts.PageData
+	Containers []HealthContainerView
+	Stats      HealthStats
+}
+
+// HealthContainerView represents a container with health check info.
+type HealthContainerView struct {
+	ID              string
+	Name            string
+	Image           string
+	State           string
+	Health          string // healthy, unhealthy, starting, none
+	HealthCheck     HealthCheckConfig
+	HealthLogs      []HealthLogEntry
+	FailingStreak   int
+	LastCheckedAt   string
+	ConsecutiveFail int
+}
+
+// HealthCheckConfig shows the healthcheck configuration.
+type HealthCheckConfig struct {
+	Test        string
+	Interval    string
+	Timeout     string
+	StartPeriod string
+	Retries     int
+	IsConfigured bool
+}
+
+// HealthLogEntry represents a health check log entry.
+type HealthLogEntry struct {
+	Start    string
+	End      string
+	ExitCode int
+	Output   string
+}
+
+// HealthStats for the dashboard.
+type HealthStats struct {
+	TotalContainers int
+	Healthy         int
+	Unhealthy       int
+	Starting        int
+	NoHealthCheck   int
+	HealthRate      string
+}
+
+templ HealthDashboard(data HealthDashData) {
+	@layouts.Base(data.PageData) {
+		<div class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">Container Health Dashboard</h1>
+					<p class="text-gray-400 mt-1">Monitor health check status, output, and failure history</p>
+				</div>
+				<a href="/containers" class="btn-secondary flex items-center gap-2">
+					<i class="fas fa-list"></i>
+					All Containers
+				</a>
+			</div>
+
+			<!-- Stats -->
+			<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+				@healthStat("Total", fmt.Sprintf("%d", data.Stats.TotalContainers), "fas fa-box", "primary")
+				@healthStat("Healthy", fmt.Sprintf("%d", data.Stats.Healthy), "fas fa-heart", "green")
+				@healthStat("Unhealthy", fmt.Sprintf("%d", data.Stats.Unhealthy), "fas fa-heart-broken", "red")
+				@healthStat("Starting", fmt.Sprintf("%d", data.Stats.Starting), "fas fa-spinner", "yellow")
+				@healthStat("No Check", fmt.Sprintf("%d", data.Stats.NoHealthCheck), "fas fa-question-circle", "gray")
+				@healthStat("Health Rate", data.Stats.HealthRate, "fas fa-chart-pie", "green")
+			</div>
+
+			<!-- Unhealthy Alert -->
+			if data.Stats.Unhealthy > 0 {
+				<div class="card border-l-4 border-l-red-500 p-4">
+					<div class="flex items-center gap-3">
+						<i class="fas fa-exclamation-triangle text-red-400"></i>
+						<div>
+							<h3 class="text-sm font-medium text-red-400">Unhealthy Containers Detected</h3>
+							<p class="text-xs text-gray-400 mt-0.5">{ fmt.Sprintf("%d container(s) are reporting unhealthy status. Review health check output below.", data.Stats.Unhealthy) }</p>
+						</div>
+					</div>
+				</div>
+			}
+
+			<!-- Container Health Cards -->
+			if len(data.Containers) == 0 {
+				<div class="card p-12 text-center">
+					<i class="fas fa-heartbeat text-4xl text-gray-400 mb-4"></i>
+					<h3 class="text-lg font-medium text-white mb-2">No Containers Found</h3>
+					<p class="text-gray-400">Container health data will appear here when containers are running</p>
+				</div>
+			} else {
+				<!-- Filter -->
+				<div x-data="{ filter: 'all' }" class="space-y-4">
+					<div class="flex gap-2 flex-wrap">
+						<button @click="filter = 'all'" :class="filter === 'all' ? 'bg-primary-600 text-white' : 'bg-dark-700 text-gray-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">
+							All ({ fmt.Sprintf("%d", data.Stats.TotalContainers) })
+						</button>
+						<button @click="filter = 'healthy'" :class="filter === 'healthy' ? 'bg-green-600 text-white' : 'bg-dark-700 text-gray-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">
+							<i class="fas fa-heart mr-1"></i>Healthy ({ fmt.Sprintf("%d", data.Stats.Healthy) })
+						</button>
+						<button @click="filter = 'unhealthy'" :class="filter === 'unhealthy' ? 'bg-red-600 text-white' : 'bg-dark-700 text-gray-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">
+							<i class="fas fa-heart-broken mr-1"></i>Unhealthy ({ fmt.Sprintf("%d", data.Stats.Unhealthy) })
+						</button>
+						<button @click="filter = 'starting'" :class="filter === 'starting' ? 'bg-yellow-600 text-white' : 'bg-dark-700 text-gray-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">
+							<i class="fas fa-spinner mr-1"></i>Starting ({ fmt.Sprintf("%d", data.Stats.Starting) })
+						</button>
+						<button @click="filter = 'none'" :class="filter === 'none' ? 'bg-gray-600 text-white' : 'bg-dark-700 text-gray-400 hover:text-white'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">
+							<i class="fas fa-question-circle mr-1"></i>No Check ({ fmt.Sprintf("%d", data.Stats.NoHealthCheck) })
+						</button>
+					</div>
+
+					<div class="space-y-3">
+						for _, c := range data.Containers {
+							<div x-show={ fmt.Sprintf("filter === 'all' || filter === '%s'", healthFilter(c.Health)) } x-cloak>
+								@healthCard(c)
+							</div>
+						}
+					</div>
+				</div>
+			}
+		</div>
+	}
+}
+
+templ healthStat(label, value, icon, color string) {
+	<div class="card p-3 text-center">
+		<i class={ icon, hdStatColor(color), "text-lg mb-1" }></i>
+		<p class="text-xl font-bold text-white">{ value }</p>
+		<p class="text-xs text-gray-400">{ label }</p>
+	</div>
+}
+
+templ healthCard(c HealthContainerView) {
+	<div class={ "card p-4", healthCardBorder(c.Health) } x-data="{ expanded: false }">
+		<div class="flex items-start justify-between">
+			<div class="flex items-start gap-3 flex-1">
+				<!-- Health Status Icon -->
+				<div class={ "w-12 h-12 rounded-lg flex items-center justify-center", healthStatusBg(c.Health) }>
+					@healthIcon(c.Health)
+				</div>
+				<div class="flex-1 min-w-0">
+					<div class="flex items-center gap-2 flex-wrap">
+						<a href={ templ.SafeURL("/containers/" + c.ID) } class="font-medium text-white hover:text-primary-400 transition-colors">{ c.Name }</a>
+						@healthBadge(c.Health)
+						<span class={ "px-2 py-0.5 text-xs rounded", stateClass(c.State) }>{ c.State }</span>
+					</div>
+					<div class="text-sm text-gray-400 mt-0.5">{ c.Image }</div>
+
+					<!-- Health Check Config Summary -->
+					if c.HealthCheck.IsConfigured {
+						<div class="flex items-center gap-4 mt-2 text-xs text-gray-500 flex-wrap">
+							<span><i class="fas fa-terminal mr-1"></i>{ c.HealthCheck.Test }</span>
+							<span><i class="fas fa-clock mr-1"></i>Interval: { c.HealthCheck.Interval }</span>
+							<span><i class="fas fa-hourglass mr-1"></i>Timeout: { c.HealthCheck.Timeout }</span>
+							<span><i class="fas fa-redo mr-1"></i>Retries: { fmt.Sprintf("%d", c.HealthCheck.Retries) }</span>
+							if c.FailingStreak > 0 {
+								<span class="text-red-400"><i class="fas fa-exclamation-triangle mr-1"></i>Failing streak: { fmt.Sprintf("%d", c.FailingStreak) }</span>
+							}
+							if c.LastCheckedAt != "" {
+								<span><i class="fas fa-history mr-1"></i>Last: { c.LastCheckedAt }</span>
+							}
+						</div>
+					} else {
+						<div class="flex items-center gap-2 mt-2 text-xs text-gray-500">
+							<i class="fas fa-info-circle"></i>
+							<span>No health check configured</span>
+						</div>
+					}
+				</div>
+			</div>
+			<!-- Expand button -->
+			if c.HealthCheck.IsConfigured && len(c.HealthLogs) > 0 {
+				<button @click="expanded = !expanded" class="p-2 text-gray-400 hover:text-white transition-colors">
+					<i :class="expanded ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
+				</button>
+			}
+		</div>
+
+		<!-- Health Check Logs (expandable) -->
+		if c.HealthCheck.IsConfigured && len(c.HealthLogs) > 0 {
+			<div x-show="expanded" x-cloak x-transition class="mt-4 border-t border-dark-600 pt-4">
+				<h4 class="text-sm font-medium text-gray-300 mb-2">
+					<i class="fas fa-clipboard-list mr-1"></i>Health Check History (last { fmt.Sprintf("%d", len(c.HealthLogs)) } checks)
+				</h4>
+				<div class="space-y-2 max-h-64 overflow-y-auto">
+					for _, log := range c.HealthLogs {
+						<div class={ "rounded-lg p-3 text-sm", logBgClass(log.ExitCode) }>
+							<div class="flex items-center justify-between mb-1">
+								<div class="flex items-center gap-2">
+									if log.ExitCode == 0 {
+										<span class="w-2 h-2 rounded-full bg-green-400"></span>
+										<span class="text-green-400 text-xs font-medium">PASS</span>
+									} else {
+										<span class="w-2 h-2 rounded-full bg-red-400"></span>
+										<span class="text-red-400 text-xs font-medium">FAIL (exit { fmt.Sprintf("%d", log.ExitCode) })</span>
+									}
+								</div>
+								<span class="text-xs text-gray-500">{ log.Start }</span>
+							</div>
+							if log.Output != "" {
+								<pre class="text-xs text-gray-300 bg-dark-900 rounded p-2 mt-1 overflow-x-auto whitespace-pre-wrap font-mono">{ log.Output }</pre>
+							}
+						</div>
+					}
+				</div>
+			</div>
+		}
+	</div>
+}
+
+templ healthIcon(health string) {
+	switch health {
+		case "healthy":
+			<i class="fas fa-heart text-green-400 text-lg"></i>
+		case "unhealthy":
+			<i class="fas fa-heart-broken text-red-400 text-lg animate-pulse"></i>
+		case "starting":
+			<i class="fas fa-spinner text-yellow-400 text-lg animate-spin"></i>
+		default:
+			<i class="fas fa-question-circle text-gray-500 text-lg"></i>
+	}
+}
+
+templ healthBadge(health string) {
+	switch health {
+		case "healthy":
+			<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>Healthy</span>
+		case "unhealthy":
+			<span class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>Unhealthy</span>
+		case "starting":
+			<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded flex items-center gap-1 w-fit"><span class="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse"></span>Starting</span>
+		default:
+			<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded">No Check</span>
+	}
+}
+
+func healthFilter(health string) string {
+	switch health {
+	case "healthy":
+		return "healthy"
+	case "unhealthy":
+		return "unhealthy"
+	case "starting":
+		return "starting"
+	default:
+		return "none"
+	}
+}
+
+func hdStatColor(color string) string {
+	switch color {
+	case "primary":
+		return "text-primary-400"
+	case "green":
+		return "text-green-400"
+	case "red":
+		return "text-red-400"
+	case "yellow":
+		return "text-yellow-400"
+	case "gray":
+		return "text-gray-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func healthCardBorder(health string) string {
+	switch health {
+	case "unhealthy":
+		return "border-l-4 border-l-red-500"
+	case "starting":
+		return "border-l-4 border-l-yellow-500"
+	case "healthy":
+		return "border-l-4 border-l-green-500"
+	default:
+		return ""
+	}
+}
+
+func healthStatusBg(health string) string {
+	switch health {
+	case "healthy":
+		return "bg-green-500/20"
+	case "unhealthy":
+		return "bg-red-500/20"
+	case "starting":
+		return "bg-yellow-500/20"
+	default:
+		return "bg-gray-500/20"
+	}
+}
+
+func stateClass(state string) string {
+	switch state {
+	case "running":
+		return "bg-green-500/20 text-green-400"
+	case "exited", "dead":
+		return "bg-red-500/20 text-red-400"
+	case "paused":
+		return "bg-yellow-500/20 text-yellow-400"
+	case "restarting":
+		return "bg-blue-500/20 text-blue-400"
+	default:
+		return "bg-gray-500/20 text-gray-400"
+	}
+}
+
+func logBgClass(exitCode int) string {
+	if exitCode == 0 {
+		return "bg-green-500/5 border border-green-500/20"
+	}
+	return "bg-red-500/5 border border-red-500/20"
+}

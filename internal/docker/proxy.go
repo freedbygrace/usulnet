@@ -959,3 +959,19 @@ func (p *AgentProxyClient) SwarmServiceUpdate(_ context.Context, _ string, _ Swa
 func (p *AgentProxyClient) SwarmTaskList(_ context.Context, _ string) ([]SwarmTaskInfo, error) {
 	return nil, errSwarmNotProxied
 }
+
+// ============================================================================
+// Event operations (remote agents deliver events via NATS, not through proxy)
+// ============================================================================
+
+func (p *AgentProxyClient) GetEvents(_ context.Context, _ time.Time) ([]DockerEvent, error) {
+	return nil, ErrNotSupportedRemote
+}
+
+func (p *AgentProxyClient) StreamEvents(_ context.Context) (<-chan DockerEvent, <-chan error) {
+	ch := make(chan DockerEvent)
+	close(ch)
+	errCh := make(chan error, 1)
+	errCh <- ErrNotSupportedRemote
+	return ch, errCh
+}

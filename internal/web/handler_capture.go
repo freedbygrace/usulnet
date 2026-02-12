@@ -29,11 +29,6 @@ type CaptureService interface {
 	Cleanup()
 }
 
-// SetCaptureService sets the capture service.
-func (h *Handler) SetCaptureService(svc CaptureService) {
-	h.captureService = svc
-}
-
 // ============================================================================
 // Packet Capture Handlers
 // ============================================================================

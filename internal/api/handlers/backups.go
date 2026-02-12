@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -456,7 +457,7 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", info.Filename))
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 
-	http.ServeContent(w, r, info.Filename, time.Now(), nil)
+	io.Copy(w, info.Reader)
 }
 
 // Restore restores a backup.

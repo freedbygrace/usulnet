@@ -11,9 +11,9 @@ templ AuditLog(data StorageAuditData) {
 			<!-- Breadcrumb -->
 			<div class="flex items-center gap-2 text-sm text-gray-400">
 				<a href="/storage" class="hover:text-primary-400 transition-colors">Storage</a>
-				<i class="fas fa-chevron-right text-xs text-gray-600"></i>
+				<i class="fas fa-chevron-right text-xs text-gray-400"></i>
 				<a href={ templ.SafeURL("/storage/" + data.ConnectionID + "/buckets") } class="hover:text-primary-400 transition-colors">{ data.ConnectionName }</a>
-				<i class="fas fa-chevron-right text-xs text-gray-600"></i>
+				<i class="fas fa-chevron-right text-xs text-gray-400"></i>
 				<span class="text-white">Audit Log</span>
 			</div>
 

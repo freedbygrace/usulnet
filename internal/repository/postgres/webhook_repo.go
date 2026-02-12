@@ -11,7 +11,6 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 // OutgoingWebhookRepository handles CRUD for outgoing webhooks.
@@ -39,7 +38,7 @@ func (r *OutgoingWebhookRepository) Create(ctx context.Context, wh *models.Outgo
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO outgoing_webhooks (id, name, url, secret, events, headers, is_enabled, retry_count, timeout_secs, created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		wh.ID, wh.Name, wh.URL, wh.Secret, pq.Array(wh.Events),
+		wh.ID, wh.Name, wh.URL, wh.Secret, wh.Events,
 		wh.Headers, wh.IsEnabled, wh.RetryCount, wh.TimeoutSecs, wh.CreatedBy,
 	)
 	return err
@@ -52,7 +51,7 @@ func (r *OutgoingWebhookRepository) GetByID(ctx context.Context, id uuid.UUID) (
 		SELECT id, name, url, secret, events, headers, is_enabled, retry_count, timeout_secs,
 			created_by, created_at, updated_at
 		FROM outgoing_webhooks WHERE id = $1`, id).Scan(
-		&wh.ID, &wh.Name, &wh.URL, &wh.Secret, pq.Array(&wh.Events),
+		&wh.ID, &wh.Name, &wh.URL, &wh.Secret, &wh.Events,
 		&wh.Headers, &wh.IsEnabled, &wh.RetryCount, &wh.TimeoutSecs,
 		&wh.CreatedBy, &wh.CreatedAt, &wh.UpdatedAt,
 	)
@@ -77,7 +76,7 @@ func (r *OutgoingWebhookRepository) List(ctx context.Context) ([]*models.Outgoin
 	for rows.Next() {
 		wh := &models.OutgoingWebhook{}
 		if err := rows.Scan(
-			&wh.ID, &wh.Name, &wh.URL, &wh.Secret, pq.Array(&wh.Events),
+			&wh.ID, &wh.Name, &wh.URL, &wh.Secret, &wh.Events,
 			&wh.Headers, &wh.IsEnabled, &wh.RetryCount, &wh.TimeoutSecs,
 			&wh.CreatedBy, &wh.CreatedAt, &wh.UpdatedAt,
 		); err != nil {
@@ -103,7 +102,7 @@ func (r *OutgoingWebhookRepository) ListEnabled(ctx context.Context, event strin
 	for rows.Next() {
 		wh := &models.OutgoingWebhook{}
 		if err := rows.Scan(
-			&wh.ID, &wh.Name, &wh.URL, &wh.Secret, pq.Array(&wh.Events),
+			&wh.ID, &wh.Name, &wh.URL, &wh.Secret, &wh.Events,
 			&wh.Headers, &wh.IsEnabled, &wh.RetryCount, &wh.TimeoutSecs,
 			&wh.CreatedBy, &wh.CreatedAt, &wh.UpdatedAt,
 		); err != nil {
@@ -121,7 +120,7 @@ func (r *OutgoingWebhookRepository) Update(ctx context.Context, wh *models.Outgo
 			name=$2, url=$3, secret=$4, events=$5, headers=$6,
 			is_enabled=$7, retry_count=$8, timeout_secs=$9
 		WHERE id=$1`,
-		wh.ID, wh.Name, wh.URL, wh.Secret, pq.Array(wh.Events),
+		wh.ID, wh.Name, wh.URL, wh.Secret, wh.Events,
 		wh.Headers, wh.IsEnabled, wh.RetryCount, wh.TimeoutSecs,
 	)
 	return err

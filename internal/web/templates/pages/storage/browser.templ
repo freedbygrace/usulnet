@@ -10,15 +10,15 @@ templ Browser(data StorageBrowserData) {
 			<!-- Breadcrumb -->
 			<div class="flex items-center gap-2 text-sm text-gray-400 flex-wrap">
 				<a href="/storage" class="hover:text-primary-400 transition-colors">Storage</a>
-				<i class="fas fa-chevron-right text-xs text-gray-600"></i>
+				<i class="fas fa-chevron-right text-xs text-gray-400"></i>
 				<a href={ templ.SafeURL("/storage/" + data.ConnectionID + "/buckets") } class="hover:text-primary-400 transition-colors">{ data.ConnectionName }</a>
-				<i class="fas fa-chevron-right text-xs text-gray-600"></i>
+				<i class="fas fa-chevron-right text-xs text-gray-400"></i>
 				<a href={ templ.SafeURL("/storage/" + data.ConnectionID + "/buckets/" + data.Bucket + "/browse") }
 					class={ templ.KV("text-white", len(data.Breadcrumbs) == 0), templ.KV("hover:text-primary-400 transition-colors", len(data.Breadcrumbs) > 0) }>
 					{ data.Bucket }
 				</a>
 				for i, crumb := range data.Breadcrumbs {
-					<i class="fas fa-chevron-right text-xs text-gray-600"></i>
+					<i class="fas fa-chevron-right text-xs text-gray-400"></i>
 					if i == len(data.Breadcrumbs)-1 {
 						<span class="text-white">{ crumb.Label }</span>
 					} else {

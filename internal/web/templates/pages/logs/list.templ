@@ -97,9 +97,9 @@ templ LogsList(data LogsPageData) {
 								<div class="p-2 border-b border-dark-600">
 									<div class="flex gap-2">
 										<button @click="selectAll()" class="text-xs text-primary-400 hover:text-primary-300">Select All</button>
-										<span class="text-gray-600">|</span>
+										<span class="text-gray-400">|</span>
 										<button @click="selectNone()" class="text-xs text-gray-400 hover:text-gray-300">Clear</button>
-										<span class="text-gray-600">|</span>
+										<span class="text-gray-400">|</span>
 										<button @click="selectRunning()" class="text-xs text-green-400 hover:text-green-300">Running Only</button>
 									</div>
 								</div>
@@ -186,7 +186,7 @@ templ LogsList(data LogsPageData) {
 					</div>
 					<div class="flex items-center gap-4 text-sm text-gray-400">
 						<span>
-							<i class="fas fa-circle text-xs mr-1" :class="streaming ? 'text-green-400 animate-pulse' : 'text-gray-600'"></i>
+							<i class="fas fa-circle text-xs mr-1" :class="streaming ? 'text-green-400 animate-pulse' : 'text-gray-400'"></i>
 							<span x-text="streaming ? 'Streaming' : 'Stopped'"></span>
 						</span>
 						<span x-text="logLines.length + ' lines'"></span>
@@ -212,14 +212,14 @@ templ LogsList(data LogsPageData) {
 					</template>
 					<template x-for="(line, idx) in filteredLines" :key="idx">
 						<div class="flex gap-3 py-0.5 hover:bg-dark-700/30" x-show="matchesFilter(line)">
-							<span class="text-gray-600 select-none w-12 text-right flex-shrink-0" x-text="idx + 1"></span>
+							<span class="text-gray-400 select-none w-12 text-right flex-shrink-0" x-text="idx + 1"></span>
 							<span
 								class="px-1.5 py-0 rounded text-xs font-medium flex-shrink-0"
 								:class="containerColor(line.container)"
 								x-text="line.containerName"
 								:title="line.container"
 							></span>
-							<span class="text-gray-600 flex-shrink-0" x-text="line.timestamp || ''"></span>
+							<span class="text-gray-400 flex-shrink-0" x-text="line.timestamp || ''"></span>
 							<span
 								class="text-gray-200 whitespace-pre-wrap break-all"
 								x-text="line.text"

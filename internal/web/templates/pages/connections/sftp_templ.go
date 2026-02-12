@@ -120,7 +120,7 @@ func SFTPBrowser(data SFTPBrowserData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			for i, bc := range data.Breadcrumbs {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<span class=\"text-gray-600\">/</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<span class=\"text-gray-400\">/</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -343,7 +343,7 @@ func SFTPBrowser(data SFTPBrowserData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_Buffer, showRenameModal(file.Name, file.Path))
+				templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_Buffer, showRenameModal(data.Connection.ID, file.Name, file.Path))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -351,7 +351,7 @@ func SFTPBrowser(data SFTPBrowserData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var17 templ.ComponentScript = showRenameModal(file.Name, file.Path)
+				var templ_7745c5c3_Var17 templ.ComponentScript = showRenameModal(data.Connection.ID, file.Name, file.Path)
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17.Call)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -423,7 +423,7 @@ func SFTPBrowser(data SFTPBrowserData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\"><div id=\"drop-zone\" class=\"border-2 border-dashed border-dark-600 rounded-lg p-8 text-center hover:border-primary-500 transition-colors\"><svg class=\"w-12 h-12 mx-auto text-gray-600 mb-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12\"></path></svg><p class=\"text-gray-400 mb-2\">Drop files here or click to select</p><input type=\"file\" name=\"files\" multiple class=\"hidden\" id=\"file-input\"> <label for=\"file-input\" class=\"text-primary-400 hover:text-primary-300 cursor-pointer\">Browse files</label></div><div id=\"file-list\" class=\"mt-4 space-y-2\"></div><div class=\"mt-4 flex justify-end space-x-3\"><button type=\"button\" onclick=\"hideUploadModal()\" class=\"px-4 py-2 text-gray-400 hover:text-white\">Cancel</button> <button type=\"submit\" class=\"px-4 py-2 bg-primary-500 text-white rounded hover:bg-primary-600\">Upload</button></div></form></div></div><!-- New Folder Modal --> <div id=\"new-folder-modal\" class=\"hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50\"><div class=\"bg-dark-800 rounded-lg border border-dark-700 p-6 w-full max-w-sm\"><h3 class=\"text-white font-medium mb-4\">New Folder</h3><form action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\"><div id=\"drop-zone\" class=\"border-2 border-dashed border-dark-600 rounded-lg p-8 text-center hover:border-primary-500 transition-colors\"><svg class=\"w-12 h-12 mx-auto text-gray-400 mb-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12\"></path></svg><p class=\"text-gray-400 mb-2\">Drop files here or click to select</p><input type=\"file\" name=\"files\" multiple class=\"hidden\" id=\"file-input\"> <label for=\"file-input\" class=\"text-primary-400 hover:text-primary-300 cursor-pointer\">Browse files</label></div><div id=\"file-list\" class=\"mt-4 space-y-2\"></div><div class=\"mt-4 flex justify-end space-x-3\"><button type=\"button\" onclick=\"hideUploadModal()\" class=\"px-4 py-2 text-gray-400 hover:text-white\">Cancel</button> <button type=\"submit\" class=\"px-4 py-2 bg-primary-500 text-white rounded hover:bg-primary-600\">Upload</button></div></form></div></div><!-- New Folder Modal --> <div id=\"new-folder-modal\" class=\"hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50\"><div class=\"bg-dark-800 rounded-lg border border-dark-700 p-6 w-full max-w-sm\"><h3 class=\"text-white font-medium mb-4\">New Folder</h3><form action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -502,17 +502,28 @@ func navigateTo(connID, path string) templ.ComponentScript {
 	}
 }
 
-func showRenameModal(name, path string) templ.ComponentScript {
+func showRenameModal(connID, name, path string) templ.ComponentScript {
 	return templ.ComponentScript{
-		Name: `__templ_showRenameModal_12fc`,
-		Function: `function __templ_showRenameModal_12fc(name, path){const newName = prompt(` + "`" + `Rename "${name}" to:` + "`" + `, name);
+		Name: `__templ_showRenameModal_b4fc`,
+		Function: `function __templ_showRenameModal_b4fc(connID, name, path){const newName = prompt(` + "`" + `Rename "${name}" to:` + "`" + `, name);
 	if (newName && newName !== name) {
-		// TODO: Implement rename API call
-		alert('Rename functionality coming soon');
+		const parentDir = path.substring(0, path.lastIndexOf('/') + 1);
+		const newPath = parentDir + newName;
+		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+		fetch(` + "`" + `/connections/ssh/${connID}/files/rename` + "`" + `, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				'X-CSRF-Token': csrfToken
+			},
+			body: ` + "`" + `old_path=${encodeURIComponent(path)}&new_path=${encodeURIComponent(newPath)}` + "`" + `
+		})
+		.then(r => { if (r.ok) location.reload(); else r.json().then(d => alert(d.error || 'Failed to rename')).catch(() => alert('Failed to rename')); })
+		.catch(e => alert('Error: ' + e));
 	}
 }`,
-		Call:       templ.SafeScript(`__templ_showRenameModal_12fc`, name, path),
-		CallInline: templ.SafeScriptInline(`__templ_showRenameModal_12fc`, name, path),
+		Call:       templ.SafeScript(`__templ_showRenameModal_b4fc`, connID, name, path),
+		CallInline: templ.SafeScriptInline(`__templ_showRenameModal_b4fc`, connID, name, path),
 	}
 }
 

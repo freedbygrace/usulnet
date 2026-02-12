@@ -763,7 +763,7 @@ func Container(data ContainerSecurityData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else if !data.Container.IncludedCVE {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<div class=\"card p-6 text-center\"><i class=\"fas fa-bug text-3xl text-gray-600 mb-3\"></i><p class=\"text-gray-400 mb-2\">CVE scanning was not included in this scan</p><p class=\"text-xs text-gray-500\">Install Trivy to enable image vulnerability scanning</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<div class=\"card p-6 text-center\"><i class=\"fas fa-bug text-3xl text-gray-400 mb-3\"></i><p class=\"text-gray-400 mb-2\">CVE scanning was not included in this scan</p><p class=\"text-xs text-gray-500\">Install Trivy to enable image vulnerability scanning</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

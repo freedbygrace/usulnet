@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +31,8 @@ type ServiceConfig struct {
 	// StopTimeout is the default timeout for stopping containers
 	StopTimeout time.Duration
 
-	// SyncInterval is how often to sync container state from Docker
+	// SyncInterval is how often to do a full reconciliation sync.
+	// With event-driven updates this is a safety net, not the primary sync.
 	SyncInterval time.Duration
 
 	// StatsRetention is how long to keep container stats
@@ -40,29 +43,42 @@ type ServiceConfig struct {
 
 	// MaxLogLines is the maximum log lines to store per container
 	MaxLogLines int
+
+	// EventReconnectMin is the minimum backoff for event stream reconnection
+	EventReconnectMin time.Duration
+
+	// EventReconnectMax is the maximum backoff for event stream reconnection
+	EventReconnectMax time.Duration
 }
 
 // DefaultConfig returns default service configuration.
 func DefaultConfig() ServiceConfig {
 	return ServiceConfig{
-		StopTimeout:    30 * time.Second,
-		SyncInterval:   30 * time.Second,
-		StatsRetention: 24 * time.Hour,
-		LogRetention:   7 * 24 * time.Hour,
-		MaxLogLines:    10000,
+		StopTimeout:       30 * time.Second,
+		SyncInterval:      5 * time.Minute,
+		StatsRetention:    24 * time.Hour,
+		LogRetention:      7 * 24 * time.Hour,
+		MaxLogLines:       10000,
+		EventReconnectMin: 1 * time.Second,
+		EventReconnectMax: 30 * time.Second,
 	}
 }
 
 // Service provides container management operations.
 type Service struct {
-	repo        *postgres.ContainerRepository
-	hostService *hostservice.Service
-	config      ServiceConfig
+	repo          *postgres.ContainerRepository
+	hostService   *hostservice.Service
+	config        ServiceConfig
 	logger        *logger.Logger
 	configService *configservice.Service
 
 	stopCh  chan struct{}
-	stopped bool
+	stopped atomic.Bool
+	wg      sync.WaitGroup
+
+	// eventWatchers tracks active event stream goroutines per host
+	watcherMu      sync.Mutex
+	activeWatchers map[uuid.UUID]context.CancelFunc
 }
 
 // NewService creates a new container service.
@@ -77,11 +93,12 @@ func NewService(
 	}
 
 	return &Service{
-		repo:        repo,
-		hostService: hostService,
-		config:      config,
-		logger:      log.Named("container"),
-		stopCh:      make(chan struct{}),
+		repo:           repo,
+		hostService:    hostService,
+		config:         config,
+		logger:         log.Named("container"),
+		stopCh:         make(chan struct{}),
+		activeWatchers: make(map[uuid.UUID]context.CancelFunc),
 	}
 }
 
@@ -95,22 +112,58 @@ func (s *Service) Start(ctx context.Context) error {
 		"sync_interval", s.config.SyncInterval,
 	)
 
-	// Start sync worker
-	go s.syncWorker(ctx)
+	// Start event watcher manager (watches Docker events for each host)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.eventWatcherManager(ctx)
+	}()
+
+	// Start reconciliation sync worker (full sync at reduced frequency)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.reconciliationWorker(ctx)
+	}()
 
 	// Start cleanup worker
-	go s.cleanupWorker(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.cleanupWorker(ctx)
+	}()
 
 	return nil
 }
 
 // Stop stops the service.
 func (s *Service) Stop() error {
-	if s.stopped {
+	if !s.stopped.CompareAndSwap(false, true) {
 		return nil
 	}
-	s.stopped = true
 	close(s.stopCh)
+
+	// Cancel all active event watchers
+	s.watcherMu.Lock()
+	for hostID, cancel := range s.activeWatchers {
+		cancel()
+		delete(s.activeWatchers, hostID)
+	}
+	s.watcherMu.Unlock()
+
+	// Wait for workers with timeout
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		s.logger.Warn("timeout waiting for container workers to stop")
+	}
+
 	s.logger.Info("container service stopped")
 	return nil
 }
@@ -176,7 +229,9 @@ func (s *Service) StartContainer(ctx context.Context, hostID uuid.UUID, containe
 	}
 
 	// Update cached state
-	s.repo.UpdateState(ctx, containerID, models.ContainerStateRunning, "Up")
+	if err := s.repo.UpdateState(ctx, containerID, models.ContainerStateRunning, "Up"); err != nil {
+		s.logger.Warn("failed to update cached state", "container_id", containerID, "error", err)
+	}
 
 	s.logger.Info("container started",
 		"host_id", hostID,
@@ -199,7 +254,9 @@ func (s *Service) StopContainer(ctx context.Context, hostID uuid.UUID, container
 	}
 
 	// Update cached state
-	s.repo.UpdateState(ctx, containerID, models.ContainerStateExited, "Exited")
+	if err := s.repo.UpdateState(ctx, containerID, models.ContainerStateExited, "Exited"); err != nil {
+		s.logger.Warn("failed to update cached state", "container_id", containerID, "error", err)
+	}
 
 	s.logger.Info("container stopped",
 		"host_id", hostID,
@@ -222,7 +279,9 @@ func (s *Service) Restart(ctx context.Context, hostID uuid.UUID, containerID str
 	}
 
 	// Update cached state
-	s.repo.UpdateState(ctx, containerID, models.ContainerStateRunning, "Up")
+	if err := s.repo.UpdateState(ctx, containerID, models.ContainerStateRunning, "Up"); err != nil {
+		s.logger.Warn("failed to update cached state", "container_id", containerID, "error", err)
+	}
 
 	s.logger.Info("container restarted",
 		"host_id", hostID,
@@ -243,7 +302,9 @@ func (s *Service) Pause(ctx context.Context, hostID uuid.UUID, containerID strin
 		return fmt.Errorf("pause container: %w", err)
 	}
 
-	s.repo.UpdateState(ctx, containerID, models.ContainerStatePaused, "Paused")
+	if err := s.repo.UpdateState(ctx, containerID, models.ContainerStatePaused, "Paused"); err != nil {
+		s.logger.Warn("failed to update cached state", "container_id", containerID, "error", err)
+	}
 
 	s.logger.Info("container paused",
 		"host_id", hostID,
@@ -264,7 +325,9 @@ func (s *Service) Unpause(ctx context.Context, hostID uuid.UUID, containerID str
 		return fmt.Errorf("unpause container: %w", err)
 	}
 
-	s.repo.UpdateState(ctx, containerID, models.ContainerStateRunning, "Up")
+	if err := s.repo.UpdateState(ctx, containerID, models.ContainerStateRunning, "Up"); err != nil {
+		s.logger.Warn("failed to update cached state", "container_id", containerID, "error", err)
+	}
 
 	s.logger.Info("container unpaused",
 		"host_id", hostID,
@@ -298,6 +361,26 @@ func (s *Service) Kill(ctx context.Context, hostID uuid.UUID, containerID string
 	return nil
 }
 
+// Rename renames a container.
+func (s *Service) Rename(ctx context.Context, hostID uuid.UUID, containerID string, newName string) error {
+	client, err := s.hostService.GetClient(ctx, hostID)
+	if err != nil {
+		return err
+	}
+
+	if err := client.ContainerRename(ctx, containerID, newName); err != nil {
+		return fmt.Errorf("rename container: %w", err)
+	}
+
+	s.logger.Info("container renamed",
+		"host_id", hostID,
+		"container_id", containerID,
+		"new_name", newName,
+	)
+
+	return nil
+}
+
 // Remove removes a container.
 func (s *Service) Remove(ctx context.Context, hostID uuid.UUID, containerID string, force bool, removeVolumes bool) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
@@ -305,12 +388,14 @@ func (s *Service) Remove(ctx context.Context, hostID uuid.UUID, containerID stri
 		return err
 	}
 
-if err := client.ContainerRemove(ctx, containerID, force, removeVolumes); err != nil {
+	if err := client.ContainerRemove(ctx, containerID, force, removeVolumes); err != nil {
 		return fmt.Errorf("remove container: %w", err)
 	}
 
 	// Remove from cache
-	s.repo.Delete(ctx, containerID)
+	if err := s.repo.Delete(ctx, containerID); err != nil {
+		s.logger.Warn("failed to delete cached container", "container_id", containerID, "error", err)
+	}
 
 	s.logger.Info("container removed",
 		"host_id", hostID,
@@ -344,11 +429,11 @@ type CreateInput struct {
 	Privileged    bool
 	NetworkMode   string
 	// Resource limits
-	MemoryLimit   int64
-	MemorySwap    int64
-	CPUShares     int64
-	CPUQuota      int64
-	CPUPeriod     int64
+	MemoryLimit int64
+	MemorySwap  int64
+	CPUShares   int64
+	CPUQuota    int64
+	CPUPeriod   int64
 }
 
 // Create creates a new container.
@@ -407,7 +492,7 @@ func (s *Service) Create(ctx context.Context, hostID uuid.UUID, input *CreateInp
 		}
 	}
 
-	// Set network
+	// Set primary network
 	if len(input.Networks) > 0 {
 		createOpts.NetworkID = input.Networks[0]
 	}
@@ -416,6 +501,19 @@ func (s *Service) Create(ctx context.Context, hostID uuid.UUID, input *CreateInp
 	containerID, err := client.ContainerCreate(ctx, createOpts)
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)
+	}
+
+	// Connect additional networks
+	for _, networkID := range input.Networks[1:] {
+		if err := client.NetworkConnect(ctx, networkID, docker.NetworkConnectOptions{
+			ContainerID: containerID,
+		}); err != nil {
+			s.logger.Warn("failed to connect additional network",
+				"container_id", containerID,
+				"network_id", networkID,
+				"error", err,
+			)
+		}
 	}
 
 	// Get full container info
@@ -493,7 +591,6 @@ func (s *Service) detailsToContainerModel(hostID uuid.UUID, d *docker.ContainerD
 
 	return c
 }
-
 
 // ============================================================================
 // Container Recreation (for updates)
@@ -660,7 +757,6 @@ func (s *Service) Recreate(ctx context.Context, hostID uuid.UUID, containerID st
 	return containerModel, nil
 }
 
-
 // ============================================================================
 // Logs
 // ============================================================================
@@ -684,8 +780,8 @@ func (s *Service) GetLogs(ctx context.Context, hostID uuid.UUID, containerID str
 	}
 
 	dockerOpts := docker.LogOptions{
-		Stdout: opts.Stdout,
-		Stderr: opts.Stderr,
+		Stdout:     opts.Stdout,
+		Stderr:     opts.Stderr,
 		Since:      opts.Since,
 		Until:      opts.Until,
 		Timestamps: opts.Timestamps,
@@ -870,7 +966,224 @@ func parseDockerTime(s string) time.Time {
 	return t
 }
 
-func (s *Service) syncWorker(ctx context.Context) {
+// eventWatcherManager periodically discovers online hosts and ensures each has
+// an active Docker event stream watcher. This replaces the old 30-second
+// full-polling approach with real-time event-driven updates.
+func (s *Service) eventWatcherManager(ctx context.Context) {
+	// Check for new/removed hosts every 30 seconds
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// Initial discovery
+	s.refreshEventWatchers(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.refreshEventWatchers(ctx)
+		}
+	}
+}
+
+// refreshEventWatchers ensures each online host has an event watcher running
+// and stops watchers for hosts that are no longer online.
+func (s *Service) refreshEventWatchers(ctx context.Context) {
+	hosts, _, err := s.hostService.List(ctx, postgres.HostListOptions{Status: "online"})
+	if err != nil {
+		s.logger.Error("failed to list hosts for event watchers", "error", err)
+		return
+	}
+
+	onlineHosts := make(map[uuid.UUID]bool, len(hosts))
+	for _, host := range hosts {
+		onlineHosts[host.ID] = true
+	}
+
+	s.watcherMu.Lock()
+	defer s.watcherMu.Unlock()
+
+	// Stop watchers for hosts no longer online
+	for hostID, cancel := range s.activeWatchers {
+		if !onlineHosts[hostID] {
+			s.logger.Info("stopping event watcher for offline host", "host_id", hostID)
+			cancel()
+			delete(s.activeWatchers, hostID)
+		}
+	}
+
+	// Start watchers for new online hosts
+	for _, host := range hosts {
+		if _, exists := s.activeWatchers[host.ID]; exists {
+			continue
+		}
+
+		watchCtx, cancel := context.WithCancel(ctx)
+		s.activeWatchers[host.ID] = cancel
+		s.logger.Info("starting event watcher for host", "host_id", host.ID)
+		go s.hostEventWatcher(watchCtx, host.ID)
+	}
+}
+
+// hostEventWatcher connects to the Docker event stream for a single host and
+// processes container events in real time. It reconnects with exponential
+// backoff on failures.
+func (s *Service) hostEventWatcher(ctx context.Context, hostID uuid.UUID) {
+	backoff := s.config.EventReconnectMin
+	if backoff <= 0 {
+		backoff = 1 * time.Second
+	}
+	maxBackoff := s.config.EventReconnectMax
+	if maxBackoff <= 0 {
+		maxBackoff = 30 * time.Second
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		default:
+		}
+
+		err := s.watchHostEvents(ctx, hostID)
+		if err == nil {
+			// Stream ended cleanly (e.g. context cancelled)
+			return
+		}
+
+		s.logger.Warn("event stream disconnected, reconnecting",
+			"host_id", hostID,
+			"error", err,
+			"backoff", backoff,
+		)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		case <-time.After(backoff):
+		}
+
+		// Exponential backoff (doubles each retry, capped at max)
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
+
+// watchHostEvents opens a Docker event stream for a host and processes events.
+// Returns an error if the stream fails; returns nil if the context is cancelled.
+func (s *Service) watchHostEvents(ctx context.Context, hostID uuid.UUID) error {
+	client, err := s.hostService.GetClient(ctx, hostID)
+	if err != nil {
+		return fmt.Errorf("get client: %w", err)
+	}
+
+	eventCh, errCh := client.StreamEvents(ctx)
+
+	s.logger.Debug("event stream connected", "host_id", hostID)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-s.stopCh:
+			return nil
+		case err := <-errCh:
+			if err != nil {
+				return fmt.Errorf("event stream: %w", err)
+			}
+			return nil
+		case event, ok := <-eventCh:
+			if !ok {
+				return fmt.Errorf("event channel closed")
+			}
+			s.handleDockerEvent(ctx, hostID, client, event)
+		}
+	}
+}
+
+// containerEventActions is the set of Docker event actions that should trigger
+// a container state update in the database.
+var containerEventActions = map[string]bool{
+	"create":  true,
+	"start":   true,
+	"stop":    true,
+	"die":     true,
+	"kill":    true,
+	"pause":   true,
+	"unpause": true,
+	"destroy": true,
+	"rename":  true,
+	"restart": true,
+	"oom":     true,
+	"health_status": true,
+}
+
+// handleDockerEvent processes a single Docker event and updates the database.
+func (s *Service) handleDockerEvent(ctx context.Context, hostID uuid.UUID, client docker.ClientAPI, event docker.DockerEvent) {
+	// Only process container events
+	if event.Type != "container" {
+		return
+	}
+
+	if !containerEventActions[event.Action] {
+		return
+	}
+
+	containerID := event.ActorID
+	if containerID == "" {
+		return
+	}
+
+	s.logger.Debug("processing container event",
+		"host_id", hostID,
+		"container_id", containerID[:12],
+		"action", event.Action,
+	)
+
+	// For destroy events, remove from database
+	if event.Action == "destroy" {
+		if err := s.repo.Delete(ctx, containerID); err != nil {
+			s.logger.Warn("failed to delete destroyed container",
+				"container_id", containerID,
+				"error", err,
+			)
+		}
+		return
+	}
+
+	// For all other events, inspect and upsert the container
+	inspect, err := client.ContainerGet(ctx, containerID)
+	if err != nil {
+		s.logger.Debug("failed to inspect container after event",
+			"container_id", containerID,
+			"action", event.Action,
+			"error", err,
+		)
+		return
+	}
+
+	model := s.detailsToContainerModel(hostID, inspect)
+	if err := s.repo.Upsert(ctx, model); err != nil {
+		s.logger.Warn("failed to upsert container after event",
+			"container_id", containerID,
+			"action", event.Action,
+			"error", err,
+		)
+	}
+}
+
+// reconciliationWorker does periodic full syncs as a safety net to catch any
+// events that may have been missed (e.g. during reconnection windows).
+func (s *Service) reconciliationWorker(ctx context.Context) {
 	if s.config.SyncInterval <= 0 {
 		return
 	}
@@ -893,7 +1206,7 @@ func (s *Service) syncWorker(ctx context.Context) {
 func (s *Service) syncAllHosts(ctx context.Context) {
 	hosts, _, err := s.hostService.List(ctx, postgres.HostListOptions{Status: "online"})
 	if err != nil {
-		s.logger.Error("failed to list online hosts for sync", "error", err)
+		s.logger.Error("failed to list online hosts for reconciliation sync", "error", err)
 		return
 	}
 
@@ -999,10 +1312,10 @@ type BulkOperationResult struct {
 
 // BulkOperationResults represents the results of a bulk operation.
 type BulkOperationResults struct {
-	Total      int                    `json:"total"`
-	Successful int                    `json:"successful"`
-	Failed     int                    `json:"failed"`
-	Results    []BulkOperationResult  `json:"results"`
+	Total      int                   `json:"total"`
+	Successful int                   `json:"successful"`
+	Failed     int                   `json:"failed"`
+	Results    []BulkOperationResult `json:"results"`
 }
 
 // BulkStart starts multiple containers.

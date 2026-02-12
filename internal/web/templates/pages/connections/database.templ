@@ -88,7 +88,7 @@ templ DatabaseConnectionsList(data DatabaseConnectionsListData) {
 			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 				if len(data.Connections) == 0 {
 					<div class="col-span-full card p-8 text-center">
-						<i class="fas fa-database text-4xl text-gray-600 mb-4"></i>
+						<i class="fas fa-database text-4xl text-gray-400 mb-4"></i>
 						<p class="text-gray-400">No database connections configured</p>
 						<button onclick="showNewConnectionModal()" class="btn-primary mt-4">
 							<i class="fas fa-plus mr-2"></i>Add Connection
@@ -337,7 +337,7 @@ templ DatabaseBrowser(data DatabaseBrowserData) {
 													<i class="fas fa-key text-yellow-400 text-[10px]"></i>
 												}
 												{ col.Name }
-												<span class="text-gray-600 font-normal">{ col.Type }</span>
+												<span class="text-gray-400 font-normal">{ col.Type }</span>
 											</div>
 										</th>
 									}
@@ -380,7 +380,7 @@ templ DatabaseBrowser(data DatabaseBrowserData) {
 				} else {
 					<div class="flex-1 flex items-center justify-center">
 						<div class="text-center">
-							<i class="fas fa-table text-4xl text-gray-600 mb-4"></i>
+							<i class="fas fa-table text-4xl text-gray-400 mb-4"></i>
 							<p class="text-gray-400">Select a table from the sidebar to view data</p>
 						</div>
 					</div>

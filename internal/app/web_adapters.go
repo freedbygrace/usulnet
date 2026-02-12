@@ -11,8 +11,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 	redisrepo "github.com/fr4nsys/usulnet/internal/repository/redis"
+	metricssvc "github.com/fr4nsys/usulnet/internal/services/metrics"
+	"github.com/fr4nsys/usulnet/internal/services/notification"
+	"github.com/fr4nsys/usulnet/internal/services/notification/channels"
+	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
 	"github.com/fr4nsys/usulnet/internal/web"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/profile"
 )
@@ -39,11 +44,12 @@ func (a *webUserRepoAdapter) GetUserByID(id string) (*web.UserInfo, error) {
 		email = *user.Email
 	}
 	return &web.UserInfo{
-		ID:       user.ID.String(),
-		Username: user.Username,
-		Email:    email,
-		Role:     string(user.Role),
-		IsActive: user.IsActive,
+		ID:        user.ID.String(),
+		Username:  user.Username,
+		Email:     email,
+		Role:      string(user.Role),
+		IsActive:  user.IsActive,
+		CreatedAt: user.CreatedAt,
 	}, nil
 }
 
@@ -255,4 +261,139 @@ func convertTerminalSession(pg *postgres.TerminalSession) *web.TerminalSession {
 		Status:       pg.Status,
 		ErrorMessage: pg.ErrorMessage,
 	}
+}
+
+// ============================================================================
+// RoleProvider adapter (postgres.RoleRepository → web.Middleware.RoleProvider)
+// ============================================================================
+
+type roleProviderAdapter struct {
+	repo *postgres.RoleRepository
+}
+
+func (a *roleProviderAdapter) GetByID(ctx context.Context, id string) (*models.Role, error) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid role ID: %w", err)
+	}
+	return a.repo.GetByID(ctx, uid)
+}
+
+// ============================================================================
+// MetricsProvider adapter (metrics.Service → monitoring.MetricsProvider)
+// Bridges the metrics service (live collection) to the alert system (metric queries).
+// ============================================================================
+
+type alertMetricsProviderAdapter struct {
+	metrics *metricssvc.Service
+	hostID  uuid.UUID // standalone mode host
+}
+
+func (a *alertMetricsProviderAdapter) GetHostMetric(ctx context.Context, hostID uuid.UUID, metric models.AlertMetric) (float64, error) {
+	hm, err := a.metrics.GetCurrentHostMetrics(ctx, hostID)
+	if err != nil {
+		return 0, fmt.Errorf("collect host metrics: %w", err)
+	}
+	return hostMetricValue(hm, metric)
+}
+
+func (a *alertMetricsProviderAdapter) GetContainerMetric(ctx context.Context, hostID uuid.UUID, containerID string, metric models.AlertMetric) (float64, error) {
+	cms, err := a.metrics.GetCurrentContainerMetrics(ctx, hostID)
+	if err != nil {
+		return 0, fmt.Errorf("collect container metrics: %w", err)
+	}
+	for _, cm := range cms {
+		if cm.ContainerID == containerID {
+			return containerMetricValue(cm, metric)
+		}
+	}
+	return 0, fmt.Errorf("container %s not found on host %s", containerID, hostID)
+}
+
+func (a *alertMetricsProviderAdapter) ListHosts(_ context.Context) ([]uuid.UUID, error) {
+	return []uuid.UUID{a.hostID}, nil
+}
+
+func (a *alertMetricsProviderAdapter) ListContainers(ctx context.Context, hostID uuid.UUID) ([]string, error) {
+	cms, err := a.metrics.GetCurrentContainerMetrics(ctx, hostID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(cms))
+	for _, cm := range cms {
+		ids = append(ids, cm.ContainerID)
+	}
+	return ids, nil
+}
+
+// hostMetricValue extracts a specific metric from a HostMetrics snapshot.
+func hostMetricValue(hm *workers.HostMetrics, metric models.AlertMetric) (float64, error) {
+	switch metric {
+	case models.AlertMetricHostCPU:
+		return hm.CPUUsagePercent, nil
+	case models.AlertMetricHostMemory:
+		return hm.MemoryPercent, nil
+	case models.AlertMetricHostDisk:
+		return hm.DiskPercent, nil
+	case models.AlertMetricHostNetwork:
+		return float64(hm.NetworkRxBytes + hm.NetworkTxBytes), nil
+	default:
+		return 0, fmt.Errorf("unsupported host metric: %s", metric)
+	}
+}
+
+// containerMetricValue extracts a specific metric from a ContainerMetrics snapshot.
+func containerMetricValue(cm *workers.ContainerMetrics, metric models.AlertMetric) (float64, error) {
+	switch metric {
+	case models.AlertMetricContainerCPU:
+		return cm.CPUUsagePercent, nil
+	case models.AlertMetricContainerMemory:
+		return cm.MemoryPercent, nil
+	case models.AlertMetricContainerNetwork:
+		return float64(cm.NetworkRxBytes + cm.NetworkTxBytes), nil
+	case models.AlertMetricContainerStatus:
+		if cm.State == "running" {
+			return 1, nil
+		}
+		return 0, nil
+	case models.AlertMetricContainerHealth:
+		switch cm.Health {
+		case "healthy":
+			return 1, nil
+		case "unhealthy":
+			return 0, nil
+		default:
+			return 0.5, nil // unknown/starting
+		}
+	default:
+		return 0, fmt.Errorf("unsupported container metric: %s", metric)
+	}
+}
+
+// ============================================================================
+// NotificationSender adapter (notification.Service → monitoring.NotificationSender)
+// Bridges the notification service to the alert system for alert dispatching.
+// ============================================================================
+
+type alertNotificationSenderAdapter struct {
+	svc *notification.Service
+}
+
+func (a *alertNotificationSenderAdapter) SendAlert(ctx context.Context, rule *models.AlertRule, event *models.AlertEvent) error {
+	return a.svc.Send(ctx, notification.Message{
+		Type:     channels.TypeSecurityAlert,
+		Title:    fmt.Sprintf("Alert: %s", rule.Name),
+		Body:     fmt.Sprintf("Alert rule %q triggered: %s %s %.2f (current: %.2f)", rule.Name, rule.Metric, rule.Operator, rule.Threshold, event.Value),
+		Priority: channels.PriorityCritical,
+		Data: map[string]interface{}{
+			"rule_id":    rule.ID.String(),
+			"rule_name":  rule.Name,
+			"metric":     string(rule.Metric),
+			"operator":   string(rule.Operator),
+			"threshold":  rule.Threshold,
+			"value":      event.Value,
+			"event_id":   event.ID.String(),
+			"severity":   string(rule.Severity),
+		},
+	})
 }

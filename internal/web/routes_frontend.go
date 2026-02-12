@@ -31,11 +31,15 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Auth pages
 		r.Get("/login", h.LoginPageTempl)
 		r.Post("/login", h.LoginSubmit)
-		r.Get("/logout", h.Logout)
+		r.Post("/logout", h.Logout)
 
 		// TOTP 2FA verification (during login)
 		r.Get("/login/totp", h.TOTPVerifyPageTempl)
 		r.Post("/login/totp", h.TOTPVerifySubmit)
+
+		// OAuth SSO login
+		r.Get("/login/oauth", h.OAuthLogin)
+		r.Get("/auth/oauth/callback", h.OAuthCallbackHandler)
 
 		// Health check
 		r.Get("/health", h.HealthCheck)
@@ -63,6 +67,9 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Dashboard
 		r.Get("/", h.DashboardTempl)
 		r.Get("/dashboard", h.DashboardTempl)
+
+		// Infrastructure Overview (multi-node aggregate dashboard)
+		r.Get("/overview", h.OverviewTempl)
 
 		// Containers
 		r.Route("/containers", func(r chi.Router) {
@@ -167,6 +174,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("image:remove"))
 				r.Post("/{id}/remove", h.ImageRemove)
+				r.Delete("/{id}", h.ImageRemove)
 				r.Post("/prune", h.ImagesPrune)
 			})
 		})
@@ -193,6 +201,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("volume:remove"))
 				r.Post("/{name}/remove", h.VolumeRemove)
+				r.Delete("/{name}", h.VolumeRemove)
 				r.Post("/prune", h.VolumesPrune)
 			})
 		})
@@ -219,6 +228,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("network:remove"))
 				r.Post("/{id}/remove", h.NetworkRemove)
+				r.Delete("/{id}", h.NetworkRemove)
 				r.Post("/prune", h.NetworksPrune)
 			})
 		})
@@ -278,10 +288,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			})
 		})
 
-		// Updates
+		// Updates & Auto-Update
 		r.Route("/updates", func(r chi.Router) {
 			r.Get("/", h.UpdatesTempl)
-			r.Get("/check", h.UpdatesCheckTempl)
+			r.Post("/check", h.UpdatesCheckTempl)
 			r.Post("/check-all", h.UpdatesCheckTempl)
 			r.Post("/apply-all", h.UpdateBatch)
 			r.Post("/manual", h.UpdateManual)
@@ -289,6 +299,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Post("/{id}/apply", h.UpdateApplyTempl)
 			r.Post("/{id}/rollback", h.UpdateRollbackTempl)
 			r.Post("/batch", h.UpdateBatch)
+			// Auto-update policy management
+			r.Post("/policies", h.AutoUpdatePolicyCreate)
+			r.Post("/policies/{id}/toggle", h.AutoUpdatePolicyToggle)
+			r.Post("/policies/{id}/delete", h.AutoUpdatePolicyDelete)
 		})
 
 		// Backups
@@ -514,7 +528,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Get("/{id}/edit", h.ProxyEditTempl)
 		})
 
-		// S3 Storage
+		// Storage (S3, Azure, GCS, B2, SFTP, Local)
 		r.Route("/storage", func(r chi.Router) {
 			r.Get("/", h.StorageTempl)
 			r.Post("/connections", h.StorageCreateConnection)
@@ -541,8 +555,12 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			// Main connections dashboard
 			r.Get("/", h.ConnectionsTempl)
 
-			// SSH Connections
+			// SSH Connections (optional service — gated by middleware)
 			r.Route("/ssh", func(r chi.Router) {
+				r.Use(h.requireServiceMiddleware(
+					func() bool { return h.sshService != nil },
+					"SSH Connections", "Enable SSH by configuring an encryption key (USULNET_ENCRYPTION_KEY)",
+				))
 				r.Get("/", h.SSHConnectionsTempl)
 				r.Get("/new", h.SSHConnectionNewTempl)
 				r.Post("/", h.SSHConnectionCreate)
@@ -577,6 +595,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/{id}", h.RDPConnectionUpdate)
 				r.Delete("/{id}", h.RDPConnectionDelete)
 				r.Post("/{id}/test", h.RDPConnectionTest)
+				r.Get("/{id}/download", h.RDPConnectionDownload)
 			})
 
 			// SSH Keys
@@ -611,9 +630,8 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/{id}/query", h.DatabaseQueryExecute)
 			})
 
-			// LDAP Connections (requires FeatureLDAP, disabled in CE)
+			// LDAP Connections
 			r.Route("/ldap", func(r chi.Router) {
-				r.Use(h.requireFeature(license.FeatureLDAP))
 				r.Get("/", h.LDAPConnectionsTempl)
 				r.Post("/", h.LDAPConnectionCreate)
 				r.Get("/{id}", h.LDAPBrowserTempl)
@@ -633,7 +651,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Gitea Integration (legacy routes - kept for backwards compatibility)
 		r.Route("/integrations/gitea", func(r chi.Router) {
 			r.Get("/", h.GiteaTempl)
-			
+
 			// Connection management
 			r.Post("/connections", h.GiteaCreateConnection)
 			r.Route("/connections/{id}", func(r chi.Router) {
@@ -642,10 +660,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/delete", h.GiteaDeleteConnection)
 				r.Get("/templates", h.GiteaTemplates) // gitignore & license templates
 			})
-			
+
 			// Repository creation (Tier 1)
 			r.Post("/repos", h.GiteaCreateRepo)
-			
+
 			// Repository operations (Tier 1)
 			r.Route("/repos/{id}", func(r chi.Router) {
 				// Existing
@@ -653,27 +671,27 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Get("/files", h.GiteaRepoFiles)
 				r.Get("/file", h.GiteaFileContent)
 				r.Post("/file", h.GiteaFileSave)
-				
+
 				// Tier 1: Repository management
 				r.Post("/edit", h.GiteaEditRepo)
 				r.Post("/delete", h.GiteaDeleteRepo)
-				
+
 				// Tier 1: Branches
 				r.Get("/branches", h.GiteaListBranches)
 				r.Post("/branches", h.GiteaCreateBranch)
 				r.Delete("/branches/{name}", h.GiteaDeleteBranch)
-				
+
 				// Tier 1: Tags
 				r.Get("/tags", h.GiteaListTags)
 				r.Post("/tags", h.GiteaCreateTag)
 				r.Delete("/tags/{name}", h.GiteaDeleteTag)
-				
+
 				// Tier 1: Commits & Diff
 				r.Get("/commits", h.GiteaListCommitsFiltered)
 				r.Get("/commits/{sha}", h.GiteaGetCommit)
 				r.Get("/compare", h.GiteaCompare)
 				r.Get("/diff", h.GiteaGetDiff)
-				
+
 				// Tier 2: Pull Requests
 				r.Route("/pulls", func(r chi.Router) {
 					r.Get("/", h.GiteaListPRs)
@@ -685,7 +703,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Get("/{number}/reviews", h.GiteaListPRReviews)
 					r.Post("/{number}/reviews", h.GiteaCreatePRReview)
 				})
-				
+
 				// Tier 2: Issues
 				r.Route("/issues", func(r chi.Router) {
 					r.Get("/", h.GiteaListIssues)
@@ -696,11 +714,11 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Post("/{number}/comments", h.GiteaCreateIssueComment)
 					r.Delete("/comments/{commentId}", h.GiteaDeleteIssueComment)
 				})
-				
+
 				// Tier 2: Labels & Milestones
 				r.Get("/labels", h.GiteaListLabels)
 				r.Get("/milestones", h.GiteaListMilestones)
-				
+
 				// Tier 2: Collaborators
 				r.Route("/collaborators", func(r chi.Router) {
 					r.Get("/", h.GiteaListCollaborators)
@@ -709,7 +727,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Get("/{username}/permission", h.GiteaGetCollaboratorPermission)
 				})
 				r.Get("/teams", h.GiteaListRepoTeams)
-				
+
 				// Tier 3: Webhooks
 				r.Route("/hooks", func(r chi.Router) {
 					r.Get("/", h.GiteaListHooks)
@@ -719,7 +737,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Delete("/{hookId}", h.GiteaDeleteHook)
 					r.Post("/{hookId}/test", h.GiteaTestHook)
 				})
-				
+
 				// Tier 3: Deploy Keys
 				r.Route("/keys", func(r chi.Router) {
 					r.Get("/", h.GiteaListDeployKeys)
@@ -727,7 +745,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Get("/{keyId}", h.GiteaGetDeployKey)
 					r.Delete("/{keyId}", h.GiteaDeleteDeployKey)
 				})
-				
+
 				// Tier 3: Releases
 				r.Route("/releases", func(r chi.Router) {
 					r.Get("/", h.GiteaListReleases)
@@ -740,7 +758,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Get("/{releaseId}/assets", h.GiteaListReleaseAssets)
 					r.Delete("/{releaseId}/assets/{assetId}", h.GiteaDeleteReleaseAsset)
 				})
-				
+
 				// Tier 3: Actions / CI
 				r.Route("/actions", func(r chi.Router) {
 					r.Get("/workflows", h.GiteaListWorkflows)
@@ -751,7 +769,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Post("/runs/{runId}/rerun", h.GiteaRerunActionRun)
 					r.Get("/jobs/{jobId}/logs", h.GiteaGetActionJobLogs)
 				})
-				
+
 				// Tier 3: Commit Status (for CI integrations)
 				r.Get("/commits/{sha}/status", h.GiteaGetCombinedStatus)
 				r.Get("/commits/{sha}/statuses", h.GiteaListCommitStatuses)
@@ -762,7 +780,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Unified Git Integration (supports Gitea, GitHub, GitLab)
 		r.Route("/integrations/git", func(r chi.Router) {
 			r.Get("/", h.GitListTempl) // Reuses GiteaTempl for now
-			
+
 			// Connection management (multi-provider)
 			r.Post("/connections", h.GitCreateConnection)
 			r.Route("/connections/{id}", func(r chi.Router) {
@@ -771,7 +789,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/delete", h.GitDeleteConnection)
 				r.Get("/templates", h.GitTemplates)
 			})
-			
+
 			// Repository operations (multi-provider)
 			r.Post("/repos", h.GitCreateRepo)
 			r.Route("/repos/{id}", func(r chi.Router) {
@@ -781,19 +799,19 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/file", h.GitFileSave)
 				r.Post("/edit", h.GitEditRepo)
 				r.Post("/delete", h.GitDeleteRepo)
-				
+
 				// Branches
 				r.Get("/branches", h.GitListBranches)
 				r.Post("/branches", h.GitCreateBranch)
 				r.Delete("/branches/{name}", h.GitDeleteBranch)
-				
+
 				// Tags
 				r.Get("/tags", h.GitListTags)
-				
+
 				// Commits
 				r.Get("/commits", h.GitListCommits)
 				r.Get("/commits/{sha}", h.GitGetCommit)
-				
+
 				// Pull Requests / Merge Requests
 				r.Route("/pulls", func(r chi.Router) {
 					r.Get("/", h.GitListPRs)
@@ -801,14 +819,14 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Get("/{number}", h.GitGetPR)
 					r.Post("/{number}/merge", h.GitMergePR)
 				})
-				
+
 				// Issues
 				r.Route("/issues", func(r chi.Router) {
 					r.Get("/", h.GitListIssues)
 					r.Post("/", h.GitCreateIssue)
 					r.Get("/{number}", h.GitGetIssue)
 				})
-				
+
 				// Releases
 				r.Get("/releases", h.GitListReleases)
 				r.Get("/releases/latest", h.GitGetLatestRelease)
@@ -835,9 +853,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Monitoring (metrics dashboard)
 		r.Route("/monitoring", func(r chi.Router) {
 			r.Get("/", h.MonitoringTempl)
-			r.Get("/host", h.MonitoringHostPartial)
-			r.Get("/containers", h.MonitoringContainersPartial)
-			r.Get("/history", h.MonitoringHistoryJSON)
+			// 301 redirects: partials moved to /partials/monitoring/* (INT-DTO-L1)
+			r.Get("/host", redirect301("/partials/monitoring/host"))
+			r.Get("/containers", redirect301("/partials/monitoring/containers"))
+			r.Get("/history", redirect301("/partials/monitoring/history"))
 		})
 
 		// Alerts
@@ -879,6 +898,96 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Topology
 		r.Get("/topology", h.TopologyTempl)
 
+		// Dependencies (full dependency graph)
+		r.Get("/dependencies", h.DependenciesTempl)
+
+		// Lifecycle Policies (automated resource cleanup)
+		r.Route("/lifecycle", func(r chi.Router) {
+			r.Get("/", h.LifecyclePoliciesTempl)
+			r.Post("/policies", h.LifecyclePolicyCreate)
+			r.Post("/policies/{id}/toggle", h.LifecyclePolicyToggle)
+			r.Post("/policies/{id}/delete", h.LifecyclePolicyDelete)
+			r.Post("/policies/{id}/execute", h.LifecyclePolicyExecute)
+		})
+
+		// Resource Quotas
+		r.Route("/quotas", func(r chi.Router) {
+			r.Get("/", h.QuotasTempl)
+			r.Post("/", h.QuotaCreate)
+			r.Post("/{id}/toggle", h.QuotaToggle)
+			r.Post("/{id}/delete", h.QuotaDelete)
+		})
+
+		// GitOps Pipelines (automated deployment from Git)
+		r.Route("/gitops", func(r chi.Router) {
+			r.Get("/", h.GitOpsTempl)
+			r.Post("/pipelines", h.GitOpsPipelineCreate)
+			r.Post("/pipelines/{id}/toggle", h.GitOpsPipelineToggle)
+			r.Post("/pipelines/{id}/delete", h.GitOpsPipelineDelete)
+			r.Post("/pipelines/{id}/deploy", h.GitOpsPipelineDeploy)
+		})
+
+		// Container Templates (reusable container configs)
+		r.Route("/container-templates", func(r chi.Router) {
+			r.Get("/", h.ContainerTemplatesTempl)
+			r.Post("/", h.ContainerTemplateCreate)
+			r.Post("/{id}/deploy", h.ContainerTemplateDeploy)
+			r.Post("/{id}/delete", h.ContainerTemplateDelete)
+		})
+
+		// Maintenance Windows (scheduled maintenance)
+		r.Route("/maintenance", func(r chi.Router) {
+			r.Get("/", h.MaintenanceTempl)
+			r.Post("/", h.MaintenanceCreate)
+			r.Post("/{id}/toggle", h.MaintenanceToggle)
+			r.Post("/{id}/delete", h.MaintenanceDelete)
+			r.Post("/{id}/execute", h.MaintenanceExecute)
+		})
+
+		// Compliance Policies (security & compliance)
+		r.Route("/compliance", func(r chi.Router) {
+			r.Get("/", h.ComplianceTempl)
+			r.Post("/policies", h.CompliancePolicyCreate)
+			r.Post("/policies/{id}/toggle", h.CompliancePolicyToggle)
+			r.Post("/policies/{id}/delete", h.CompliancePolicyDelete)
+			r.Post("/scan", h.ComplianceScan)
+			r.Post("/violations/{id}/acknowledge", h.ComplianceViolationAcknowledge)
+			r.Post("/violations/{id}/resolve", h.ComplianceViolationResolve)
+			r.Post("/violations/{id}/exempt", h.ComplianceViolationExempt)
+		})
+
+		// Secret Management
+		r.Route("/secrets", func(r chi.Router) {
+			r.Get("/", h.SecretsTempl)
+			r.Post("/", h.SecretCreate)
+			r.Post("/{id}/delete", h.SecretDelete)
+			r.Post("/{id}/rotate", h.SecretRotate)
+		})
+
+		// Vulnerability Management
+		r.Route("/vulnerabilities", func(r chi.Router) {
+			r.Get("/", h.VulnMgmtTempl)
+			r.Post("/scan", h.VulnScan)
+			r.Post("/{id}/acknowledge", h.VulnAcknowledge)
+			r.Post("/{id}/resolve", h.VulnResolve)
+			r.Post("/{id}/accept", h.VulnAcceptRisk)
+		})
+
+		// Access Control Audit
+		r.Route("/access-audit", func(r chi.Router) {
+			r.Get("/", h.AccessAuditTempl)
+			r.Post("/export", h.AccessAuditExport)
+		})
+
+		// Container Health Dashboard
+		r.Get("/health-dashboard", h.HealthDashTempl)
+
+		// Bulk Operations (dedicated page)
+		r.Route("/bulk-ops", func(r chi.Router) {
+			r.Get("/", h.BulkOpsTempl)
+			r.Post("/action", h.BulkOpsAction)
+		})
+
 		// Ports
 		r.Get("/ports", h.PortsTempl)
 
@@ -916,14 +1025,25 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Get("/", h.ProfileTempl)
 			r.Post("/", h.UpdateProfile)
 			r.Post("/password", h.UpdatePassword)
+			r.Put("/preferences", h.UpdatePreferences)
+			r.Post("/preferences/reset", h.ResetPreferences)
+			r.Post("/theme", h.ToggleTheme)
+			r.Post("/export", h.ExportUserData)
+			r.Delete("/", h.DeleteAccount)
+			r.Delete("/sessions", h.DeleteAllSessions)
+			r.Delete("/sessions/{id}", h.DeleteSession)
 		})
 
 		// Admin routes
 		r.Group(func(r chi.Router) {
 			r.Use(m.AdminRequired)
 
-			// Teams
+			// Teams (optional service — gated by middleware)
 			r.Route("/teams", func(r chi.Router) {
+				r.Use(h.requireServiceMiddleware(
+					func() bool { return h.services.Teams() != nil },
+					"Teams", "Teams service is available when the application is fully initialized",
+				))
 				r.Get("/", h.TeamsTempl)
 				r.Get("/new", h.TeamNewTempl)
 				r.Post("/", h.TeamCreate)
@@ -1001,9 +1121,8 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/{id}/disable", h.OAuthProviderDisable)
 			})
 
-			// LDAP Providers (Admin — requires FeatureLDAP, disabled in CE)
+			// LDAP Providers (Admin)
 			r.Route("/admin/ldap", func(r chi.Router) {
-				r.Use(h.requireFeature(license.FeatureLDAP))
 				r.Get("/", h.LDAPProvidersTempl)
 				r.Post("/", h.LDAPProviderCreate)
 				r.Get("/{id}", h.LDAPProviderEditTempl)
@@ -1126,7 +1245,119 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Get("/sessions/target/{type}/{id}", h.APITerminalSessionsByTarget)
 		})
 
-		// HTMX Partials
+		// ================================================================
+		// Enterprise Phase 2: Compliance, OPA, Logs, Image Signing, Runtime
+		// ================================================================
+
+		// Compliance frameworks (Enterprise license)
+		r.Route("/api/v1/compliance", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureCompliance))
+			r.Get("/frameworks", h.ComplianceFrameworksTempl)
+			r.Post("/frameworks/{id}/assess", h.ComplianceFrameworkAssess)
+			r.Get("/assessments/{assessmentId}/report", h.ComplianceFrameworkReport)
+			r.Post("/frameworks/seed", h.ComplianceFrameworkSeed)
+		})
+
+		// OPA policy engine (Enterprise license)
+		r.Route("/api/v1/opa", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureOPAPolicies))
+			r.Get("/policies", h.OPAPoliciesJSON)
+			r.Post("/evaluate/container/{id}", h.OPAPolicyEvaluateContainer)
+			r.Post("/policies/seed", h.OPAPolicySeed)
+		})
+
+		// Log aggregation and search (Enterprise license)
+		r.Route("/api/v1/logs", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureLogAggregation))
+			r.Get("/search", h.LogSearchJSON)
+			r.Get("/stats", h.LogStatsJSON)
+		})
+
+		// Image signing and verification (Enterprise license)
+		r.Route("/api/v1/images/signing", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureImageSigning))
+			r.Get("/signatures", h.ImageSignaturesJSON)
+			r.Get("/verify", h.ImageVerifyJSON)
+			r.Get("/trust-policies", h.ImageTrustPoliciesJSON)
+			r.Post("/trust-policies/seed", h.ImageSignSeed)
+		})
+
+		// Runtime security (Enterprise license)
+		r.Route("/api/v1/runtime-security", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureRuntimeSecurity))
+			r.Get("/events", h.RuntimeEventsJSON)
+			r.Post("/events/{id}/acknowledge", h.RuntimeEventAcknowledge)
+			r.Get("/dashboard", h.RuntimeDashboardJSON)
+			r.Get("/rules", h.RuntimeRulesJSON)
+			r.Post("/rules/seed", h.RuntimeSeedRules)
+			r.Post("/monitor", h.RuntimeMonitorAll)
+		})
+
+		// Dashboard layouts (Enterprise license)
+		r.Route("/api/v1/dashboards", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureCustomDashboards))
+			r.Get("/layouts", h.DashboardLayoutsJSON)
+		})
+
+		// ================================================================
+		// Phase 3: Market Expansion - GitOps
+		// ================================================================
+
+		// Bidirectional Git Sync
+		r.Route("/api/v1/git-sync", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureGitSync))
+			r.Get("/configs", h.GitSyncConfigsJSON)
+			r.Post("/configs", h.GitSyncConfigCreate)
+			r.Get("/configs/{id}", h.GitSyncConfigGet)
+			r.Delete("/configs/{id}", h.GitSyncConfigDelete)
+			r.Post("/configs/{id}/toggle", h.GitSyncConfigToggle)
+			r.Get("/configs/{id}/events", h.GitSyncEventsJSON)
+			r.Get("/configs/{id}/conflicts", h.GitSyncConflictsJSON)
+			r.Post("/conflicts/{conflictId}/resolve", h.GitSyncConflictResolve)
+			r.Get("/stats", h.GitSyncStatsJSON)
+		})
+
+		// Branch-based Ephemeral Environments
+		r.Route("/api/v1/ephemeral", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureEphemeralEnvs))
+			r.Get("/environments", h.EphemeralEnvsJSON)
+			r.Post("/environments", h.EphemeralEnvCreate)
+			r.Get("/environments/{id}", h.EphemeralEnvGet)
+			r.Post("/environments/{id}/stop", h.EphemeralEnvStop)
+			r.Delete("/environments/{id}", h.EphemeralEnvDestroy)
+			r.Post("/environments/{id}/extend", h.EphemeralEnvExtendTTL)
+			r.Get("/environments/{id}/logs", h.EphemeralEnvLogsJSON)
+			r.Get("/dashboard", h.EphemeralEnvDashboardJSON)
+		})
+
+		// Visual GitOps Manifest Builder
+		r.Route("/api/v1/manifests", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureManifestBuilder))
+			// Templates
+			r.Get("/templates", h.ManifestTemplatesJSON)
+			r.Post("/templates", h.ManifestTemplateCreate)
+			r.Get("/templates/categories", h.ManifestTemplateCategoriesJSON)
+			r.Get("/templates/{id}", h.ManifestTemplateGet)
+			r.Delete("/templates/{id}", h.ManifestTemplateDelete)
+			r.Post("/templates/{id}/render", h.ManifestTemplateRender)
+			// Builder sessions
+			r.Get("/sessions", h.ManifestSessionsJSON)
+			r.Post("/sessions", h.ManifestSessionCreate)
+			r.Get("/sessions/{id}", h.ManifestSessionGet)
+			r.Put("/sessions/{id}", h.ManifestSessionUpdate)
+			r.Delete("/sessions/{id}", h.ManifestSessionDelete)
+			r.Post("/sessions/{id}/save", h.ManifestSessionSave)
+			// Generation & validation
+			r.Post("/generate", h.ManifestGenerateJSON)
+			r.Post("/validate", h.ManifestValidateJSON)
+			// Component library
+			r.Get("/components", h.ManifestComponentsJSON)
+			// Seed data
+			r.Post("/seed", h.ManifestSeedJSON)
+		})
+
+		// HTMX Partials — canonical prefix for all partial/fragment endpoints.
+		// Monitoring partials moved here from /monitoring/* (INT-DTO-L1).
 		r.Route("/partials", func(r chi.Router) {
 			r.Get("/stats", h.StatsPartial)
 			r.Get("/containers", h.ContainersPartialTempl)
@@ -1135,6 +1366,21 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Get("/events", h.EventsPartialTempl)
 			r.Get("/notifications", h.NotificationsPartialTempl)
 			r.Get("/search", h.SearchPartialTempl)
+
+			// Monitoring partials (moved from /monitoring/*)
+			r.Route("/monitoring", func(r chi.Router) {
+				r.Get("/host", h.MonitoringHostPartial)
+				r.Get("/containers", h.MonitoringContainersPartial)
+				r.Get("/history", h.MonitoringHistoryJSON)
+			})
 		})
 	})
+}
+
+// redirect301 returns a handler that issues a permanent redirect to the target path.
+// Used for backward-compatible URL migration (e.g., moving HTMX partials).
+func redirect301(target string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
+	}
 }

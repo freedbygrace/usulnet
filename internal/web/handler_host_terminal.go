@@ -35,25 +35,15 @@ type HostTerminalConfig struct {
 	Shell   string // HOST_TERMINAL_SHELL (default: /bin/bash)
 }
 
-// loadHostTerminalConfig reads config from environment variables.
+// loadHostTerminalConfig returns default terminal config.
+// Actual values are injected via Handler.SetTerminalConfig() from centralized
+// app config (TerminalConfig struct with Viper bindings).
 func loadHostTerminalConfig() HostTerminalConfig {
-	cfg := HostTerminalConfig{
+	return HostTerminalConfig{
 		Enabled: false,
 		User:    "nobody_usulnet",
 		Shell:   "/bin/bash",
 	}
-
-	if v := os.Getenv("HOST_TERMINAL_ENABLED"); v != "" {
-		cfg.Enabled = strings.EqualFold(v, "true") || v == "1"
-	}
-	if v := os.Getenv("HOST_TERMINAL_USER"); v != "" {
-		cfg.User = v
-	}
-	if v := os.Getenv("HOST_TERMINAL_SHELL"); v != "" {
-		cfg.Shell = v
-	}
-
-	return cfg
 }
 
 // =============================================================================

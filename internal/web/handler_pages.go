@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/web/templates/components"
 	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages"
@@ -23,12 +24,12 @@ import (
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/config"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/containers"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/hosts"
-	"github.com/fr4nsys/usulnet/internal/web/templates/types"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/networks"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/proxy"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/stacks"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/users"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/volumes"
+	"github.com/fr4nsys/usulnet/internal/web/templates/types"
 )
 
 // ============================================================================
@@ -140,7 +141,7 @@ func (h *Handler) StackNewTempl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StackCatalogTempl(w http.ResponseWriter, r *http.Request) {
-	pageData := h.prepareTemplPageData(r, "Apps", "catalog")
+	pageData := h.prepareTemplPageData(r, "Apps", "stacks")
 
 	apps := GetCatalogApps()
 	var items []stacks.CatalogAppItem
@@ -173,7 +174,7 @@ func (h *Handler) StackCatalogDeployTempl(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	pageData := h.prepareTemplPageData(r, "Install "+app.Name, "catalog")
+	pageData := h.prepareTemplPageData(r, "Install "+app.Name, "stacks")
 	data := stacks.CatalogDeployData{
 		PageData:   pageData,
 		App:        catalogAppToDetail(app),
@@ -237,7 +238,7 @@ func (h *Handler) StackCatalogDeploySubmit(w http.ResponseWriter, r *http.Reques
 
 // renderCatalogDeployError re-renders the catalog deploy form preserving user values.
 func (h *Handler) renderCatalogDeployError(w http.ResponseWriter, r *http.Request, app *CatalogApp, errMsg string, validationErrors []string, values map[string]string) {
-	pageData := h.prepareTemplPageData(r, "Install "+app.Name, "catalog")
+	pageData := h.prepareTemplPageData(r, "Install "+app.Name, "stacks")
 	data := stacks.CatalogDeployData{
 		PageData:   pageData,
 		App:        catalogAppToDetail(app),
@@ -279,7 +280,6 @@ func catalogAppToDetail(app *CatalogApp) stacks.CatalogAppDetail {
 		Fields:      fields,
 	}
 }
-
 
 // ============================================================================
 // Backups Handlers
@@ -530,6 +530,11 @@ func (h *Handler) ConfigTempl(w http.ResponseWriter, r *http.Request) {
 					if v, ok := m["description"].(string); ok {
 						tmpl.Description = v
 					}
+					if v, ok := m["var_count"].(int); ok {
+						tmpl.VarCount = v
+					} else if v, ok := m["var_count"].(float64); ok {
+						tmpl.VarCount = int(v)
+					}
 					templates = append(templates, tmpl)
 				}
 			}
@@ -687,19 +692,27 @@ func (h *Handler) ProxyTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Reverse Proxy", "proxy")
 
-	connected := h.services.Proxy().IsConnected(ctx)
+	var connected bool
 	var proxyHosts []proxy.ProxyHost
-	if connected {
-		if hostList, err := h.services.Proxy().ListHosts(ctx); err == nil {
-			for _, ph := range hostList {
-				proxyHosts = append(proxyHosts, proxy.ProxyHost{
-					DomainName:    ph.Domain,
-					ForwardHost:   ph.ForwardHost,
-					ForwardPort:   ph.ForwardPort,
-					SSLEnabled:    ph.SSLEnabled,
-					Enabled:       ph.Enabled,
-					ContainerName: ph.Container,
-				})
+
+	proxySvc := h.services.Proxy()
+	if proxySvc != nil {
+		connected = proxySvc.IsConnected(ctx)
+		if connected {
+			if hostList, err := proxySvc.ListHosts(ctx); err == nil {
+				for _, ph := range hostList {
+					proxyHosts = append(proxyHosts, proxy.ProxyHost{
+						ID:            strconv.Itoa(ph.ID),
+						DomainName:    ph.Domain,
+						ForwardHost:   ph.ForwardHost,
+						ForwardPort:   ph.ForwardPort,
+						SSLEnabled:    ph.SSLEnabled,
+						SSLForced:     ph.SSLForced,
+						Enabled:       ph.Enabled,
+						ContainerName: ph.Container,
+						LastSync:      ph.ModifiedOn,
+					})
+				}
 			}
 		}
 	}
@@ -712,10 +725,6 @@ func (h *Handler) ProxyTempl(w http.ResponseWriter, r *http.Request) {
 	h.renderTempl(w, r, proxy.List(data))
 }
 
-func (h *Handler) ProxyHostDelete(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ============================================================================
 // Users Handlers
 // ============================================================================
@@ -724,14 +733,28 @@ func (h *Handler) UsersTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Users", "users")
 
+	filter := r.URL.Query().Get("filter")
+	if filter == "" {
+		filter = "all"
+	}
+
 	var items []users.UserItem
 	if userList, _, err := h.services.Users().List(ctx, "", ""); err == nil {
 		for _, u := range userList {
+			// Apply filter
+			if filter == "local" && u.IsLDAP {
+				continue
+			}
+			if filter == "ldap" && !u.IsLDAP {
+				continue
+			}
+
 			item := users.UserItem{
 				ID:       u.ID,
 				Username: u.Username,
 				Email:    u.Email,
 				Role:     u.Role,
+				RoleName: u.Role,
 				IsActive: u.IsActive,
 				IsLDAP:   u.IsLDAP,
 				LDAPDN:   u.LDAPDN,
@@ -762,6 +785,7 @@ func (h *Handler) UsersTempl(w http.ResponseWriter, r *http.Request) {
 		PageData: pageData,
 		Users:    items,
 		Stats:    statsView,
+		Filter:   filter,
 	}
 	h.renderTempl(w, r, users.List(data))
 }
@@ -788,10 +812,6 @@ func (h *Handler) UserNewTempl(w http.ResponseWriter, r *http.Request) {
 	h.renderTempl(w, r, users.New(data))
 }
 
-func (h *Handler) UserDetail(w http.ResponseWriter, r *http.Request) {
-	h.UsersTempl(w, r)
-}
-
 // UserEditTempl shows user edit page using Templ.
 func (h *Handler) UserEditTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -811,6 +831,7 @@ func (h *Handler) UserEditTempl(w http.ResponseWriter, r *http.Request) {
 			Username: user.Username,
 			Email:    user.Email,
 			Role:     user.Role,
+			RoleName: user.Role,
 			IsActive: user.IsActive,
 			IsLDAP:   user.IsLDAP,
 			LDAPDN:   user.LDAPDN,
@@ -822,7 +843,7 @@ func (h *Handler) UserEditTempl(w http.ResponseWriter, r *http.Request) {
 	}
 	data.User.CreatedAt = user.CreatedAt.Format("2006-01-02 15:04")
 
-	// Load roles for dropdown
+	// Load roles for dropdown and match current user's role to get RoleID
 	if h.roleRepo != nil {
 		if roles, err := h.roleRepo.GetAll(ctx); err == nil {
 			for _, role := range roles {
@@ -833,6 +854,10 @@ func (h *Handler) UserEditTempl(w http.ResponseWriter, r *http.Request) {
 					Description: ptrToString(role.Description),
 					IsSystem:    role.IsSystem,
 				})
+				// Match role name to populate RoleID for dropdown pre-selection
+				if role.Name == user.Role {
+					data.User.RoleID = role.ID.String()
+				}
 			}
 		}
 	}
@@ -845,21 +870,101 @@ func (h *Handler) UserEditTempl(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (h *Handler) SettingsTempl(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Settings", "settings")
+
+	// Load settings from config service variables (scope=settings)
+	cfg := pages.SettingsConfig{
+		SiteName:         "usulnet",
+		BackupPath:       "/app/backups",
+		BackupRetention:  30,
+		ScanInterval:     6,
+		UpdateCheckHours: 6,
+	}
+
+	if vars, err := h.services.Config().ListVariables(ctx, "settings", "global"); err == nil {
+		for _, v := range vars {
+			switch v.Name {
+			case "site_name":
+				if v.Value != "" {
+					cfg.SiteName = v.Value
+				}
+			case "backup_path":
+				if v.Value != "" {
+					cfg.BackupPath = v.Value
+				}
+			case "backup_retention":
+				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
+					cfg.BackupRetention = n
+				}
+			case "scan_interval":
+				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
+					cfg.ScanInterval = n
+				}
+			case "update_check_hours":
+				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
+					cfg.UpdateCheckHours = n
+				}
+			case "s3_enabled":
+				cfg.S3Enabled = v.Value == "true"
+			case "s3_bucket":
+				cfg.S3Bucket = v.Value
+			case "s3_region":
+				cfg.S3Region = v.Value
+			case "smtp_enabled":
+				cfg.SMTPEnabled = v.Value == "true"
+			case "smtp_host":
+				cfg.SMTPHost = v.Value
+			case "smtp_port":
+				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
+					cfg.SMTPPort = n
+				}
+			}
+		}
+	}
+
 	data := pages.SettingsData{
 		PageData: pageData,
-		Settings: pages.SettingsConfig{
-			SiteName:         "usulnet",
-			BackupPath:       "/app/backups",
-			BackupRetention:  30,
-			ScanInterval:     6,
-			UpdateCheckHours: 6,
-		},
+		Settings: cfg,
 	}
 	h.renderTempl(w, r, pages.Settings(data))
 }
 
 func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if err := r.ParseForm(); err != nil {
+		slog.Error("Failed to parse settings form", "error", err)
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	}
+
+	// Map form fields to config variable names
+	fields := map[string]string{
+		"site_name":          r.FormValue("site_name"),
+		"backup_path":        r.FormValue("backup_path"),
+		"backup_retention":   r.FormValue("backup_retention"),
+		"scan_interval":      r.FormValue("scan_interval"),
+		"update_check_hours": r.FormValue("update_check_hours"),
+	}
+
+	for name, value := range fields {
+		if value == "" {
+			continue
+		}
+		v := &ConfigVarView{
+			Name:    name,
+			Value:   value,
+			VarType: "string",
+			Scope:   "settings",
+			ScopeID: "global",
+		}
+		if err := h.services.Config().CreateVariable(ctx, v); err != nil {
+			slog.Error("Failed to save setting", "name", name, "error", err)
+		}
+	}
+
+	h.setFlash(w, r, "success", "Settings saved successfully")
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
@@ -1055,24 +1160,108 @@ func (h *Handler) TopologyTempl(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (h *Handler) NotificationsTempl(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Notifications", "notifications")
+
+	var items []pages.NotificationItem
+	var unreadCount int
+
+	// Generate notifications from recent alert events
+	alertSvc := h.getAlertService()
+	if alertSvc != nil {
+		events, _, err := alertSvc.ListEvents(ctx, models.AlertEventListOptions{Limit: 50})
+		if err == nil {
+			for _, event := range events {
+				nType := "info"
+				if event.State == "firing" {
+					nType = "warning"
+				}
+				// Get rule name for better notification title
+				title := "Alert Event"
+				if rule, err := alertSvc.GetRule(ctx, event.AlertID); err == nil && rule != nil {
+					title = rule.Name
+					if rule.Severity == "critical" {
+						nType = "error"
+					}
+				}
+
+				item := pages.NotificationItem{
+					ID:        event.ID.String(),
+					Type:      nType,
+					Title:     title,
+					Message:   event.Message,
+					Link:      "/alerts?tab=events",
+					Read:      event.AcknowledgedAt != nil,
+					CreatedAt: event.FiredAt.Format("2006-01-02 15:04"),
+				}
+				if event.AcknowledgedAt == nil {
+					unreadCount++
+				}
+				items = append(items, item)
+			}
+		}
+	}
+
 	data := pages.NotificationsData{
 		PageData:      pageData,
-		Notifications: []pages.NotificationItem{},
-		UnreadCount:   0,
+		Notifications: items,
+		UnreadCount:   unreadCount,
 	}
 	h.renderTempl(w, r, pages.Notifications(data))
 }
 
 func (h *Handler) NotificationsMarkAllRead(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	alertSvc := h.getAlertService()
+	if alertSvc != nil {
+		var userID uuid.UUID
+		if user := GetUserFromContext(ctx); user != nil {
+			userID, _ = uuid.Parse(user.ID)
+		}
+		events, _, err := alertSvc.ListEvents(ctx, models.AlertEventListOptions{Limit: 100})
+		if err == nil {
+			for _, event := range events {
+				if event.AcknowledgedAt == nil {
+					_ = alertSvc.AcknowledgeEvent(ctx, event.ID, userID)
+				}
+			}
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) NotificationMarkRead(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	idStr := chi.URLParam(r, "id")
+
+	alertSvc := h.getAlertService()
+	if alertSvc != nil {
+		if eventID, err := uuid.Parse(idStr); err == nil {
+			var userID uuid.UUID
+			if user := GetUserFromContext(ctx); user != nil {
+				userID, _ = uuid.Parse(user.ID)
+			}
+			_ = alertSvc.AcknowledgeEvent(ctx, eventID, userID)
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) NotificationDelete(w http.ResponseWriter, r *http.Request) {
+	// Alert events cannot be deleted, but we acknowledge them to "dismiss"
+	ctx := r.Context()
+	idStr := chi.URLParam(r, "id")
+
+	alertSvc := h.getAlertService()
+	if alertSvc != nil {
+		if eventID, err := uuid.Parse(idStr); err == nil {
+			var userID uuid.UUID
+			if user := GetUserFromContext(ctx); user != nil {
+				userID, _ = uuid.Parse(user.ID)
+			}
+			_ = alertSvc.AcknowledgeEvent(ctx, eventID, userID)
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1287,8 +1476,36 @@ func (h *Handler) ContainerRowPartial(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ImagesPartial(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(`<div id="images">Images partial</div>`))
+
+	imgList, err := h.services.Images().List(ctx)
+	if err != nil {
+		w.Write([]byte(`<div id="images" class="text-red-400 p-4">Failed to load images</div>`))
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div id="images" class="space-y-2">`)
+	if len(imgList) == 0 {
+		b.WriteString(`<p class="text-gray-400 p-4">No images found</p>`)
+	} else {
+		for _, img := range imgList {
+			tag := img.PrimaryTag
+			if tag == "" && len(img.Tags) > 0 {
+				tag = img.Tags[0]
+			}
+			if tag == "" {
+				tag = img.ShortID
+			}
+			b.WriteString(fmt.Sprintf(
+				`<div class="flex items-center justify-between p-2 rounded bg-dark-700"><span class="text-sm text-white truncate">%s</span><span class="text-xs text-gray-400">%s</span></div>`,
+				tag, img.SizeHuman,
+			))
+		}
+	}
+	b.WriteString(`</div>`)
+	w.Write([]byte(b.String()))
 }
 
 func (h *Handler) ImagePullSubmit(w http.ResponseWriter, r *http.Request) {

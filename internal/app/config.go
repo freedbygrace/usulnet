@@ -6,6 +6,7 @@ package app
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -28,6 +29,15 @@ type Config struct {
 	Minio    MinIOConfig    `mapstructure:"minio"`
 	Logging  LoggingConfig  `mapstructure:"logging"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
+	Terminal TerminalConfig `mapstructure:"terminal"`
+}
+
+// TerminalConfig holds host terminal configuration.
+// Previously read from HOST_TERMINAL_* env vars; now centralized in Config.
+type TerminalConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	User    string `mapstructure:"user"`
+	Shell   string `mapstructure:"shell"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -241,16 +251,21 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// Allow direct env vars for common settings
-	_ = v.BindEnv("database.url", "DATABASE_URL")
-	_ = v.BindEnv("redis.url", "REDIS_URL")
-	_ = v.BindEnv("nats.url", "NATS_URL")
-	_ = v.BindEnv("security.jwt_secret", "JWT_SECRET")
-	_ = v.BindEnv("security.config_encryption_key", "CONFIG_ENCRYPTION_KEY")
-	_ = v.BindEnv("storage.s3.access_key", "S3_ACCESS_KEY")
-	_ = v.BindEnv("storage.s3.secret_key", "S3_SECRET_KEY")
+	// Dual-binding: USULNET_ prefixed (canonical) + unprefixed (Docker Compose compat).
+	// BindEnv picks the first set: USULNET_DATABASE_URL takes priority over DATABASE_URL.
+	_ = v.BindEnv("database.url", "USULNET_DATABASE_URL", "DATABASE_URL")
+	_ = v.BindEnv("redis.url", "USULNET_REDIS_URL", "REDIS_URL")
+	_ = v.BindEnv("nats.url", "USULNET_NATS_URL", "NATS_URL")
+	_ = v.BindEnv("security.jwt_secret", "USULNET_JWT_SECRET", "JWT_SECRET")
+	_ = v.BindEnv("security.config_encryption_key", "USULNET_ENCRYPTION_KEY", "CONFIG_ENCRYPTION_KEY")
+	_ = v.BindEnv("storage.s3.access_key", "USULNET_S3_ACCESS_KEY", "S3_ACCESS_KEY")
+	_ = v.BindEnv("storage.s3.secret_key", "USULNET_S3_SECRET_KEY", "S3_SECRET_KEY")
 	_ = v.BindEnv("caddy.admin_url", "USULNET_CADDY_ADMIN_URL")
 	_ = v.BindEnv("caddy.acme_email", "USULNET_CADDY_ACME_EMAIL")
+	// Backwards-compatible bindings for legacy HOST_TERMINAL_* env vars
+	_ = v.BindEnv("terminal.enabled", "USULNET_TERMINAL_ENABLED", "HOST_TERMINAL_ENABLED")
+	_ = v.BindEnv("terminal.user", "USULNET_TERMINAL_USER", "HOST_TERMINAL_USER")
+	_ = v.BindEnv("terminal.shell", "USULNET_TERMINAL_SHELL", "HOST_TERMINAL_SHELL")
 
 	// Set defaults
 	setDefaults(v)
@@ -366,62 +381,200 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("metrics.path", "/metrics")
 	v.SetDefault("metrics.go_metrics", true)
 	v.SetDefault("metrics.process_metrics", true)
+
+	// Host Terminal (migrated from HOST_TERMINAL_* env vars)
+	v.SetDefault("terminal.enabled", false)
+	v.SetDefault("terminal.user", "nobody_usulnet")
+	v.SetDefault("terminal.shell", "/bin/bash")
 }
 
-// Validate validates the configuration
+// Validate validates the configuration.
+// Collects all errors so the operator can fix them in one pass.
 func (c *Config) Validate() error {
+	var errs []error
+
 	// Mode validation
 	validModes := map[string]bool{"standalone": true, "master": true, "agent": true}
 	if !validModes[c.Mode] {
-		return fmt.Errorf("invalid mode: %s (must be standalone, master, or agent)", c.Mode)
+		errs = append(errs, fmt.Errorf("invalid mode: %s (must be standalone, master, or agent)", c.Mode))
 	}
 
 	// Database URL required for master/standalone
 	if c.Mode != "agent" && c.Database.URL == "" {
-		return fmt.Errorf("database.url is required for %s mode", c.Mode)
+		errs = append(errs, fmt.Errorf("database.url is required for %s mode", c.Mode))
 	}
 
 	// Redis URL required for master/standalone
 	if c.Mode != "agent" && c.Redis.URL == "" {
-		return fmt.Errorf("redis.url is required for %s mode", c.Mode)
+		errs = append(errs, fmt.Errorf("redis.url is required for %s mode", c.Mode))
 	}
 
 	// NATS URL required for master/agent
 	if c.Mode != "standalone" && c.NATS.URL == "" {
-		return fmt.Errorf("nats.url is required for %s mode", c.Mode)
+		errs = append(errs, fmt.Errorf("nats.url is required for %s mode", c.Mode))
 	}
 
 	// Agent-specific validation
 	if c.Mode == "agent" {
 		if c.Agent.MasterURL == "" {
-			return fmt.Errorf("agent.master_url is required for agent mode")
+			errs = append(errs, fmt.Errorf("agent.master_url is required for agent mode"))
 		}
 		if c.Agent.Token == "" {
-			return fmt.Errorf("agent.token is required for agent mode")
+			errs = append(errs, fmt.Errorf("agent.token is required for agent mode"))
 		}
 	}
 
 	// Security validation for master/standalone
 	if c.Mode != "agent" {
 		if c.Security.JWTSecret == "" {
-			return fmt.Errorf("security.jwt_secret is required")
-		}
-		if len(c.Security.JWTSecret) < 32 {
-			return fmt.Errorf("security.jwt_secret must be at least 32 characters")
+			errs = append(errs, fmt.Errorf("security.jwt_secret is required"))
+		} else if len(c.Security.JWTSecret) < 32 {
+			errs = append(errs, fmt.Errorf("security.jwt_secret must be at least 32 characters"))
 		}
 	}
 
 	// Storage validation
 	if c.Storage.Type == "s3" {
 		if c.Storage.S3.Bucket == "" {
-			return fmt.Errorf("storage.s3.bucket is required when using S3 storage")
+			errs = append(errs, fmt.Errorf("storage.s3.bucket is required when using S3 storage"))
 		}
 		if c.Storage.S3.AccessKey == "" || c.Storage.S3.SecretKey == "" {
-			return fmt.Errorf("storage.s3 credentials are required when using S3 storage")
+			errs = append(errs, fmt.Errorf("storage.s3 credentials are required when using S3 storage"))
 		}
 	}
 
-	return nil
+	// Port validation
+	errs = append(errs, c.validatePorts()...)
+
+	// Duration validation
+	errs = append(errs, c.validateDurations()...)
+
+	// Enum validation
+	errs = append(errs, c.validateEnums()...)
+
+	// Relationship validation
+	errs = append(errs, c.validateRelationships()...)
+
+	if len(errs) == 0 {
+		return nil
+	}
+	// Join all errors with newlines for readable operator output
+	var msgs []string
+	for _, e := range errs {
+		msgs = append(msgs, e.Error())
+	}
+	return fmt.Errorf("config validation failed:\n  - %s", strings.Join(msgs, "\n  - "))
+}
+
+// validatePorts checks that port values are in the valid range.
+func (c *Config) validatePorts() []error {
+	var errs []error
+	checkPort := func(name string, port int) {
+		if port != 0 && (port < 1 || port > 65535) {
+			errs = append(errs, fmt.Errorf("%s: %d is not a valid port (1-65535)", name, port))
+		}
+	}
+	checkPort("server.port", c.Server.Port)
+	checkPort("server.https_port", c.Server.HTTPSPort)
+	return errs
+}
+
+// validateDurations checks that duration values are positive where required.
+func (c *Config) validateDurations() []error {
+	var errs []error
+	checkPositive := func(name string, d time.Duration) {
+		if d < 0 {
+			errs = append(errs, fmt.Errorf("%s must be non-negative, got %s", name, d))
+		}
+	}
+	// Server timeouts
+	checkPositive("server.read_timeout", c.Server.ReadTimeout)
+	checkPositive("server.write_timeout", c.Server.WriteTimeout)
+	checkPositive("server.idle_timeout", c.Server.IdleTimeout)
+	checkPositive("server.shutdown_timeout", c.Server.ShutdownTimeout)
+	// Database
+	checkPositive("database.conn_max_lifetime", c.Database.ConnMaxLifetime)
+	checkPositive("database.conn_max_idle_time", c.Database.ConnMaxIdleTime)
+	checkPositive("database.query_timeout", c.Database.QueryTimeout)
+	// Redis
+	checkPositive("redis.dial_timeout", c.Redis.DialTimeout)
+	checkPositive("redis.read_timeout", c.Redis.ReadTimeout)
+	checkPositive("redis.write_timeout", c.Redis.WriteTimeout)
+	// Security
+	checkPositive("security.jwt_expiry", c.Security.JWTExpiry)
+	checkPositive("security.refresh_expiry", c.Security.RefreshExpiry)
+	checkPositive("security.lockout_duration", c.Security.LockoutDuration)
+	return errs
+}
+
+// validateEnums checks that enum-like string fields have valid values.
+func (c *Config) validateEnums() []error {
+	var errs []error
+	// Logging level
+	if c.Logging.Level != "" {
+		validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+		if !validLevels[strings.ToLower(c.Logging.Level)] {
+			errs = append(errs, fmt.Errorf("logging.level: %q is not valid (debug, info, warn, error)", c.Logging.Level))
+		}
+	}
+	// Logging format
+	if c.Logging.Format != "" {
+		validFormats := map[string]bool{"json": true, "text": true, "console": true}
+		if !validFormats[strings.ToLower(c.Logging.Format)] {
+			errs = append(errs, fmt.Errorf("logging.format: %q is not valid (json, text, console)", c.Logging.Format))
+		}
+	}
+	// Storage type
+	if c.Storage.Type != "" {
+		validTypes := map[string]bool{"local": true, "s3": true}
+		if !validTypes[strings.ToLower(c.Storage.Type)] {
+			errs = append(errs, fmt.Errorf("storage.type: %q is not valid (local, s3)", c.Storage.Type))
+		}
+	}
+	// Cookie SameSite
+	if c.Security.CookieSameSite != "" {
+		validSS := map[string]bool{"strict": true, "lax": true, "none": true}
+		if !validSS[strings.ToLower(c.Security.CookieSameSite)] {
+			errs = append(errs, fmt.Errorf("security.cookie_samesite: %q is not valid (strict, lax, none)", c.Security.CookieSameSite))
+		}
+	}
+	return errs
+}
+
+// validateRelationships checks cross-field constraints.
+func (c *Config) validateRelationships() []error {
+	var errs []error
+	// MaxIdleConns should not exceed MaxOpenConns
+	if c.Database.MaxIdleConns > 0 && c.Database.MaxOpenConns > 0 && c.Database.MaxIdleConns > c.Database.MaxOpenConns {
+		errs = append(errs, fmt.Errorf("database.max_idle_conns (%d) must not exceed database.max_open_conns (%d)",
+			c.Database.MaxIdleConns, c.Database.MaxOpenConns))
+	}
+	// Redis MinIdleConns vs PoolSize
+	if c.Redis.MinIdleConns > 0 && c.Redis.PoolSize > 0 && c.Redis.MinIdleConns > c.Redis.PoolSize {
+		errs = append(errs, fmt.Errorf("redis.min_idle_conns (%d) must not exceed redis.pool_size (%d)",
+			c.Redis.MinIdleConns, c.Redis.PoolSize))
+	}
+	// Port conflict
+	if c.Server.Port > 0 && c.Server.HTTPSPort > 0 && c.Server.Port == c.Server.HTTPSPort {
+		errs = append(errs, fmt.Errorf("server.port and server.https_port must not be the same (%d)", c.Server.Port))
+	}
+	// RefreshExpiry should be >= JWTExpiry
+	if c.Security.JWTExpiry > 0 && c.Security.RefreshExpiry > 0 && c.Security.RefreshExpiry < c.Security.JWTExpiry {
+		errs = append(errs, fmt.Errorf("security.refresh_expiry (%s) should be >= security.jwt_expiry (%s)",
+			c.Security.RefreshExpiry, c.Security.JWTExpiry))
+	}
+	// PasswordMinLength
+	if c.Security.PasswordMinLength > 0 && c.Security.PasswordMinLength < 8 {
+		errs = append(errs, fmt.Errorf("security.password_min_length (%d) should be at least 8", c.Security.PasswordMinLength))
+	}
+	// RateLimitRPS and Burst
+	if c.Server.RateLimitRPS < 0 {
+		errs = append(errs, fmt.Errorf("server.rate_limit_rps must be non-negative"))
+	}
+	if c.Server.RateLimitBurst < 0 {
+		errs = append(errs, fmt.Errorf("server.rate_limit_burst must be non-negative"))
+	}
+	return errs
 }
 
 // PrintMasked prints configuration with sensitive values masked
@@ -444,6 +597,47 @@ func (c *Config) PrintMasked() {
 	if c.Caddy.Enabled {
 		fmt.Printf("Caddy Admin URL: %s\n", c.Caddy.AdminURL)
 	}
+}
+
+// parseSameSite converts a config string ("strict", "lax", "none") to http.SameSite.
+// Returns http.SameSiteLaxMode for unrecognized values.
+func parseSameSite(s string) http.SameSite {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
+	}
+}
+
+// parseSize parses a human-readable size string (e.g., "100MB", "1GB") to bytes.
+// Returns defaultBytes if the string is empty or unparseable.
+func parseSize(s string, defaultBytes int64) int64 {
+	if s == "" {
+		return defaultBytes
+	}
+	s = strings.TrimSpace(strings.ToUpper(s))
+	multiplier := int64(1)
+	switch {
+	case strings.HasSuffix(s, "GB"):
+		multiplier = 1024 * 1024 * 1024
+		s = strings.TrimSuffix(s, "GB")
+	case strings.HasSuffix(s, "MB"):
+		multiplier = 1024 * 1024
+		s = strings.TrimSuffix(s, "MB")
+	case strings.HasSuffix(s, "KB"):
+		multiplier = 1024
+		s = strings.TrimSuffix(s, "KB")
+	case strings.HasSuffix(s, "B"):
+		s = strings.TrimSuffix(s, "B")
+	}
+	var n int64
+	if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d", &n); err != nil {
+		return defaultBytes
+	}
+	return n * multiplier
 }
 
 // maskURL masks password in URL

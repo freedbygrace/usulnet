@@ -14,14 +14,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fr4nsys/usulnet/internal/models"
-	swarmsvc "github.com/fr4nsys/usulnet/internal/services/swarm"
 	swarmtpl "github.com/fr4nsys/usulnet/internal/web/templates/pages/swarm"
 )
-
-// SetSwarmService sets the Swarm service for the handler.
-func (h *Handler) SetSwarmService(svc *swarmsvc.Service) {
-	h.swarmService = svc
-}
 
 // SwarmClusterTempl renders the Swarm cluster page.
 func (h *Handler) SwarmClusterTempl(w http.ResponseWriter, r *http.Request) {

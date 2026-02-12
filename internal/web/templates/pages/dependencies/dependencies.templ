@@ -1,0 +1,579 @@
+package dependencies
+
+import (
+	"fmt"
+	"strings"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+// DependencyData holds all data for the dependency graph page.
+type DependencyData struct {
+	PageData    layouts.PageData
+	Containers  []ContainerDep
+	Networks    []NetworkDep
+	Volumes     []VolumeDep
+	Images      []ImageDep
+	Stats       DepStats
+	Warnings    []DepWarning
+}
+
+// ContainerDep represents a container in the dependency graph.
+type ContainerDep struct {
+	ID         string
+	Name       string
+	Image      string
+	State      string
+	Networks   []string
+	Volumes    []string
+	DependsOn  []string // container names this depends on (via shared networks)
+	DependedBy []string // containers that depend on this
+	Ports      []string
+}
+
+// NetworkDep represents a network in the dependency graph.
+type NetworkDep struct {
+	ID         string
+	Name       string
+	Driver     string
+	Subnet     string
+	Scope      string
+	Internal   bool
+	Containers []string
+}
+
+// VolumeDep represents a volume in the dependency graph.
+type VolumeDep struct {
+	Name       string
+	Driver     string
+	Size       string
+	InUse      bool
+	Containers []string
+}
+
+// ImageDep represents an image in the dependency graph.
+type ImageDep struct {
+	ID         string
+	Tag        string
+	Size       string
+	Containers int
+}
+
+// DepStats provides aggregate dependency statistics.
+type DepStats struct {
+	TotalContainers     int
+	TotalNetworks       int
+	TotalVolumes        int
+	TotalImages         int
+	IsolatedContainers  int
+	SharedVolumes       int
+	SharedNetworks      int
+	OrphanedVolumes     int
+	OrphanedImages      int
+}
+
+// DepWarning flags potential issues in the dependency graph.
+type DepWarning struct {
+	Severity string // critical, warning, info
+	Category string // isolation, orphan, single-point
+	Title    string
+	Message  string
+	Resource string // resource name/ID
+}
+
+templ Dependencies(data DependencyData) {
+	@layouts.Base(data.PageData) {
+		<div class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">Dependency Graph</h1>
+					<p class="text-gray-400 mt-1">Visualize relationships between containers, networks, volumes, and images</p>
+				</div>
+				<a href="/topology" class="btn-secondary flex items-center gap-2">
+					<i class="fas fa-project-diagram"></i>
+					Network Topology
+				</a>
+			</div>
+
+			<!-- Stats -->
+			<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+				@depStat("Containers", data.Stats.TotalContainers, "fas fa-cube", "green")
+				@depStat("Networks", data.Stats.TotalNetworks, "fas fa-network-wired", "blue")
+				@depStat("Volumes", data.Stats.TotalVolumes, "fas fa-database", "purple")
+				@depStat("Images", data.Stats.TotalImages, "fas fa-layer-group", "cyan")
+				@depStat("Isolated", data.Stats.IsolatedContainers, "fas fa-unlink", "yellow")
+				@depStat("Shared Nets", data.Stats.SharedNetworks, "fas fa-share-alt", "primary")
+				@depStat("Shared Vols", data.Stats.SharedVolumes, "fas fa-clone", "orange")
+				@depStat("Orphaned", data.Stats.OrphanedVolumes + data.Stats.OrphanedImages, "fas fa-ghost", "red")
+			</div>
+
+			<!-- Warnings -->
+			if len(data.Warnings) > 0 {
+				<div class="card p-4">
+					<h3 class="text-sm font-medium text-yellow-400 mb-3">
+						<i class="fas fa-exclamation-triangle mr-2"></i>Dependency Warnings ({ fmt.Sprintf("%d", len(data.Warnings)) })
+					</h3>
+					<div class="space-y-2">
+						for _, w := range data.Warnings {
+							<div class="flex items-start gap-3 px-3 py-2 bg-dark-700 rounded-lg">
+								@warningSeverityIcon(w.Severity)
+								<div class="flex-1">
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-medium text-white">{ w.Title }</span>
+										<span class="px-2 py-0.5 text-xs bg-dark-600 text-gray-400 rounded">{ w.Category }</span>
+									</div>
+									<p class="text-xs text-gray-400 mt-0.5">{ w.Message }</p>
+								</div>
+							</div>
+						}
+					</div>
+				</div>
+			}
+
+			<!-- Tabs -->
+			<div x-data="{ tab: 'graph' }" class="space-y-4">
+				<div class="flex gap-1 border-b border-dark-600">
+					<button @click="tab = 'graph'" :class="tab === 'graph' ? 'border-primary-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'" class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+						Dependency Map
+					</button>
+					<button @click="tab = 'containers'" :class="tab === 'containers' ? 'border-primary-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'" class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+						Containers ({ fmt.Sprintf("%d", len(data.Containers)) })
+					</button>
+					<button @click="tab = 'networks'" :class="tab === 'networks' ? 'border-primary-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'" class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+						Networks ({ fmt.Sprintf("%d", len(data.Networks)) })
+					</button>
+					<button @click="tab = 'volumes'" :class="tab === 'volumes' ? 'border-primary-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'" class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+						Volumes ({ fmt.Sprintf("%d", len(data.Volumes)) })
+					</button>
+					<button @click="tab = 'images'" :class="tab === 'images' ? 'border-primary-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'" class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors">
+						Images ({ fmt.Sprintf("%d", len(data.Images)) })
+					</button>
+				</div>
+
+				<!-- Graph Tab - Visual Dependency Map -->
+				<div x-show="tab === 'graph'" x-cloak>
+					<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+						<!-- Main Graph -->
+						<div class="lg:col-span-2 space-y-4">
+							for _, network := range data.Networks {
+								if len(network.Containers) > 0 {
+									@networkCluster(network, data.Containers)
+								}
+							}
+							<!-- Isolated Containers -->
+							if data.Stats.IsolatedContainers > 0 {
+								<div class="card p-4 border border-yellow-500/30">
+									<h3 class="text-sm font-medium text-yellow-400 mb-3">
+										<i class="fas fa-unlink mr-2"></i>Isolated Containers (no network)
+									</h3>
+									<div class="flex flex-wrap gap-2">
+										for _, c := range data.Containers {
+											if len(c.Networks) == 0 {
+												@containerChip(c)
+											}
+										}
+									</div>
+								</div>
+							}
+						</div>
+
+						<!-- Sidebar - Volumes & Images -->
+						<div class="space-y-4">
+							<!-- Shared Volumes -->
+							<div class="card p-4">
+								<h3 class="font-medium text-white mb-3">
+									<i class="fas fa-database text-purple-400 mr-2"></i>Volumes
+								</h3>
+								<div class="space-y-2">
+									for _, vol := range data.Volumes {
+										<div class="px-3 py-2 bg-dark-700 rounded-lg">
+											<div class="flex items-center justify-between">
+												<span class="text-sm text-white truncate">{ vol.Name }</span>
+												if vol.InUse {
+													<span class="text-xs text-green-400">in use</span>
+												} else {
+													<span class="text-xs text-yellow-400">orphaned</span>
+												}
+											</div>
+											if len(vol.Containers) > 0 {
+												<div class="flex flex-wrap gap-1 mt-1">
+													for _, cName := range vol.Containers {
+														<span class="px-1.5 py-0.5 text-xs bg-purple-500/20 text-purple-300 rounded">{ cName }</span>
+													}
+												</div>
+											}
+											<div class="text-xs text-gray-500 mt-1">{ vol.Driver } &bull; { vol.Size }</div>
+										</div>
+									}
+									if len(data.Volumes) == 0 {
+										<p class="text-sm text-gray-500">No volumes</p>
+									}
+								</div>
+							</div>
+
+							<!-- Images -->
+							<div class="card p-4">
+								<h3 class="font-medium text-white mb-3">
+									<i class="fas fa-layer-group text-cyan-400 mr-2"></i>Images
+								</h3>
+								<div class="space-y-2">
+									for _, img := range data.Images {
+										<div class="px-3 py-2 bg-dark-700 rounded-lg">
+											<div class="flex items-center justify-between">
+												<span class="text-sm text-white truncate" title={ img.Tag }>{ truncateTag(img.Tag) }</span>
+												<span class="text-xs text-gray-400">{ img.Size }</span>
+											</div>
+											if img.Containers > 0 {
+												<span class="text-xs text-green-400">{ fmt.Sprintf("%d container(s)", img.Containers) }</span>
+											} else {
+												<span class="text-xs text-yellow-400">unused</span>
+											}
+										</div>
+									}
+									if len(data.Images) == 0 {
+										<p class="text-sm text-gray-500">No images</p>
+									}
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Containers Tab -->
+				<div x-show="tab === 'containers'" x-cloak>
+					<div class="card overflow-hidden">
+						<table class="w-full">
+							<thead>
+								<tr class="border-b border-dark-600">
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Container</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Image</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">State</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Networks</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Volumes</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Dependencies</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-dark-700">
+								for _, c := range data.Containers {
+									<tr class="hover:bg-dark-700/50">
+										<td class="px-4 py-3">
+											<a href={ templ.SafeURL("/containers/" + c.ID) } class="text-sm text-primary-400 hover:text-primary-300">{ c.Name }</a>
+										</td>
+										<td class="px-4 py-3 text-sm text-gray-300">{ truncateTag(c.Image) }</td>
+										<td class="px-4 py-3">
+											@containerState(c.State)
+										</td>
+										<td class="px-4 py-3">
+											<div class="flex flex-wrap gap-1">
+												for _, n := range c.Networks {
+													<span class="px-1.5 py-0.5 text-xs bg-blue-500/20 text-blue-300 rounded">{ n }</span>
+												}
+												if len(c.Networks) == 0 {
+													<span class="text-xs text-yellow-400">none</span>
+												}
+											</div>
+										</td>
+										<td class="px-4 py-3">
+											<div class="flex flex-wrap gap-1">
+												for _, v := range c.Volumes {
+													<span class="px-1.5 py-0.5 text-xs bg-purple-500/20 text-purple-300 rounded">{ truncateVolume(v) }</span>
+												}
+												if len(c.Volumes) == 0 {
+													<span class="text-xs text-gray-500">none</span>
+												}
+											</div>
+										</td>
+										<td class="px-4 py-3 text-sm text-gray-400">
+											{ fmt.Sprintf("%d in / %d out", len(c.DependedBy), len(c.DependsOn)) }
+										</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				</div>
+
+				<!-- Networks Tab -->
+				<div x-show="tab === 'networks'" x-cloak>
+					<div class="space-y-3">
+						for _, net := range data.Networks {
+							<div class="card p-4">
+								<div class="flex items-center justify-between mb-3">
+									<div class="flex items-center gap-3">
+										<div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+											<i class="fas fa-network-wired text-blue-400"></i>
+										</div>
+										<div>
+											<div class="flex items-center gap-2">
+												<a href={ templ.SafeURL("/networks/" + net.ID) } class="font-medium text-primary-400 hover:text-primary-300">{ net.Name }</a>
+												<span class="px-2 py-0.5 text-xs bg-dark-600 text-gray-300 rounded">{ net.Driver }</span>
+												if net.Internal {
+													<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded">internal</span>
+												}
+											</div>
+											<div class="text-xs text-gray-500 mt-0.5">
+												{ net.Scope }
+												if net.Subnet != "" {
+													<span> &bull; { net.Subnet }</span>
+												}
+											</div>
+										</div>
+									</div>
+									<span class="text-sm text-gray-400">{ fmt.Sprintf("%d containers", len(net.Containers)) }</span>
+								</div>
+								if len(net.Containers) > 0 {
+									<div class="flex flex-wrap gap-2">
+										for _, cName := range net.Containers {
+											<span class="px-3 py-1.5 bg-dark-700 rounded-lg text-sm text-gray-300 flex items-center gap-2">
+												<span class="w-2 h-2 rounded-full bg-green-500"></span>
+												{ cName }
+											</span>
+										}
+									</div>
+								}
+							</div>
+						}
+					</div>
+				</div>
+
+				<!-- Volumes Tab -->
+				<div x-show="tab === 'volumes'" x-cloak>
+					<div class="card overflow-hidden">
+						<table class="w-full">
+							<thead>
+								<tr class="border-b border-dark-600">
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Volume</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Driver</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Size</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Status</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Used By</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-dark-700">
+								for _, vol := range data.Volumes {
+									<tr class="hover:bg-dark-700/50">
+										<td class="px-4 py-3">
+											<a href={ templ.SafeURL("/volumes/" + vol.Name) } class="text-sm text-primary-400 hover:text-primary-300">{ truncateVolume(vol.Name) }</a>
+										</td>
+										<td class="px-4 py-3 text-sm text-gray-300">{ vol.Driver }</td>
+										<td class="px-4 py-3 text-sm text-gray-300">{ vol.Size }</td>
+										<td class="px-4 py-3">
+											if vol.InUse {
+												<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded">In Use</span>
+											} else {
+												<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded">Orphaned</span>
+											}
+										</td>
+										<td class="px-4 py-3">
+											<div class="flex flex-wrap gap-1">
+												for _, cName := range vol.Containers {
+													<span class="px-1.5 py-0.5 text-xs bg-green-500/20 text-green-300 rounded">{ cName }</span>
+												}
+												if len(vol.Containers) == 0 {
+													<span class="text-xs text-gray-500">none</span>
+												}
+											</div>
+										</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				</div>
+
+				<!-- Images Tab -->
+				<div x-show="tab === 'images'" x-cloak>
+					<div class="card overflow-hidden">
+						<table class="w-full">
+							<thead>
+								<tr class="border-b border-dark-600">
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Image</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Size</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Containers</th>
+									<th class="text-left text-xs font-medium text-gray-400 uppercase px-4 py-3">Status</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-dark-700">
+								for _, img := range data.Images {
+									<tr class="hover:bg-dark-700/50">
+										<td class="px-4 py-3">
+											<a href={ templ.SafeURL("/images/" + img.ID) } class="text-sm text-primary-400 hover:text-primary-300">{ truncateTag(img.Tag) }</a>
+										</td>
+										<td class="px-4 py-3 text-sm text-gray-300">{ img.Size }</td>
+										<td class="px-4 py-3 text-sm text-gray-300">{ fmt.Sprintf("%d", img.Containers) }</td>
+										<td class="px-4 py-3">
+											if img.Containers > 0 {
+												<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded">In Use</span>
+											} else {
+												<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded">Unused</span>
+											}
+										</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ depStat(label string, count int, icon, color string) {
+	<div class="card p-3 text-center">
+		<i class={ icon, depColor(color), "text-lg mb-1" }></i>
+		<p class="text-xl font-bold text-white">{ fmt.Sprintf("%d", count) }</p>
+		<p class="text-xs text-gray-400">{ label }</p>
+	</div>
+}
+
+templ networkCluster(net NetworkDep, allContainers []ContainerDep) {
+	<div class="card p-4">
+		<div class="flex items-center gap-3 mb-3">
+			<div class={ "w-8 h-8 rounded-lg flex items-center justify-center", driverBg(net.Driver) }>
+				<i class={ "fas fa-network-wired text-sm", driverColor(net.Driver) }></i>
+			</div>
+			<div>
+				<h3 class="text-sm font-medium text-white">{ net.Name }</h3>
+				<span class="text-xs text-gray-500">{ net.Driver } &bull; { fmt.Sprintf("%d containers", len(net.Containers)) }</span>
+			</div>
+		</div>
+		<div class="flex flex-wrap gap-2">
+			for _, cName := range net.Containers {
+				for _, c := range allContainers {
+					if c.Name == cName {
+						@containerChip(c)
+					}
+				}
+			}
+		</div>
+	</div>
+}
+
+templ containerChip(c ContainerDep) {
+	<a href={ templ.SafeURL("/containers/" + c.ID) } class="px-3 py-2 bg-dark-700 rounded-lg text-sm hover:bg-dark-600 transition-colors">
+		<div class="flex items-center gap-2">
+			@containerStateDot(c.State)
+			<span class="text-gray-200">{ c.Name }</span>
+		</div>
+		if len(c.Volumes) > 0 || len(c.Ports) > 0 {
+			<div class="flex items-center gap-2 mt-1">
+				if len(c.Volumes) > 0 {
+					<span class="text-xs text-purple-400">
+						<i class="fas fa-database mr-0.5"></i>{ fmt.Sprintf("%d vol", len(c.Volumes)) }
+					</span>
+				}
+				if len(c.Ports) > 0 {
+					<span class="text-xs text-cyan-400">
+						<i class="fas fa-plug mr-0.5"></i>{ fmt.Sprintf("%d port", len(c.Ports)) }
+					</span>
+				}
+			</div>
+		}
+	</a>
+}
+
+templ containerStateDot(state string) {
+	switch state {
+		case "running":
+			<span class="w-2 h-2 rounded-full bg-green-500"></span>
+		case "paused":
+			<span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+		case "exited":
+			<span class="w-2 h-2 rounded-full bg-red-500"></span>
+		default:
+			<span class="w-2 h-2 rounded-full bg-gray-500"></span>
+	}
+}
+
+templ containerState(state string) {
+	switch state {
+		case "running":
+			<span class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded">Running</span>
+		case "paused":
+			<span class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded">Paused</span>
+		case "exited":
+			<span class="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 rounded">Exited</span>
+		default:
+			<span class="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 rounded">{ state }</span>
+	}
+}
+
+templ warningSeverityIcon(severity string) {
+	switch severity {
+		case "critical":
+			<span class="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0"></span>
+		case "warning":
+			<span class="w-2 h-2 rounded-full bg-yellow-500 mt-1.5 flex-shrink-0"></span>
+		default:
+			<span class="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0"></span>
+	}
+}
+
+func depColor(color string) string {
+	switch color {
+	case "green":
+		return "text-green-400"
+	case "blue":
+		return "text-blue-400"
+	case "purple":
+		return "text-purple-400"
+	case "cyan":
+		return "text-cyan-400"
+	case "yellow":
+		return "text-yellow-400"
+	case "primary":
+		return "text-primary-400"
+	case "orange":
+		return "text-orange-400"
+	case "red":
+		return "text-red-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func driverBg(driver string) string {
+	switch driver {
+	case "bridge":
+		return "bg-blue-500/20"
+	case "overlay":
+		return "bg-green-500/20"
+	case "host":
+		return "bg-yellow-500/20"
+	case "macvlan", "ipvlan":
+		return "bg-purple-500/20"
+	default:
+		return "bg-gray-500/20"
+	}
+}
+
+func driverColor(driver string) string {
+	switch driver {
+	case "bridge":
+		return "text-blue-400"
+	case "overlay":
+		return "text-green-400"
+	case "host":
+		return "text-yellow-400"
+	case "macvlan", "ipvlan":
+		return "text-purple-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func truncateTag(tag string) string {
+	if len(tag) > 40 {
+		return tag[:37] + "..."
+	}
+	return tag
+}
+
+func truncateVolume(name string) string {
+	// Volume names can be very long hashes
+	if len(name) > 30 && !strings.Contains(name, "/") {
+		return name[:12] + "..."
+	}
+	return name
+}

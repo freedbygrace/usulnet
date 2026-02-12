@@ -60,6 +60,17 @@ type ServerConfig struct {
 
 	// RouterConfig contains configuration for the router.
 	RouterConfig RouterConfig
+
+	// Version information (injected at build time)
+	Version   string
+	Commit    string
+	BuildTime string
+
+	// Logger for the server (also wired into RouterConfig.Logger)
+	Logger middleware.RequestLogger
+
+	// LicenseProvider for feature gating (also wired into RouterConfig.LicenseProvider)
+	LicenseProvider middleware.LicenseProvider
 }
 
 // DefaultServerConfig returns a default server configuration.
@@ -90,35 +101,47 @@ type Server struct {
 	shutdown chan struct{}
 }
 
-// NewServer creates a new API server.
+// NewServer creates a new API server with all dependencies injected via config.
 func NewServer(config ServerConfig) *Server {
+	// Wire logger and license provider into the router config
+	if config.Logger != nil {
+		config.RouterConfig.Logger = config.Logger
+	}
+	if config.LicenseProvider != nil {
+		config.RouterConfig.LicenseProvider = config.LicenseProvider
+	}
+
+	version := config.Version
+	if version == "" {
+		version = "dev"
+	}
+	commit := config.Commit
+	if commit == "" {
+		commit = "unknown"
+	}
+	buildTime := config.BuildTime
+	if buildTime == "" {
+		buildTime = time.Now().Format(time.RFC3339)
+	}
+
 	s := &Server{
 		config:   config,
+		logger:   config.Logger,
 		shutdown: make(chan struct{}),
 	}
 
-	// Initialize handlers - WebSocket needs container service, initialized later
+	// Initialize handlers with version info from config
 	s.handlers = &Handlers{
-		System:    handlers.NewSystemHandler("dev", "unknown", time.Now().Format(time.RFC3339), nil),
+		System:    handlers.NewSystemHandler(version, commit, buildTime, nil),
 		WebSocket: nil, // Initialized when container service is available
 	}
 
 	return s
 }
 
-// SetVersion sets the version information for the system handler.
-func (s *Server) SetVersion(version, commit, buildTime string) {
-	s.handlers.System = handlers.NewSystemHandler(version, commit, buildTime, nil)
-}
-
-// SetLogger sets the logger for the server.
-func (s *Server) SetLogger(logger middleware.RequestLogger) {
-	s.logger = logger
-	s.config.RouterConfig.Logger = logger
-}
-
-// SetLicenseProvider sets the license provider.
-func (s *Server) SetLicenseProvider(provider middleware.LicenseProvider) {
+// RegisterLicenseProvider wires a license provider created after server init.
+// This is the only late-binding dependency; all others are injected via ServerConfig.
+func (s *Server) RegisterLicenseProvider(provider middleware.LicenseProvider) {
 	s.config.RouterConfig.LicenseProvider = provider
 }
 
