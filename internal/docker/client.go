@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,16 +33,34 @@ const (
 	// We use API version negotiation, so this is a fallback
 	DefaultAPIVersion = "1.45"
 
-	// LocalSocketPath is the default Unix socket path for Docker
-	LocalSocketPath = "/var/run/docker.sock"
+	// DefaultLocalSocketPath is the standard Unix socket path for Docker.
+	// Override at runtime via SetLocalSocketPath for rootless Docker or custom locations.
+	DefaultLocalSocketPath = "/var/run/docker.sock"
 
 	// DefaultPingTimeout is the timeout for ping operations
 	DefaultPingTimeout = 5 * time.Second
 )
 
+// localSocketPath holds the active Docker socket path.
+// Defaults to DefaultLocalSocketPath; override via SetLocalSocketPath.
+var localSocketPath = DefaultLocalSocketPath
+
+// LocalSocketPath returns the configured Docker socket path.
+func LocalSocketPath() string {
+	return localSocketPath
+}
+
+// SetLocalSocketPath overrides the default Docker socket path.
+// Call this at application startup before creating any Docker clients.
+func SetLocalSocketPath(path string) {
+	if path != "" {
+		localSocketPath = path
+	}
+}
+
 // ClientOptions configures a Docker client connection
 type ClientOptions struct {
-	// Host is the Docker daemon address (unix:///var/run/docker.sock or tcp://host:2375)
+	// Host is the Docker daemon address (e.g. unix:///var/run/docker.sock or tcp://host:2375)
 	Host string
 
 	// APIVersion is the Docker API version to use (empty for auto-negotiation)
@@ -88,7 +107,7 @@ func NewClient(ctx context.Context, opts ClientOptions) (*Client, error) {
 
 	// Apply defaults
 	if opts.Host == "" {
-		opts.Host = "unix://" + LocalSocketPath
+		opts.Host = "unix://" + localSocketPath
 	}
 	if opts.Timeout == 0 {
 		opts.Timeout = DefaultTimeout
@@ -162,7 +181,7 @@ func NewClient(ctx context.Context, opts ClientOptions) (*Client, error) {
 // NewLocalClient creates a client connected to the local Docker socket
 func NewLocalClient(ctx context.Context) (*Client, error) {
 	return NewClient(ctx, ClientOptions{
-		Host:    "unix://" + LocalSocketPath,
+		Host:    "unix://" + localSocketPath,
 		Timeout: DefaultTimeout,
 	})
 }
@@ -282,6 +301,13 @@ func (c *Client) Info(ctx context.Context) (*DockerInfo, error) {
 		return nil, errors.Wrap(err, errors.CodeDockerConnection, "failed to get Docker info")
 	}
 
+	// Extract sorted runtime names from the map
+	var runtimes []string
+	for name := range info.Runtimes {
+		runtimes = append(runtimes, name)
+	}
+	sort.Strings(runtimes)
+
 	return &DockerInfo{
 		ID:                info.ID,
 		Name:              info.Name,
@@ -299,6 +325,13 @@ func (c *Client) Info(ctx context.Context) (*DockerInfo, error) {
 		MemTotal:          info.MemTotal,
 		NCPU:              info.NCPU,
 		DockerRootDir:     info.DockerRootDir,
+		StorageDriver:     info.Driver,
+		LoggingDriver:     info.LoggingDriver,
+		CgroupDriver:      info.CgroupDriver,
+		CgroupVersion:     info.CgroupVersion,
+		DefaultRuntime:    info.DefaultRuntime,
+		SecurityOptions:   info.SecurityOptions,
+		Runtimes:          runtimes,
 		Swarm:             info.Swarm.ControlAvailable,
 		RegistryConfig:    info.RegistryConfig,
 	}, nil

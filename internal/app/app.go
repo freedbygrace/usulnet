@@ -162,6 +162,14 @@ func Run(cfgFile, mode string) error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Configure Docker socket path: use explicit config, or auto-detect
+	if cfg.Docker.Socket != "" {
+		dockerpkg.SetLocalSocketPath(cfg.Docker.Socket)
+	} else {
+		detected := dockerpkg.DetectSocketPath()
+		dockerpkg.SetLocalSocketPath(detected)
+	}
+
 	// Initialize logger (supports stdout, stderr, and file with rotation)
 	log, err := logger.NewFromConfig(cfg.Logging.Level, cfg.Logging.Format, logger.OutputConfig{
 		Output: cfg.Logging.Output,
@@ -182,6 +190,11 @@ func Run(cfgFile, mode string) error {
 		"version", Version,
 		"commit", Commit,
 		"mode", cfg.Mode,
+	)
+
+	log.Info(dockerpkg.FormatDetectedSocket(dockerpkg.LocalSocketPath()),
+		"socket", dockerpkg.LocalSocketPath(),
+		"configured", cfg.Docker.Socket != "",
 	)
 
 	// Initialize PostgreSQL
@@ -1080,6 +1093,9 @@ func (app *Application) startStandalone(ctx context.Context) error {
 		TerminalEnabled: app.Config.Terminal.Enabled,
 		TerminalUser:    app.Config.Terminal.User,
 		TerminalShell:   app.Config.Terminal.Shell,
+		GuacdEnabled:    app.Config.Guacd.Enabled,
+		GuacdHost:       app.Config.Guacd.Host,
+		GuacdPort:       app.Config.Guacd.Port,
 		Logger:          app.Logger,
 	}
 
@@ -1617,7 +1633,7 @@ func (app *Application) startAgent(ctx context.Context) error {
 		AgentID:     app.Config.Agent.ID,
 		Token:       app.Config.Agent.Token,
 		GatewayURL:  gatewayURL,
-		DockerHost:  "unix:///var/run/docker.sock",
+		DockerHost:  "unix://" + dockerpkg.LocalSocketPath(),
 		Hostname:    app.Config.Agent.Name,
 		LogLevel:    app.Config.Logging.Level,
 		DataDir:     "/var/lib/usulnet-agent",
@@ -1777,7 +1793,7 @@ func (app *Application) bootstrapLocalHost(ctx context.Context, hostID uuid.UUID
 		INSERT INTO hosts (id, name, display_name, endpoint_type, endpoint_url, tls_enabled, status, last_seen_at)
 		VALUES ($1, $2, $3, $4, $5, false, 'online', CURRENT_TIMESTAMP)
 		ON CONFLICT (id) DO NOTHING`,
-		hostID, "local", "Local Docker", "local", "unix:///var/run/docker.sock",
+		hostID, "local", "Local Docker", "local", "unix://"+dockerpkg.LocalSocketPath(),
 	)
 	if err != nil {
 		return fmt.Errorf("insert local host: %w", err)

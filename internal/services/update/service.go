@@ -285,15 +285,10 @@ func (s *Service) CheckContainerForUpdate(ctx context.Context, hostID uuid.UUID,
 		currentDigest = ExtractDigestFromRepoDigests(imageInfo.RepoDigests, info.Config.Image)
 	}
 
-	// Check for update
-	update, err := s.checker.CheckContainer(ctx, containerID, info.Name, info.Config.Image)
+	// Check for update (pass currentDigest for accurate "latest" tag comparison)
+	update, err := s.checker.CheckContainer(ctx, containerID, info.Name, info.Config.Image, currentDigest)
 	if err != nil {
 		return nil, err
-	}
-
-	// Set current digest on update
-	if update != nil && currentDigest != "" {
-		update.CurrentDigest = currentDigest
 	}
 
 	// Fetch changelog if update available

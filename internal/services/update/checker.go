@@ -107,30 +107,32 @@ func (c *Checker) RegisterClient(client RegistryClient) {
 	c.clients = append(c.clients, client)
 }
 
-// CheckContainer checks if a container has an update available
-func (c *Checker) CheckContainer(ctx context.Context, containerID, containerName, image string) (*models.AvailableUpdate, error) {
+// CheckContainer checks if a container has an update available.
+// currentDigest is the running container's image digest (from Docker ImageID),
+// used for accurate comparison with "latest" tagged images.
+func (c *Checker) CheckContainer(ctx context.Context, containerID, containerName, image, currentDigest string) (*models.AvailableUpdate, error) {
 	log := c.logger.With("container_id", containerID, "image", image)
-	
+
 	// Parse image reference
 	ref, err := ParseImageRef(image)
 	if err != nil {
 		log.Debug("Failed to parse image reference", "error", err)
 		return nil, errors.Wrap(err, errors.CodeInvalidInput, "failed to parse image")
 	}
-	
+
 	// Skip local images if configured
 	if c.config.SkipLocalImages && isLocalImage(ref) {
 		log.Debug("Skipping local image")
 		return nil, nil
 	}
-	
+
 	// Check cache first
 	if c.cache != nil {
 		if cached, ok := c.cache.Get(ctx, ref.FullName(), ref.Tag); ok {
-			return c.buildAvailableUpdate(containerID, containerName, ref, cached), nil
+			return c.buildAvailableUpdate(containerID, containerName, ref, cached, currentDigest), nil
 		}
 	}
-	
+
 	// Acquire semaphore
 	select {
 	case c.semaphore <- struct{}{}:
@@ -138,7 +140,7 @@ func (c *Checker) CheckContainer(ctx context.Context, containerID, containerName
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	
+
 	// Find appropriate client
 	client := c.findClient(ref.Registry)
 	if client == nil {
@@ -146,24 +148,24 @@ func (c *Checker) CheckContainer(ctx context.Context, containerID, containerName
 		return nil, errors.New(errors.CodeNotSupported, "unsupported registry").
 			WithDetail("registry", ref.Registry)
 	}
-	
+
 	// Create timeout context
 	checkCtx, cancel := context.WithTimeout(ctx, c.config.CheckTimeout)
 	defer cancel()
-	
+
 	// Get latest version
 	latest, err := client.GetLatestVersion(checkCtx, ref)
 	if err != nil {
 		log.Debug("Failed to get latest version", "error", err)
 		return nil, errors.Wrap(err, errors.CodeExternal, "failed to check registry")
 	}
-	
+
 	// Cache the result
 	if c.cache != nil && latest != nil {
 		c.cache.Set(ctx, ref.FullName(), ref.Tag, latest, c.config.CacheTTL)
 	}
-	
-	return c.buildAvailableUpdate(containerID, containerName, ref, latest), nil
+
+	return c.buildAvailableUpdate(containerID, containerName, ref, latest, currentDigest), nil
 }
 
 // CheckContainers checks multiple containers for updates
@@ -183,7 +185,7 @@ func (c *Checker) CheckContainers(ctx context.Context, containers []ContainerInf
 		go func(ct ContainerInfo) {
 			defer wg.Done()
 			
-			update, err := c.CheckContainer(ctx, ct.ID, ct.Name, ct.Image)
+			update, err := c.CheckContainer(ctx, ct.ID, ct.Name, ct.Image, ct.Digest)
 			
 			mu.Lock()
 			defer mu.Unlock()
@@ -215,18 +217,26 @@ type ContainerInfo struct {
 	Digest string // Current digest if known
 }
 
-// buildAvailableUpdate builds an AvailableUpdate from check results
-func (c *Checker) buildAvailableUpdate(containerID, containerName string, ref *models.ImageRef, latest *models.ImageVersion) *models.AvailableUpdate {
+// buildAvailableUpdate builds an AvailableUpdate from check results.
+// currentDigest is the actual running image digest from Docker, which takes
+// priority over the digest parsed from the image reference string.
+func (c *Checker) buildAvailableUpdate(containerID, containerName string, ref *models.ImageRef, latest *models.ImageVersion, currentDigest string) *models.AvailableUpdate {
 	if latest == nil {
 		return nil
 	}
-	
+
+	// Prefer the runtime digest from Docker over the one from the image ref string
+	digest := currentDigest
+	if digest == "" {
+		digest = ref.Digest
+	}
+
 	return &models.AvailableUpdate{
 		ContainerID:    containerID,
 		ContainerName:  containerName,
 		Image:          ref.FullNameWithTag(),
 		CurrentVersion: ref.Tag,
-		CurrentDigest:  ref.Digest,
+		CurrentDigest:  digest,
 		LatestVersion:  latest.Tag,
 		LatestDigest:   latest.Digest,
 		CheckedAt:      time.Now(),

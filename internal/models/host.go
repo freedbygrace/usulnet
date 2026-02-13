@@ -205,9 +205,16 @@ type HostDockerInfo struct {
 	ContainersStopped  int               `json:"containers_stopped"`
 	Images             int               `json:"images"`
 	DockerRootDir      string            `json:"docker_root_dir"`
+	StorageDriver      string            `json:"storage_driver"`
+	LoggingDriver      string            `json:"logging_driver"`
+	CgroupDriver       string            `json:"cgroup_driver"`
+	CgroupVersion      string            `json:"cgroup_version"`
+	DefaultRuntime     string            `json:"default_runtime"`
+	SecurityOptions    []string          `json:"security_options,omitempty"`
 	IndexServerAddress string            `json:"index_server_address"`
 	RegistryConfig     map[string]any    `json:"registry_config,omitempty"`
 	Labels             []string          `json:"labels,omitempty"`
+	RuntimeNames       []string          `json:"runtime_names,omitempty"`
 	Runtimes           map[string]any    `json:"runtimes,omitempty"`
 	Swarm              *SwarmInfo        `json:"swarm,omitempty"`
 	SwarmActive        bool              `json:"swarm_active"`

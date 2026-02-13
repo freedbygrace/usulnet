@@ -47,6 +47,13 @@ type RDPConnectionDetailData struct {
 	Connection RDPConnectionData
 }
 
+// RDPSessionData is the data for the RDP web session page.
+type RDPSessionData struct {
+	PageData     layouts.PageData
+	Connection   RDPConnectionData
+	GuacdEnabled bool
+}
+
 // RDPConnectionsList renders the RDP connections list page.
 func RDPConnectionsList(data RDPConnectionsListData) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -179,7 +186,7 @@ func RDPConnectionCard(conn RDPConnectionData) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 95, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 102, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
@@ -192,7 +199,7 @@ func RDPConnectionCard(conn RDPConnectionData) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(formatRDPAddress(conn.Host, conn.Port))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 96, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 103, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -203,192 +210,205 @@ func RDPConnectionCard(conn RDPConnectionData) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 templ.SafeURL
-		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", conn.ID)))
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/session", conn.ID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 101, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 108, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" class=\"p-2 text-gray-400 hover:text-primary-400 hover:bg-dark-700 rounded-lg transition-colors\" title=\"Connect\"><i class=\"fas fa-desktop text-lg\"></i></a></div></div><!-- Connection Info --><div class=\"mt-4 space-y-2 text-sm\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" class=\"p-2 text-gray-400 hover:text-primary-400 hover:bg-dark-700 rounded-lg transition-colors\" title=\"Open Remote Desktop\"><i class=\"fas fa-desktop text-lg\"></i></a> <a href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var9 templ.SafeURL
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", conn.ID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 115, Col: 70}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"p-2 text-gray-400 hover:text-gray-200 hover:bg-dark-700 rounded-lg transition-colors\" title=\"Settings\"><i class=\"fas fa-cog\"></i></a></div></div><!-- Connection Info --><div class=\"mt-4 space-y-2 text-sm\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if conn.Username != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"flex items-center text-gray-400\"><i class=\"fas fa-user w-4 mr-2 text-center\"></i> <span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div class=\"flex items-center text-gray-400\"><i class=\"fas fa-user w-4 mr-2 text-center\"></i> <span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if conn.Domain != "" {
-				var templ_7745c5c3_Var9 string
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Domain)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 117, Col: 20}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\\")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
 				var templ_7745c5c3_Var10 string
-				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Username)
+				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Domain)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 117, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 131, Col: 20}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\\")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Username)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 119, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 131, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
+			} else {
+				var templ_7745c5c3_Var12 string
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Username)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 133, Col: 22}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if conn.Resolution != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div class=\"flex items-center text-gray-400\"><i class=\"fas fa-expand-arrows-alt w-4 mr-2 text-center\"></i> <span>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Resolution)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 127, Col: 28}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		if conn.Security != "" && conn.Security != "any" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div class=\"flex items-center text-gray-400\"><i class=\"fas fa-lock w-4 mr-2 text-center\"></i> <span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"flex items-center text-gray-400\"><i class=\"fas fa-expand-arrows-alt w-4 mr-2 text-center\"></i> <span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
-			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(rdpSecurityLabel(conn.Security))
+			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(conn.Resolution)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 133, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 141, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</span></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if conn.LastUsed != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div class=\"flex items-center text-gray-500\"><i class=\"fas fa-clock w-4 mr-2 text-center\"></i> <span>Last used ")
+		if conn.Security != "" && conn.Security != "any" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"flex items-center text-gray-400\"><i class=\"fas fa-lock w-4 mr-2 text-center\"></i> <span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var14 string
-			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(conn.LastUsed)
+			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(rdpSecurityLabel(conn.Security))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 139, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 147, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</div><!-- Tags -->")
+		if conn.LastUsed != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"flex items-center text-gray-500\"><i class=\"fas fa-clock w-4 mr-2 text-center\"></i> <span>Last used ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var15 string
+			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(conn.LastUsed)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 153, Col: 36}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</span></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</div><!-- Tags -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(conn.Tags) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<div class=\"mt-3 flex flex-wrap gap-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<div class=\"mt-3 flex flex-wrap gap-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, tag := range conn.Tags {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<span class=\"px-2 py-0.5 bg-dark-700 text-gray-400 text-xs rounded\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<span class=\"px-2 py-0.5 bg-dark-700 text-gray-400 text-xs rounded\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var15 string
-				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(tag)
+				var templ_7745c5c3_Var16 string
+				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(tag)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 148, Col: 78}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 162, Col: 78}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<!-- Actions --><div class=\"mt-4 pt-4 border-t border-dark-700 flex items-center justify-between\"><a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<!-- Actions --><div class=\"mt-4 pt-4 border-t border-dark-700 flex items-center justify-between\"><a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var16 templ.SafeURL
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", conn.ID)))
+		var templ_7745c5c3_Var17 templ.SafeURL
+		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", conn.ID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 156, Col: 69}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" class=\"text-gray-400 hover:text-white text-sm\">Settings</a> <button class=\"text-gray-400 hover:text-red-400 text-sm\" hx-delete=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/connections/rdp/%s", conn.ID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 163, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 170, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" hx-confirm=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" class=\"text-gray-400 hover:text-white text-sm\">Settings</a> <button class=\"text-gray-400 hover:text-red-400 text-sm\" hx-delete=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Delete connection '%s'?", conn.Name))
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/connections/rdp/%s", conn.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 164, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 177, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-target=\"closest div.bg-dark-800\" hx-swap=\"outerHTML\">Delete</button></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-confirm=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var19 string
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Delete connection '%s'?", conn.Name))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 178, Col: 66}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" hx-target=\"closest div.bg-dark-800\" hx-swap=\"outerHTML\">Delete</button></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -413,12 +433,12 @@ func RDPConnectionNew(data RDPConnectionNewData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var19 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var19 == nil {
-			templ_7745c5c3_Var19 = templ.NopComponent
+		templ_7745c5c3_Var20 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var20 == nil {
+			templ_7745c5c3_Var20 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var20 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var21 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -430,26 +450,26 @@ func RDPConnectionNew(data RDPConnectionNewData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<div class=\"max-w-2xl mx-auto space-y-6\"><!-- Header --><div class=\"flex items-center gap-4\"><a href=\"/connections/rdp\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg\"><i class=\"fas fa-arrow-left\"></i></a><div><h1 class=\"text-2xl font-display font-bold text-white\">New RDP Connection</h1><p class=\"text-gray-400 mt-1\">Configure a Remote Desktop connection</p></div></div><form method=\"POST\" action=\"/connections/rdp\" class=\"space-y-6\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"max-w-2xl mx-auto space-y-6\"><!-- Header --><div class=\"flex items-center gap-4\"><a href=\"/connections/rdp\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg\"><i class=\"fas fa-arrow-left\"></i></a><div><h1 class=\"text-2xl font-display font-bold text-white\">New RDP Connection</h1><p class=\"text-gray-400 mt-1\">Configure a Remote Desktop connection</p></div></div><form method=\"POST\" action=\"/connections/rdp\" class=\"space-y-6\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var21 string
-			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(data.PageData.CSRFToken)
+			var templ_7745c5c3_Var22 string
+			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(data.PageData.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 190, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 204, Col: 74}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\"><!-- Basic Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Connection Details</h2><div><label for=\"name\" class=\"block text-sm font-medium text-gray-300 mb-1\">Connection Name</label> <input type=\"text\" id=\"name\" name=\"name\" required class=\"input w-full\" placeholder=\"My Windows Server\"></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"host\" class=\"block text-sm font-medium text-gray-300 mb-1\">Host</label> <input type=\"text\" id=\"host\" name=\"host\" required class=\"input w-full\" placeholder=\"192.168.1.100\"></div><div><label for=\"port\" class=\"block text-sm font-medium text-gray-300 mb-1\">Port</label> <input type=\"number\" id=\"port\" name=\"port\" value=\"3389\" class=\"input w-full\" placeholder=\"3389\"></div></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"username\" class=\"block text-sm font-medium text-gray-300 mb-1\">Username</label> <input type=\"text\" id=\"username\" name=\"username\" class=\"input w-full\" placeholder=\"Administrator\"></div><div><label for=\"domain\" class=\"block text-sm font-medium text-gray-300 mb-1\">Domain (optional)</label> <input type=\"text\" id=\"domain\" name=\"domain\" class=\"input w-full\" placeholder=\"WORKGROUP\"></div></div><div><label for=\"password\" class=\"block text-sm font-medium text-gray-300 mb-1\">Password</label> <input type=\"password\" id=\"password\" name=\"password\" class=\"input w-full\" placeholder=\"Enter password\"><p class=\"text-xs text-gray-500 mt-1\">Stored encrypted. Leave blank to be prompted on each connection.</p></div></div><!-- Display Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Display Settings</h2><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"resolution\" class=\"block text-sm font-medium text-gray-300 mb-1\">Resolution</label> <select id=\"resolution\" name=\"resolution\" class=\"input w-full\"><option value=\"1920x1080\" selected>1920 x 1080 (Full HD)</option> <option value=\"1600x900\">1600 x 900</option> <option value=\"1366x768\">1366 x 768</option> <option value=\"1280x720\">1280 x 720 (HD)</option> <option value=\"1024x768\">1024 x 768</option> <option value=\"auto\">Auto (fit browser)</option></select></div><div><label for=\"color_depth\" class=\"block text-sm font-medium text-gray-300 mb-1\">Color Depth</label> <select id=\"color_depth\" name=\"color_depth\" class=\"input w-full\"><option value=\"32\" selected>32-bit (True Color)</option> <option value=\"24\">24-bit</option> <option value=\"16\">16-bit (High Color)</option></select></div></div></div><!-- Security Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Security</h2><div><label for=\"security\" class=\"block text-sm font-medium text-gray-300 mb-1\">Security Mode</label> <select id=\"security\" name=\"security\" class=\"input w-full\"><option value=\"any\" selected>Any (auto-negotiate)</option> <option value=\"nla\">NLA (Network Level Authentication)</option> <option value=\"tls\">TLS</option> <option value=\"rdp\">RDP (legacy)</option></select><p class=\"text-xs text-gray-500 mt-1\">NLA is recommended for best security. Use \"Any\" if unsure.</p></div><div class=\"flex items-center gap-3\"><input type=\"checkbox\" id=\"ignore_cert\" name=\"ignore_cert\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500 focus:ring-primary-500\"> <label for=\"ignore_cert\" class=\"text-sm text-gray-300\">Ignore certificate errors (self-signed certs)</label></div></div><!-- Tags --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Organization</h2><div><label for=\"tags\" class=\"block text-sm font-medium text-gray-300 mb-1\">Tags (comma separated)</label> <input type=\"text\" id=\"tags\" name=\"tags\" class=\"input w-full\" placeholder=\"production, windows, dc\"></div></div><!-- Submit --><div class=\"flex justify-end gap-3\"><a href=\"/connections/rdp\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>Create Connection</button></div></form></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\"><!-- Basic Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Connection Details</h2><div><label for=\"name\" class=\"block text-sm font-medium text-gray-300 mb-1\">Connection Name</label> <input type=\"text\" id=\"name\" name=\"name\" required class=\"input w-full\" placeholder=\"My Windows Server\"></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"host\" class=\"block text-sm font-medium text-gray-300 mb-1\">Host</label> <input type=\"text\" id=\"host\" name=\"host\" required class=\"input w-full\" placeholder=\"192.168.1.100\"></div><div><label for=\"port\" class=\"block text-sm font-medium text-gray-300 mb-1\">Port</label> <input type=\"number\" id=\"port\" name=\"port\" value=\"3389\" class=\"input w-full\" placeholder=\"3389\"></div></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"username\" class=\"block text-sm font-medium text-gray-300 mb-1\">Username</label> <input type=\"text\" id=\"username\" name=\"username\" class=\"input w-full\" placeholder=\"Administrator\"></div><div><label for=\"domain\" class=\"block text-sm font-medium text-gray-300 mb-1\">Domain (optional)</label> <input type=\"text\" id=\"domain\" name=\"domain\" class=\"input w-full\" placeholder=\"WORKGROUP\"></div></div><div><label for=\"password\" class=\"block text-sm font-medium text-gray-300 mb-1\">Password</label> <input type=\"password\" id=\"password\" name=\"password\" class=\"input w-full\" placeholder=\"Enter password\"><p class=\"text-xs text-gray-500 mt-1\">Stored encrypted. Leave blank to be prompted on each connection.</p></div></div><!-- Display Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Display Settings</h2><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"resolution\" class=\"block text-sm font-medium text-gray-300 mb-1\">Resolution</label> <select id=\"resolution\" name=\"resolution\" class=\"input w-full\"><option value=\"1920x1080\" selected>1920 x 1080 (Full HD)</option> <option value=\"1600x900\">1600 x 900</option> <option value=\"1366x768\">1366 x 768</option> <option value=\"1280x720\">1280 x 720 (HD)</option> <option value=\"1024x768\">1024 x 768</option> <option value=\"auto\">Auto (fit browser)</option></select></div><div><label for=\"color_depth\" class=\"block text-sm font-medium text-gray-300 mb-1\">Color Depth</label> <select id=\"color_depth\" name=\"color_depth\" class=\"input w-full\"><option value=\"32\" selected>32-bit (True Color)</option> <option value=\"24\">24-bit</option> <option value=\"16\">16-bit (High Color)</option></select></div></div></div><!-- Security Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Security</h2><div><label for=\"security\" class=\"block text-sm font-medium text-gray-300 mb-1\">Security Mode</label> <select id=\"security\" name=\"security\" class=\"input w-full\"><option value=\"any\" selected>Any (auto-negotiate)</option> <option value=\"nla\">NLA (Network Level Authentication)</option> <option value=\"tls\">TLS</option> <option value=\"rdp\">RDP (legacy)</option></select><p class=\"text-xs text-gray-500 mt-1\">NLA is recommended for best security. Use \"Any\" if unsure.</p></div><div class=\"flex items-center gap-3\"><input type=\"checkbox\" id=\"ignore_cert\" name=\"ignore_cert\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500 focus:ring-primary-500\"> <label for=\"ignore_cert\" class=\"text-sm text-gray-300\">Ignore certificate errors (self-signed certs)</label></div></div><!-- Tags --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Organization</h2><div><label for=\"tags\" class=\"block text-sm font-medium text-gray-300 mb-1\">Tags (comma separated)</label> <input type=\"text\" id=\"tags\" name=\"tags\" class=\"input w-full\" placeholder=\"production, windows, dc\"></div></div><!-- Submit --><div class=\"flex justify-end gap-3\"><a href=\"/connections/rdp\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\"><i class=\"fas fa-plus mr-2\"></i>Create Connection</button></div></form></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layouts.Base(data.PageData).Render(templ.WithChildren(ctx, templ_7745c5c3_Var20), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layouts.Base(data.PageData).Render(templ.WithChildren(ctx, templ_7745c5c3_Var21), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -474,12 +494,12 @@ func RDPConnectionDetail(data RDPConnectionDetailData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var22 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var22 == nil {
-			templ_7745c5c3_Var22 = templ.NopComponent
+		templ_7745c5c3_Var23 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var23 == nil {
+			templ_7745c5c3_Var23 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var23 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var24 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -491,396 +511,638 @@ func RDPConnectionDetail(data RDPConnectionDetailData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"max-w-2xl mx-auto space-y-6\"><!-- Header --><div class=\"flex items-center gap-4\"><a href=\"/connections/rdp\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg\"><i class=\"fas fa-arrow-left\"></i></a><div class=\"flex-1\"><div class=\"flex items-center gap-3\"><h1 class=\"text-2xl font-display font-bold text-white\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<div class=\"max-w-2xl mx-auto space-y-6\"><!-- Header --><div class=\"flex items-center gap-4\"><a href=\"/connections/rdp\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg\"><i class=\"fas fa-arrow-left\"></i></a><div class=\"flex-1\"><div class=\"flex items-center gap-3\"><h1 class=\"text-2xl font-display font-bold text-white\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var24 string
-			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
+			var templ_7745c5c3_Var25 string
+			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 311, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 325, Col: 83}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</h1>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var25 = []any{"inline-flex items-center px-2 py-0.5 rounded text-xs font-medium", rdpStatusBadgeClass(data.Connection.Status)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var25...)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</h1>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span class=\"")
+			var templ_7745c5c3_Var26 = []any{"inline-flex items-center px-2 py-0.5 rounded text-xs font-medium", rdpStatusBadgeClass(data.Connection.Status)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var26...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var26 string
-			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var25).String())
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 1, Col: 0}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<span class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var27 string
-			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Status)
+			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var26).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 313, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 1, Col: 0}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</span></div><p class=\"text-gray-400 mt-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var28 string
-			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(formatRDPAddress(data.Connection.Host, data.Connection.Port))
+			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Status)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 316, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 327, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</p></div></div><!-- Quick Actions --><div class=\"grid grid-cols-2 gap-4\"><button class=\"card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors text-left\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</span></div><p class=\"text-gray-400 mt-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var29 string
-			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/connections/rdp/%s/test", data.Connection.ID))
+			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(formatRDPAddress(data.Connection.Host, data.Connection.Port))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 324, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 330, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" hx-target=\"#test-result\" hx-swap=\"innerHTML\"><div class=\"w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center\"><i class=\"fas fa-plug text-blue-400\"></i></div><div><p class=\"text-white font-medium\">Test Connection</p><p class=\"text-xs text-gray-400\">Verify RDP is reachable</p></div></button> <a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</p></div></div><!-- Quick Actions --><div class=\"grid grid-cols-3 gap-4\"><a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var30 templ.SafeURL
-			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)))
+			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/session", data.Connection.ID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 337, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 337, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" class=\"card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors\" download><div class=\"w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center\"><i class=\"fas fa-desktop text-primary-400\"></i></div><div><p class=\"text-white font-medium\">Connect</p><p class=\"text-xs text-gray-400\">Download .rdp file</p></div></a></div><!-- Test result --><div id=\"test-result\"></div><!-- Edit Form --><form method=\"POST\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" class=\"card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors\"><div class=\"w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center\"><i class=\"fas fa-desktop text-green-400\"></i></div><div><p class=\"text-white font-medium\">Open Session</p><p class=\"text-xs text-gray-400\">Web Remote Desktop</p></div></a> <button class=\"card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors text-left\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var31 templ.SafeURL
-			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", data.Connection.ID)))
+			var templ_7745c5c3_Var31 string
+			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/connections/rdp/%s/test", data.Connection.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 354, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 350, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" class=\"space-y-6\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" hx-target=\"#test-result\" hx-swap=\"innerHTML\"><div class=\"w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center\"><i class=\"fas fa-plug text-blue-400\"></i></div><div><p class=\"text-white font-medium\">Test Connection</p><p class=\"text-xs text-gray-400\">Verify RDP is reachable</p></div></button> <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var32 string
-			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(data.PageData.CSRFToken)
+			var templ_7745c5c3_Var32 templ.SafeURL
+			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 355, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 363, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\"><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Connection Details</h2><div><label for=\"name\" class=\"block text-sm font-medium text-gray-300 mb-1\">Connection Name</label> <input type=\"text\" id=\"name\" name=\"name\" required class=\"input w-full\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" class=\"card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors\" download><div class=\"w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center\"><i class=\"fas fa-download text-primary-400\"></i></div><div><p class=\"text-white font-medium\">Download .rdp</p><p class=\"text-xs text-gray-400\">Native client file</p></div></a></div><!-- Test result --><div id=\"test-result\"></div><!-- Edit Form --><form method=\"POST\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var33 string
-			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
+			var templ_7745c5c3_Var33 templ.SafeURL
+			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", data.Connection.ID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 362, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 381, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\"></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"host\" class=\"block text-sm font-medium text-gray-300 mb-1\">Host</label> <input type=\"text\" id=\"host\" name=\"host\" required class=\"input w-full\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" class=\"space-y-6\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var34 string
-			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Host)
+			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(data.PageData.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 368, Col: 106}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 382, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\"></div><div><label for=\"port\" class=\"block text-sm font-medium text-gray-300 mb-1\">Port</label> <input type=\"number\" id=\"port\" name=\"port\" class=\"input w-full\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\"><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Connection Details</h2><div><label for=\"name\" class=\"block text-sm font-medium text-gray-300 mb-1\">Connection Name</label> <input type=\"text\" id=\"name\" name=\"name\" required class=\"input w-full\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var35 string
-			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Connection.Port))
+			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 372, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 389, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\"></div></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"username\" class=\"block text-sm font-medium text-gray-300 mb-1\">Username</label> <input type=\"text\" id=\"username\" name=\"username\" class=\"input w-full\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\"></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"host\" class=\"block text-sm font-medium text-gray-300 mb-1\">Host</label> <input type=\"text\" id=\"host\" name=\"host\" required class=\"input w-full\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var36 string
-			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Username)
+			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Host)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 379, Col: 109}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 395, Col: 106}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\"></div><div><label for=\"domain\" class=\"block text-sm font-medium text-gray-300 mb-1\">Domain (optional)</label> <input type=\"text\" id=\"domain\" name=\"domain\" class=\"input w-full\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\"></div><div><label for=\"port\" class=\"block text-sm font-medium text-gray-300 mb-1\">Port</label> <input type=\"number\" id=\"port\" name=\"port\" class=\"input w-full\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var37 string
-			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Domain)
+			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Connection.Port))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 383, Col: 103}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 399, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\"></div></div><div><label for=\"password\" class=\"block text-sm font-medium text-gray-300 mb-1\">Password</label> <input type=\"password\" id=\"password\" name=\"password\" class=\"input w-full\" placeholder=\"Leave blank to keep current\"></div></div><!-- Display Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Display Settings</h2><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"resolution\" class=\"block text-sm font-medium text-gray-300 mb-1\">Resolution</label> <select id=\"resolution\" name=\"resolution\" class=\"input w-full\"><option value=\"1920x1080\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Resolution == "1920x1080" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, ">1920 x 1080 (Full HD)</option> <option value=\"1600x900\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Resolution == "1600x900" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, ">1600 x 900</option> <option value=\"1366x768\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Resolution == "1366x768" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, ">1366 x 768</option> <option value=\"1280x720\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Resolution == "1280x720" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, ">1280 x 720 (HD)</option> <option value=\"1024x768\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Resolution == "1024x768" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, ">1024 x 768</option> <option value=\"auto\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Resolution == "auto" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, ">Auto (fit browser)</option></select></div><div><label for=\"color_depth\" class=\"block text-sm font-medium text-gray-300 mb-1\">Color Depth</label> <select id=\"color_depth\" name=\"color_depth\" class=\"input w-full\"><option value=\"32\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.ColorDepth == "32" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, ">32-bit (True Color)</option> <option value=\"24\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.ColorDepth == "24" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, ">24-bit</option> <option value=\"16\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.ColorDepth == "16" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, ">16-bit (High Color)</option></select></div></div></div><!-- Security --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Security</h2><div><label for=\"security\" class=\"block text-sm font-medium text-gray-300 mb-1\">Security Mode</label> <select id=\"security\" name=\"security\" class=\"input w-full\"><option value=\"any\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Security == "any" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, ">Any (auto-negotiate)</option> <option value=\"nla\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Security == "nla" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, ">NLA (Network Level Authentication)</option> <option value=\"tls\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Security == "tls" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, ">TLS</option> <option value=\"rdp\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if data.Connection.Security == "rdp" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, ">RDP (legacy)</option></select></div></div><!-- Submit --><div class=\"flex justify-between\"><button type=\"button\" class=\"text-red-400 hover:text-red-300 text-sm\" hx-delete=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\"></div></div><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"username\" class=\"block text-sm font-medium text-gray-300 mb-1\">Username</label> <input type=\"text\" id=\"username\" name=\"username\" class=\"input w-full\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var38 string
-			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/connections/rdp/%s", data.Connection.ID))
+			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Username)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 440, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 406, Col: 109}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" hx-confirm=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\"></div><div><label for=\"domain\" class=\"block text-sm font-medium text-gray-300 mb-1\">Domain (optional)</label> <input type=\"text\" id=\"domain\" name=\"domain\" class=\"input w-full\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var39 string
-			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Delete connection '%s'? This cannot be undone.", data.Connection.Name))
+			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Domain)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 441, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 410, Col: 103}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\"><i class=\"fas fa-trash mr-1\"></i>Delete Connection</button><div class=\"flex gap-3\"><a href=\"/connections/rdp\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\"><i class=\"fas fa-save mr-2\"></i>Save Changes</button></div></div></form><!-- Connection Info --><div class=\"card p-6\"><h2 class=\"text-lg font-medium text-white mb-4\">Connection Info</h2><dl class=\"grid grid-cols-2 gap-4 text-sm\"><div><dt class=\"text-gray-500\">Created</dt><dd class=\"text-gray-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\"></div></div><div><label for=\"password\" class=\"block text-sm font-medium text-gray-300 mb-1\">Password</label> <input type=\"password\" id=\"password\" name=\"password\" class=\"input w-full\" placeholder=\"Leave blank to keep current\"></div></div><!-- Display Settings --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Display Settings</h2><div class=\"grid grid-cols-2 gap-4\"><div><label for=\"resolution\" class=\"block text-sm font-medium text-gray-300 mb-1\">Resolution</label> <select id=\"resolution\" name=\"resolution\" class=\"input w-full\"><option value=\"1920x1080\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Resolution == "1920x1080" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, ">1920 x 1080 (Full HD)</option> <option value=\"1600x900\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Resolution == "1600x900" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, ">1600 x 900</option> <option value=\"1366x768\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Resolution == "1366x768" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, ">1366 x 768</option> <option value=\"1280x720\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Resolution == "1280x720" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, ">1280 x 720 (HD)</option> <option value=\"1024x768\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Resolution == "1024x768" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, ">1024 x 768</option> <option value=\"auto\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Resolution == "auto" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, ">Auto (fit browser)</option></select></div><div><label for=\"color_depth\" class=\"block text-sm font-medium text-gray-300 mb-1\">Color Depth</label> <select id=\"color_depth\" name=\"color_depth\" class=\"input w-full\"><option value=\"32\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.ColorDepth == "32" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, ">32-bit (True Color)</option> <option value=\"24\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.ColorDepth == "24" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, ">24-bit</option> <option value=\"16\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.ColorDepth == "16" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, ">16-bit (High Color)</option></select></div></div></div><!-- Security --><div class=\"card p-6 space-y-4\"><h2 class=\"text-lg font-medium text-white\">Security</h2><div><label for=\"security\" class=\"block text-sm font-medium text-gray-300 mb-1\">Security Mode</label> <select id=\"security\" name=\"security\" class=\"input w-full\"><option value=\"any\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Security == "any" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, ">Any (auto-negotiate)</option> <option value=\"nla\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Security == "nla" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, ">NLA (Network Level Authentication)</option> <option value=\"tls\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Security == "tls" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, ">TLS</option> <option value=\"rdp\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Security == "rdp" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, ">RDP (legacy)</option></select></div></div><!-- Submit --><div class=\"flex justify-between\"><button type=\"button\" class=\"text-red-400 hover:text-red-300 text-sm\" hx-delete=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var40 string
-			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.CreatedAt)
+			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/connections/rdp/%s", data.Connection.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 460, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 467, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "</dd></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "\" hx-confirm=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if data.Connection.LastUsed != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "<div><dt class=\"text-gray-500\">Last Used</dt><dd class=\"text-gray-300\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var41 string
-				templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.LastUsed)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 465, Col: 59}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</dd></div>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
+			var templ_7745c5c3_Var41 string
+			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Delete connection '%s'? This cannot be undone.", data.Connection.Name))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 468, Col: 102}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<div><dt class=\"text-gray-500\">Connection ID</dt><dd class=\"text-gray-300 font-mono text-xs\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "\"><i class=\"fas fa-trash mr-1\"></i>Delete Connection</button><div class=\"flex gap-3\"><a href=\"/connections/rdp\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\"><i class=\"fas fa-save mr-2\"></i>Save Changes</button></div></div></form><!-- Connection Info --><div class=\"card p-6\"><h2 class=\"text-lg font-medium text-white mb-4\">Connection Info</h2><dl class=\"grid grid-cols-2 gap-4 text-sm\"><div><dt class=\"text-gray-500\">Created</dt><dd class=\"text-gray-300\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var42 string
-			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.ID)
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.CreatedAt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 470, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 487, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "</dd></div></dl></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</dd></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.LastUsed != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<div><dt class=\"text-gray-500\">Last Used</dt><dd class=\"text-gray-300\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var43 string
+				templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.LastUsed)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 492, Col: 59}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "</dd></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "<div><dt class=\"text-gray-500\">Connection ID</dt><dd class=\"text-gray-300 font-mono text-xs\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var44 string
+			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.ID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 497, Col: 70}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "</dd></div></dl></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layouts.Base(data.PageData).Render(templ.WithChildren(ctx, templ_7745c5c3_Var23), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layouts.Base(data.PageData).Render(templ.WithChildren(ctx, templ_7745c5c3_Var24), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+// RDPSession renders the web-based RDP session page using Apache Guacamole.
+func RDPSession(data RDPSessionData) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var45 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var45 == nil {
+			templ_7745c5c3_Var45 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Var46 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "<!-- Breadcrumb --> <nav class=\"flex items-center gap-2 text-sm text-gray-400 mb-4\"><a href=\"/connections/rdp\" class=\"hover:text-primary-400 transition-colors\">RDP Connections</a> <i class=\"fas fa-chevron-right text-xs\"></i> <a href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var47 templ.SafeURL
+			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/connections/rdp/" + data.Connection.ID))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 512, Col: 68}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "\" class=\"hover:text-primary-400 transition-colors\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var48 string
+			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 512, Col: 142}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "</a> <i class=\"fas fa-chevron-right text-xs\"></i> <span class=\"text-white\">Session</span></nav><!-- Header --> <div class=\"flex items-center justify-between mb-6\"><div class=\"flex items-center gap-4\"><div class=\"w-10 h-10 rounded-lg bg-dark-700 flex items-center justify-center\"><i class=\"fas fa-desktop text-lg text-primary-400\"></i></div><div><h1 class=\"text-2xl font-bold font-display text-white\">Remote Desktop</h1><p class=\"text-gray-400 text-sm\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var49 string
+			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 526, Col: 28}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, " — ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var50 string
+			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(formatRDPAddress(data.Connection.Host, data.Connection.Port))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 526, Col: 97}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, " ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Connection.Username != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "<span class=\"text-gray-500\">(")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var51 string
+				templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Username)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 528, Col: 63}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, ")</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "</p></div></div><div class=\"flex items-center gap-2\"><a href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var52 templ.SafeURL
+			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/connections/rdp/" + data.Connection.ID))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 534, Col: 69}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "\" class=\"px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg transition-colors\"><i class=\"fas fa-arrow-left mr-2\"></i>Back</a> <a href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var53 templ.SafeURL
+			templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 538, Col: 90}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\" class=\"px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg transition-colors\" download><i class=\"fas fa-download mr-2\"></i>.rdp File</a></div></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !data.GuacdEnabled {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "<!-- Guacd not enabled message --> <div class=\"bg-dark-800 rounded-xl border border-dark-600 p-8 text-center\"><div class=\"w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4\"><i class=\"fas fa-exclamation-triangle text-2xl text-yellow-400\"></i></div><h3 class=\"text-lg font-medium text-white mb-2\">Web RDP Not Configured</h3><p class=\"text-gray-400 mb-4 max-w-lg mx-auto\">Web-based Remote Desktop requires Apache Guacamole daemon (guacd). Add guacd to your Docker Compose configuration and set <code class=\"text-primary-400\">GUACD_ENABLED=true</code>.</p><div class=\"bg-dark-700 rounded-lg p-4 max-w-md mx-auto text-left mb-6\"><p class=\"text-gray-400 text-xs mb-2\">docker-compose.yml:</p><pre class=\"text-gray-300 text-sm\"><code>guacd: image: guacamole/guacd:latest restart: unless-stopped</code></pre></div><a href=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var54 templ.SafeURL
+				templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 565, Col: 90}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "\" class=\"inline-flex items-center px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors\" download><i class=\"fas fa-download mr-2\"></i>Download .rdp File Instead</a></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "<!-- Guacamole Client JS (bundled locally) --> <script src=\"/static/js/guacamole-common.min.js?v=1.5.0-2\"></script> <script>\n\t\t\t\tfunction rdpSession() {\n\t\t\t\t\treturn {\n\t\t\t\t\t\tclient: null,\n\t\t\t\t\t\ttunnel: null,\n\t\t\t\t\t\tconnected: false,\n\t\t\t\t\t\tconnecting: false,\n\t\t\t\t\t\tconnId: '',\n\t\t\t\t\t\tconnName: '',\n\t\t\t\t\t\terrorMsg: '',\n\t\t\t\t\t\t_initialized: false,\n\t\t\t\t\t\t_keyboard: null,\n\t\t\t\t\t\t_mouse: null,\n\n\t\t\t\t\t\tinit() {\n\t\t\t\t\t\t\tif (this._initialized) return;\n\t\t\t\t\t\t\tthis._initialized = true;\n\n\t\t\t\t\t\t\tthis.connId = this.$el.dataset.connId;\n\t\t\t\t\t\t\tthis.connName = this.$el.dataset.connName;\n\n\t\t\t\t\t\t\tthis.connect();\n\t\t\t\t\t\t},\n\n\t\t\t\t\t\tdestroy() {\n\t\t\t\t\t\t\tif (this.client) {\n\t\t\t\t\t\t\t\tthis.client.disconnect();\n\t\t\t\t\t\t\t\tthis.client = null;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (this._keyboard) {\n\t\t\t\t\t\t\t\tthis._keyboard.onkeydown = null;\n\t\t\t\t\t\t\t\tthis._keyboard.onkeyup = null;\n\t\t\t\t\t\t\t\tthis._keyboard = null;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t},\n\n\t\t\t\t\t\tconnect() {\n\t\t\t\t\t\t\tthis.connecting = true;\n\t\t\t\t\t\t\tthis.connected = false;\n\t\t\t\t\t\t\tthis.errorMsg = '';\n\n\t\t\t\t\t\t\tconst display = this.$refs.rdpDisplay;\n\n\t\t\t\t\t\t\t// Remove previous display elements\n\t\t\t\t\t\t\tconst existingCanvas = display.querySelector('.guac-display');\n\t\t\t\t\t\t\tif (existingCanvas) existingCanvas.remove();\n\n\t\t\t\t\t\t\t// Create WebSocket tunnel to our Go backend\n\t\t\t\t\t\t\tconst protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';\n\t\t\t\t\t\t\tconst wsUrl = `${protocol}//${window.location.host}/ws/rdp/${this.connId}`;\n\n\t\t\t\t\t\t\tthis.tunnel = new Guacamole.WebSocketTunnel(wsUrl);\n\t\t\t\t\t\t\tthis.client = new Guacamole.Client(this.tunnel);\n\n\t\t\t\t\t\t\t// Get display element\n\t\t\t\t\t\t\tconst guacDisplay = this.client.getDisplay().getElement();\n\t\t\t\t\t\t\tguacDisplay.classList.add('guac-display');\n\t\t\t\t\t\t\tdisplay.appendChild(guacDisplay);\n\n\t\t\t\t\t\t\t// Handle state changes\n\t\t\t\t\t\t\tthis.client.onstatechange = (state) => {\n\t\t\t\t\t\t\t\tswitch(state) {\n\t\t\t\t\t\t\t\t\tcase 0: // IDLE\n\t\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t\tcase 1: // CONNECTING\n\t\t\t\t\t\t\t\t\t\tthis.connecting = true;\n\t\t\t\t\t\t\t\t\t\tthis.connected = false;\n\t\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t\tcase 2: // WAITING\n\t\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t\tcase 3: // CONNECTED\n\t\t\t\t\t\t\t\t\t\tthis.connecting = false;\n\t\t\t\t\t\t\t\t\t\tthis.connected = true;\n\t\t\t\t\t\t\t\t\t\tthis.errorMsg = '';\n\t\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t\tcase 4: // DISCONNECTING\n\t\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t\tcase 5: // DISCONNECTED\n\t\t\t\t\t\t\t\t\t\tthis.connecting = false;\n\t\t\t\t\t\t\t\t\t\tthis.connected = false;\n\t\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t};\n\n\t\t\t\t\t\t\t// Handle errors\n\t\t\t\t\t\t\tthis.client.onerror = (error) => {\n\t\t\t\t\t\t\t\tthis.connecting = false;\n\t\t\t\t\t\t\t\tthis.connected = false;\n\t\t\t\t\t\t\t\tthis.errorMsg = error.message || 'Connection error';\n\t\t\t\t\t\t\t\tconsole.error('Guacamole error:', error);\n\t\t\t\t\t\t\t};\n\n\t\t\t\t\t\t\t// Handle clipboard\n\t\t\t\t\t\t\tthis.client.onclipboard = (stream, mimetype) => {\n\t\t\t\t\t\t\t\tif (mimetype === 'text/plain') {\n\t\t\t\t\t\t\t\t\tlet data = '';\n\t\t\t\t\t\t\t\t\tconst reader = new Guacamole.StringReader(stream);\n\t\t\t\t\t\t\t\t\treader.ontext = (text) => { data += text; };\n\t\t\t\t\t\t\t\t\treader.onend = () => {\n\t\t\t\t\t\t\t\t\t\tif (navigator.clipboard) {\n\t\t\t\t\t\t\t\t\t\t\tnavigator.clipboard.writeText(data).catch(() => {});\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t};\n\n\t\t\t\t\t\t\t// Setup mouse\n\t\t\t\t\t\t\tthis._mouse = new Guacamole.Mouse(guacDisplay);\n\t\t\t\t\t\t\tthis._mouse.onEach(['mousedown', 'mousemove', 'mouseup'], (e) => {\n\t\t\t\t\t\t\t\tif (this.client) {\n\t\t\t\t\t\t\t\t\tthis.client.sendMouseState(e.state);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\n\t\t\t\t\t\t\t// Setup keyboard\n\t\t\t\t\t\t\tthis._keyboard = new Guacamole.Keyboard(document);\n\t\t\t\t\t\t\tthis._keyboard.onkeydown = (keysym) => {\n\t\t\t\t\t\t\t\tif (this.client) this.client.sendKeyEvent(1, keysym);\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\tthis._keyboard.onkeyup = (keysym) => {\n\t\t\t\t\t\t\t\tif (this.client) this.client.sendKeyEvent(0, keysym);\n\t\t\t\t\t\t\t};\n\n\t\t\t\t\t\t\t// Connect (empty string = no additional params, handled server-side)\n\t\t\t\t\t\t\tthis.client.connect('');\n\n\t\t\t\t\t\t\t// Auto-resize display\n\t\t\t\t\t\t\tthis._setupResize(display);\n\t\t\t\t\t\t},\n\n\t\t\t\t\t\t_setupResize(display) {\n\t\t\t\t\t\t\tconst resizeObserver = new ResizeObserver(() => {\n\t\t\t\t\t\t\t\tif (!this.client || !this.connected) return;\n\t\t\t\t\t\t\t\tconst w = display.clientWidth;\n\t\t\t\t\t\t\t\tconst h = display.clientHeight;\n\t\t\t\t\t\t\t\tif (w > 0 && h > 0) {\n\t\t\t\t\t\t\t\t\tthis.client.sendSize(w, h);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tresizeObserver.observe(display);\n\t\t\t\t\t\t},\n\n\t\t\t\t\t\treconnect() {\n\t\t\t\t\t\t\tif (this.client) {\n\t\t\t\t\t\t\t\ttry { this.client.disconnect(); } catch(e) {}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tthis.connect();\n\t\t\t\t\t\t},\n\n\t\t\t\t\t\ttoggleFullscreen() {\n\t\t\t\t\t\t\tconst display = this.$refs.rdpDisplay;\n\t\t\t\t\t\t\tif (document.fullscreenElement) {\n\t\t\t\t\t\t\t\tdocument.exitFullscreen();\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tdisplay.requestFullscreen();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t},\n\n\t\t\t\t\t\tsendCtrlAltDel() {\n\t\t\t\t\t\t\tif (!this.client) return;\n\t\t\t\t\t\t\t// Key codes for Ctrl+Alt+Del\n\t\t\t\t\t\t\tconst KEYSYM_CTRL = 0xFFE3;\n\t\t\t\t\t\t\tconst KEYSYM_ALT = 0xFFE9;\n\t\t\t\t\t\t\tconst KEYSYM_DEL = 0xFFFF;\n\t\t\t\t\t\t\tthis.client.sendKeyEvent(1, KEYSYM_CTRL);\n\t\t\t\t\t\t\tthis.client.sendKeyEvent(1, KEYSYM_ALT);\n\t\t\t\t\t\t\tthis.client.sendKeyEvent(1, KEYSYM_DEL);\n\t\t\t\t\t\t\tthis.client.sendKeyEvent(0, KEYSYM_DEL);\n\t\t\t\t\t\t\tthis.client.sendKeyEvent(0, KEYSYM_ALT);\n\t\t\t\t\t\t\tthis.client.sendKeyEvent(0, KEYSYM_CTRL);\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t}\n\t\t\t</script> <!-- RDP Session Container --> <div x-data=\"rdpSession()\" data-conn-id=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var55 string
+				templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.ID)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 754, Col: 37}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "\" data-conn-name=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var56 string
+				templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 755, Col: 41}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "\" class=\"bg-dark-800 rounded-xl border border-dark-600 overflow-hidden\"><!-- Session Header --><div class=\"flex items-center justify-between px-4 py-3 border-b border-dark-600 bg-dark-850\"><div class=\"flex items-center gap-3\"><div class=\"flex items-center gap-1.5\"><span class=\"w-3 h-3 rounded-full bg-red-500\"></span> <span class=\"w-3 h-3 rounded-full bg-yellow-500\"></span> <span class=\"w-3 h-3 rounded-full bg-green-500\"></span></div><span class=\"text-sm text-gray-400\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var57 string
+				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(data.Connection.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 767, Col: 29}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, " — ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var58 string
+				templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(formatRDPAddress(data.Connection.Host, data.Connection.Port))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/connections/rdp.templ`, Line: 767, Col: 98}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "</span></div><div class=\"flex items-center gap-2\"><span x-show=\"connected\" class=\"flex items-center gap-1.5 text-xs text-green-400\"><span class=\"w-2 h-2 bg-green-500 rounded-full animate-pulse\"></span> Connected</span> <span x-show=\"!connected && !connecting\" class=\"flex items-center gap-1.5 text-xs text-red-400\"><span class=\"w-2 h-2 bg-red-500 rounded-full\"></span> Disconnected</span> <span x-show=\"connecting\" class=\"flex items-center gap-1.5 text-xs text-yellow-400\"><i class=\"fas fa-spinner fa-spin\"></i> Connecting...</span> <button @click=\"reconnect()\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-600 rounded-lg transition-colors\" title=\"Reconnect\"><i class=\"fas fa-redo\"></i></button> <button @click=\"toggleFullscreen()\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-600 rounded-lg transition-colors\" title=\"Fullscreen\"><i class=\"fas fa-expand\"></i></button> <button @click=\"sendCtrlAltDel()\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-600 rounded-lg transition-colors\" title=\"Send Ctrl+Alt+Del\"><i class=\"fas fa-keyboard\"></i></button></div></div><!-- RDP Display --><div x-ref=\"rdpDisplay\" id=\"rdp-display\" class=\"relative\" style=\"min-height: 500px; background: #000;\"><!-- Loading overlay --><div x-show=\"connecting\" x-cloak class=\"absolute inset-0 flex items-center justify-center bg-dark-900/80 z-10\"><div class=\"text-center\"><i class=\"fas fa-spinner fa-spin text-3xl text-primary-400 mb-4\"></i><p class=\"text-gray-400\">Connecting to remote desktop...</p></div></div><!-- Error overlay --><div x-show=\"errorMsg\" x-cloak class=\"absolute inset-0 flex items-center justify-center bg-dark-900/80 z-10\"><div class=\"text-center\"><i class=\"fas fa-exclamation-circle text-3xl text-red-400 mb-4\"></i><p class=\"text-red-400 mb-2\" x-text=\"errorMsg\"></p><button @click=\"reconnect()\" class=\"px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors\">Reconnect</button></div></div></div></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, " <style>\n\t\t\t[x-cloak] {\n\t\t\t\tdisplay: none !important;\n\t\t\t}\n\n\t\t\t#test-result {\n\t\t\t\tcolor: rgb(255 255 255 / var(--tw-text-opacity, 1));\n\t\t\t}\n\n\t\t\t#rdp-display {\n\t\t\t\tcursor: none;\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t}\n\n\t\t\t#rdp-display .guac-display {\n\t\t\t\tposition: relative;\n\t\t\t\tz-index: 1;\n\t\t\t}\n\n\t\t\t#rdp-display:fullscreen {\n\t\t\t\tbackground: #000;\n\t\t\t\twidth: 100vw;\n\t\t\t\theight: 100vh;\n\t\t\t}\n\t\t</style>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = layouts.Base(data.PageData).Render(templ.WithChildren(ctx, templ_7745c5c3_Var46), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

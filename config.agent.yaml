@@ -9,6 +9,8 @@ gateway_url: "nats://master:4222"
 token: ""
 
 # Docker daemon address
+# For rootless Docker, use: "unix:///run/user/<UID>/docker.sock"
+# Can also be set via DOCKER_HOST env var.
 docker_host: "unix:///var/run/docker.sock"
 
 # Agent hostname (auto-detected if empty)

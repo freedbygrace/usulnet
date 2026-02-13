@@ -23,6 +23,7 @@ type Config struct {
 	Security SecurityConfig `mapstructure:"security"`
 	Storage  StorageConfig  `mapstructure:"storage"`
 	Agent    AgentConfig    `mapstructure:"agent"`
+	Docker   DockerConfig   `mapstructure:"docker"`
 	Trivy    TrivyConfig    `mapstructure:"trivy"`
 	NPM      NPMConfig      `mapstructure:"npm"`
 	Caddy    CaddyConfig    `mapstructure:"caddy"`
@@ -30,6 +31,15 @@ type Config struct {
 	Logging  LoggingConfig  `mapstructure:"logging"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
 	Terminal TerminalConfig `mapstructure:"terminal"`
+	Guacd   GuacdConfig    `mapstructure:"guacd"`
+}
+
+// DockerConfig holds Docker daemon connection configuration.
+type DockerConfig struct {
+	// Socket is the path to the Docker daemon Unix socket.
+	// For rootless Docker, this is typically /run/user/<UID>/docker.sock
+	// or $XDG_RUNTIME_DIR/docker.sock.
+	Socket string `mapstructure:"socket"`
 }
 
 // TerminalConfig holds host terminal configuration.
@@ -38,6 +48,14 @@ type TerminalConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	User    string `mapstructure:"user"`
 	Shell   string `mapstructure:"shell"`
+}
+
+// GuacdConfig holds Apache Guacamole daemon configuration for web-based RDP.
+// The guacd service is included by default. Set GUACD_ENABLED=false to disable.
+type GuacdConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -266,6 +284,12 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	_ = v.BindEnv("terminal.enabled", "USULNET_TERMINAL_ENABLED", "HOST_TERMINAL_ENABLED")
 	_ = v.BindEnv("terminal.user", "USULNET_TERMINAL_USER", "HOST_TERMINAL_USER")
 	_ = v.BindEnv("terminal.shell", "USULNET_TERMINAL_SHELL", "HOST_TERMINAL_SHELL")
+	// Guacd (Apache Guacamole daemon) for web-based RDP
+	_ = v.BindEnv("guacd.enabled", "USULNET_GUACD_ENABLED", "GUACD_ENABLED")
+	_ = v.BindEnv("guacd.host", "USULNET_GUACD_HOST", "GUACD_HOST")
+	_ = v.BindEnv("guacd.port", "USULNET_GUACD_PORT", "GUACD_PORT")
+	// Docker socket path (for rootless Docker or custom socket locations)
+	_ = v.BindEnv("docker.socket", "USULNET_DOCKER_SOCKET", "DOCKER_SOCKET")
 
 	// Set defaults
 	setDefaults(v)
@@ -383,9 +407,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("metrics.process_metrics", true)
 
 	// Host Terminal (migrated from HOST_TERMINAL_* env vars)
-	v.SetDefault("terminal.enabled", false)
+	v.SetDefault("terminal.enabled", true)
 	v.SetDefault("terminal.user", "nobody_usulnet")
 	v.SetDefault("terminal.shell", "/bin/bash")
+
+	// Docker socket path (empty = auto-detect at startup)
+	v.SetDefault("docker.socket", "")
+
+	// Guacd (Apache Guacamole daemon) for web-based RDP
+	v.SetDefault("guacd.enabled", true)
+	v.SetDefault("guacd.host", "guacd")
+	v.SetDefault("guacd.port", 4822)
 }
 
 // Validate validates the configuration.
@@ -587,6 +619,11 @@ func (c *Config) PrintMasked() {
 	fmt.Printf("Database URL: %s\n", maskURL(c.Database.URL))
 	fmt.Printf("Redis URL: %s\n", maskURL(c.Redis.URL))
 	fmt.Printf("NATS URL: %s\n", maskURL(c.NATS.URL))
+	if c.Docker.Socket != "" {
+		fmt.Printf("Docker Socket: %s\n", c.Docker.Socket)
+	} else {
+		fmt.Printf("Docker Socket: <auto-detect>\n")
+	}
 	fmt.Printf("Storage Type: %s\n", c.Storage.Type)
 	fmt.Printf("Storage Path: %s\n", c.Storage.Path)
 	fmt.Printf("Log Level: %s\n", c.Logging.Level)

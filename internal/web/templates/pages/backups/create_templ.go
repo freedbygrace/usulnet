@@ -70,7 +70,7 @@ func Create(data CreateData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><div class=\"px-6 py-4 border-b border-dark-700\"><h2 class=\"font-medium text-white\">Backup Configuration</h2></div><div class=\"p-6 space-y-6\"><!-- Backup Type --><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Backup Type</label><div class=\"grid grid-cols-3 gap-3\"><label class=\"relative\"><input type=\"radio\" name=\"type\" value=\"container\" class=\"peer sr-only\" checked><div class=\"border border-dark-600 rounded-lg p-4 cursor-pointer peer-checked:border-primary-500 peer-checked:bg-primary-500/10 transition-colors\"><div class=\"flex items-center gap-3\"><i class=\"fas fa-cube text-primary-400 text-lg\"></i><div><div class=\"font-medium text-white\">Container</div><div class=\"text-xs text-gray-400\">Backup container data</div></div></div></div></label> <label class=\"relative\"><input type=\"radio\" name=\"type\" value=\"volume\" class=\"peer sr-only\"><div class=\"border border-dark-600 rounded-lg p-4 cursor-pointer peer-checked:border-primary-500 peer-checked:bg-primary-500/10 transition-colors\"><div class=\"flex items-center gap-3\"><i class=\"fas fa-database text-blue-400 text-lg\"></i><div><div class=\"font-medium text-white\">Volume</div><div class=\"text-xs text-gray-400\">Backup volume data</div></div></div></div></label> <label class=\"relative\"><input type=\"radio\" name=\"type\" value=\"stack\" class=\"peer sr-only\"><div class=\"border border-dark-600 rounded-lg p-4 cursor-pointer peer-checked:border-primary-500 peer-checked:bg-primary-500/10 transition-colors\"><div class=\"flex items-center gap-3\"><i class=\"fas fa-layer-group text-green-400 text-lg\"></i><div><div class=\"font-medium text-white\">Stack</div><div class=\"text-xs text-gray-400\">Backup entire stack</div></div></div></div></label></div></div><!-- Target Selection --><div id=\"target-container\"><label class=\"block text-sm font-medium text-gray-300 mb-2\">Target Container</label> <select name=\"target_id\" required class=\"input\"><option value=\"\">Select a container...</option> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><div class=\"px-6 py-4 border-b border-dark-700\"><h2 class=\"font-medium text-white\">Backup Configuration</h2></div><div class=\"p-6 space-y-6\"><!-- Backup Type --><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Backup Type</label><div class=\"grid grid-cols-3 gap-3\"><label class=\"relative\"><input type=\"radio\" name=\"type\" value=\"container\" class=\"peer sr-only\" checked><div class=\"border border-dark-600 rounded-lg p-4 cursor-pointer peer-checked:border-primary-500 peer-checked:bg-primary-500/10 transition-colors\"><div class=\"flex items-center gap-3\"><i class=\"fas fa-cube text-primary-400 text-lg\"></i><div><div class=\"font-medium text-white\">Container</div><div class=\"text-xs text-gray-400\">Backup container data</div></div></div></div></label> <label class=\"relative\"><input type=\"radio\" name=\"type\" value=\"volume\" class=\"peer sr-only\"><div class=\"border border-dark-600 rounded-lg p-4 cursor-pointer peer-checked:border-primary-500 peer-checked:bg-primary-500/10 transition-colors\"><div class=\"flex items-center gap-3\"><i class=\"fas fa-database text-blue-400 text-lg\"></i><div><div class=\"font-medium text-white\">Volume</div><div class=\"text-xs text-gray-400\">Backup volume data</div></div></div></div></label> <label class=\"relative\"><input type=\"radio\" name=\"type\" value=\"stack\" class=\"peer sr-only\"><div class=\"border border-dark-600 rounded-lg p-4 cursor-pointer peer-checked:border-primary-500 peer-checked:bg-primary-500/10 transition-colors\"><div class=\"flex items-center gap-3\"><i class=\"fas fa-layer-group text-green-400 text-lg\"></i><div><div class=\"font-medium text-white\">Stack</div><div class=\"text-xs text-gray-400\">Backup entire stack</div></div></div></div></label></div></div><!-- Target Selection --><input type=\"hidden\" name=\"target_name\" id=\"target_name_field\" value=\"\"><div id=\"target-container\"><label class=\"block text-sm font-medium text-gray-300 mb-2\">Target Container</label> <select name=\"target_id\" required class=\"input\" onchange=\"updateTargetName(this)\"><option value=\"\">Select a container...</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -82,7 +82,7 @@ func Create(data CreateData) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(c.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 89, Col: 28}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 90, Col: 28}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -95,7 +95,7 @@ func Create(data CreateData) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(c.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 89, Col: 39}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 90, Col: 39}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -106,7 +106,7 @@ func Create(data CreateData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</select></div><div id=\"target-volume\" class=\"hidden\"><label class=\"block text-sm font-medium text-gray-300 mb-2\">Target Volume</label> <select name=\"target_volume\" class=\"input\"><option value=\"\">Select a volume...</option> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</select></div><div id=\"target-volume\" class=\"hidden\"><label class=\"block text-sm font-medium text-gray-300 mb-2\">Target Volume</label> <select name=\"target_volume\" class=\"input\" onchange=\"updateTargetName(this)\"><option value=\"\">Select a volume...</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -118,7 +118,7 @@ func Create(data CreateData) templ.Component {
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(v.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 99, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 100, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -131,7 +131,7 @@ func Create(data CreateData) templ.Component {
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(v.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 99, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 100, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -142,7 +142,7 @@ func Create(data CreateData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</select></div><div id=\"target-stack\" class=\"hidden\"><label class=\"block text-sm font-medium text-gray-300 mb-2\">Target Stack</label> <select name=\"target_stack\" class=\"input\"><option value=\"\">Select a stack...</option> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</select></div><div id=\"target-stack\" class=\"hidden\"><label class=\"block text-sm font-medium text-gray-300 mb-2\">Target Stack</label> <select name=\"target_stack\" class=\"input\" onchange=\"updateTargetName(this)\"><option value=\"\">Select a stack...</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -154,7 +154,7 @@ func Create(data CreateData) templ.Component {
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(s.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 109, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 110, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -167,7 +167,7 @@ func Create(data CreateData) templ.Component {
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(s.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 109, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/backups/create.templ`, Line: 110, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -178,7 +178,7 @@ func Create(data CreateData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</select></div><!-- Compression --><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Compression</label> <select name=\"compression\" class=\"input\"><option value=\"gzip\" selected>Gzip (recommended)</option> <option value=\"zstd\">Zstd (faster)</option> <option value=\"none\">None</option></select><p class=\"text-xs text-gray-500 mt-1\">Gzip provides good compression ratio; Zstd is faster with similar results</p></div><!-- Options Row --><div class=\"grid grid-cols-2 gap-6\"><!-- Retention --><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Retention (days)</label> <input type=\"number\" name=\"retention_days\" value=\"30\" min=\"1\" max=\"365\" class=\"input\"><p class=\"text-xs text-gray-500 mt-1\">Backup will be automatically deleted after this period</p></div><!-- Encryption & Stop --><div class=\"space-y-3 pt-7\"><div class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"encrypt\" name=\"encrypt\" value=\"true\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500\"> <label for=\"encrypt\" class=\"text-sm text-gray-300\">Encrypt backup</label></div><div class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"stop_container\" name=\"stop_container\" value=\"true\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500\"> <label for=\"stop_container\" class=\"text-sm text-gray-300\">Stop container during backup</label></div></div></div></div><!-- Actions --><div class=\"px-6 py-4 border-t border-dark-700 flex justify-end gap-3\"><a href=\"/backups\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\"><i class=\"fas fa-download mr-2\"></i>Create Backup</button></div></form></div><!-- Target switching script --> <script>\n\t\t\tdocument.querySelectorAll('input[name=\"type\"]').forEach(radio => {\n\t\t\t\tradio.addEventListener('change', function() {\n\t\t\t\t\t// Hide all target divs and remove required\n\t\t\t\t\t['container', 'volume', 'stack'].forEach(t => {\n\t\t\t\t\t\tconst div = document.getElementById('target-' + t);\n\t\t\t\t\t\tdiv.classList.add('hidden');\n\t\t\t\t\t\tconst sel = div.querySelector('select');\n\t\t\t\t\t\tif (sel) sel.removeAttribute('required');\n\t\t\t\t\t});\n\t\t\t\t\t// Show selected target and add required\n\t\t\t\t\tconst activeDiv = document.getElementById('target-' + this.value);\n\t\t\t\t\tactiveDiv.classList.remove('hidden');\n\t\t\t\t\tconst activeSel = activeDiv.querySelector('select');\n\t\t\t\t\tif (activeSel) activeSel.setAttribute('required', '');\n\t\t\t\t});\n\t\t\t});\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</select></div><!-- Compression --><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Compression</label> <select name=\"compression\" class=\"input\"><option value=\"gzip\" selected>Gzip (recommended)</option> <option value=\"zstd\">Zstd (faster)</option> <option value=\"none\">None</option></select><p class=\"text-xs text-gray-500 mt-1\">Gzip provides good compression ratio; Zstd is faster with similar results</p></div><!-- Options Row --><div class=\"grid grid-cols-2 gap-6\"><!-- Retention --><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Retention (days)</label> <input type=\"number\" name=\"retention_days\" value=\"30\" min=\"1\" max=\"365\" class=\"input\"><p class=\"text-xs text-gray-500 mt-1\">Backup will be automatically deleted after this period</p></div><!-- Encryption & Stop --><div class=\"space-y-3 pt-7\"><div class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"encrypt\" name=\"encrypt\" value=\"true\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500\"> <label for=\"encrypt\" class=\"text-sm text-gray-300\">Encrypt backup</label></div><div class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"stop_container\" name=\"stop_container\" value=\"true\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500\"> <label for=\"stop_container\" class=\"text-sm text-gray-300\">Stop container during backup</label></div></div></div></div><!-- Actions --><div class=\"px-6 py-4 border-t border-dark-700 flex justify-end gap-3\"><a href=\"/backups\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\"><i class=\"fas fa-download mr-2\"></i>Create Backup</button></div></form></div><!-- Target switching script --> <script>\n\t\t\tfunction updateTargetName(sel) {\n\t\t\t\tvar opt = sel.options[sel.selectedIndex];\n\t\t\t\tdocument.getElementById('target_name_field').value = opt ? opt.text : '';\n\t\t\t}\n\t\t\tdocument.querySelectorAll('input[name=\"type\"]').forEach(radio => {\n\t\t\t\tradio.addEventListener('change', function() {\n\t\t\t\t\t['container', 'volume', 'stack'].forEach(t => {\n\t\t\t\t\t\tconst div = document.getElementById('target-' + t);\n\t\t\t\t\t\tdiv.classList.add('hidden');\n\t\t\t\t\t\tconst sel = div.querySelector('select');\n\t\t\t\t\t\tif (sel) sel.removeAttribute('required');\n\t\t\t\t\t});\n\t\t\t\t\tconst activeDiv = document.getElementById('target-' + this.value);\n\t\t\t\t\tactiveDiv.classList.remove('hidden');\n\t\t\t\t\tconst activeSel = activeDiv.querySelector('select');\n\t\t\t\t\tif (activeSel) activeSel.setAttribute('required', '');\n\t\t\t\t});\n\t\t\t});\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

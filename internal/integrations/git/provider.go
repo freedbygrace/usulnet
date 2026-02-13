@@ -7,6 +7,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/fr4nsys/usulnet/internal/models"
 )
@@ -203,9 +204,11 @@ type LicenseTemplate struct {
 // Factory
 // ============================================================================
 
-// NewProvider creates a new Git provider based on type
+// NewProvider creates a new Git provider based on type.
+// Normalizes to lowercase to handle DB/form casing variations.
 func NewProvider(providerType models.GitProviderType, baseURL, token string) (Provider, error) {
-	switch providerType {
+	normalized := models.GitProviderType(strings.ToLower(string(providerType)))
+	switch normalized {
 	case models.GitProviderGitea:
 		return NewGiteaProvider(baseURL, token)
 	case models.GitProviderGitHub:

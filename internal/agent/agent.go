@@ -34,7 +34,7 @@ type Config struct {
 	Token string
 	// GatewayURL is the NATS server URL
 	GatewayURL string
-	// DockerHost is the Docker daemon address (default: unix:///var/run/docker.sock)
+	// DockerHost is the Docker daemon address (default: unix:// + configured socket path)
 	DockerHost string
 	// Hostname is the agent's hostname (auto-detected if empty)
 	Hostname string
@@ -57,7 +57,7 @@ func DefaultConfig() Config {
 	return Config{
 		AgentID:    uuid.New().String(),
 		GatewayURL: "nats://localhost:4222",
-		DockerHost: "unix:///var/run/docker.sock",
+		DockerHost: "unix://" + docker.LocalSocketPath(),
 		Hostname:   hostname,
 		Labels:     make(map[string]string),
 		LogLevel:   "info",

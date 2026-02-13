@@ -100,11 +100,7 @@ func (h *Handler) GiteaTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get CSRF token from context
-	csrfToken := ""
-	if token, ok := ctx.Value("csrf_token").(string); ok {
-		csrfToken = token
-	}
+	csrfToken := h.getCSRFToken(r)
 
 	data := giteapages.GiteaData{
 		PageData:    pageData,
@@ -230,11 +226,7 @@ func (h *Handler) GiteaRepoDetail(w http.ResponseWriter, r *http.Request) {
 		detail.Description = *repo.Description
 	}
 
-	// Get CSRF token from context
-	csrfToken := ""
-	if token, ok := ctx.Value("csrf_token").(string); ok {
-		csrfToken = token
-	}
+	csrfToken := h.getCSRFToken(r)
 
 	data := giteapages.RepoDetailData{
 		PageData:      pageData,

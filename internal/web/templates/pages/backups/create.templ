@@ -81,9 +81,10 @@ templ Create(data CreateData) {
 					</div>
 
 					<!-- Target Selection -->
+					<input type="hidden" name="target_name" id="target_name_field" value=""/>
 					<div id="target-container">
 						<label class="block text-sm font-medium text-gray-300 mb-2">Target Container</label>
-						<select name="target_id" required class="input">
+						<select name="target_id" required class="input" onchange="updateTargetName(this)">
 							<option value="">Select a container...</option>
 							for _, c := range data.Containers {
 								<option value={ c.ID }>{ c.Name }</option>
@@ -93,7 +94,7 @@ templ Create(data CreateData) {
 
 					<div id="target-volume" class="hidden">
 						<label class="block text-sm font-medium text-gray-300 mb-2">Target Volume</label>
-						<select name="target_volume" class="input">
+						<select name="target_volume" class="input" onchange="updateTargetName(this)">
 							<option value="">Select a volume...</option>
 							for _, v := range data.Volumes {
 								<option value={ v.Name }>{ v.Name }</option>
@@ -103,7 +104,7 @@ templ Create(data CreateData) {
 
 					<div id="target-stack" class="hidden">
 						<label class="block text-sm font-medium text-gray-300 mb-2">Target Stack</label>
-						<select name="target_stack" class="input">
+						<select name="target_stack" class="input" onchange="updateTargetName(this)">
 							<option value="">Select a stack...</option>
 							for _, s := range data.Stacks {
 								<option value={ s.Name }>{ s.Name }</option>
@@ -157,16 +158,18 @@ templ Create(data CreateData) {
 
 		<!-- Target switching script -->
 		<script>
+			function updateTargetName(sel) {
+				var opt = sel.options[sel.selectedIndex];
+				document.getElementById('target_name_field').value = opt ? opt.text : '';
+			}
 			document.querySelectorAll('input[name="type"]').forEach(radio => {
 				radio.addEventListener('change', function() {
-					// Hide all target divs and remove required
 					['container', 'volume', 'stack'].forEach(t => {
 						const div = document.getElementById('target-' + t);
 						div.classList.add('hidden');
 						const sel = div.querySelector('select');
 						if (sel) sel.removeAttribute('required');
 					});
-					// Show selected target and add required
 					const activeDiv = document.getElementById('target-' + this.value);
 					activeDiv.classList.remove('hidden');
 					const activeSel = activeDiv.querySelector('select');

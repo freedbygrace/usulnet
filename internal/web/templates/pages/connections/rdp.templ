@@ -39,6 +39,13 @@ type RDPConnectionDetailData struct {
 	Connection RDPConnectionData
 }
 
+// RDPSessionData is the data for the RDP web session page.
+type RDPSessionData struct {
+	PageData     layouts.PageData
+	Connection   RDPConnectionData
+	GuacdEnabled bool
+}
+
 // RDPConnectionsList renders the RDP connections list page.
 templ RDPConnectionsList(data RDPConnectionsListData) {
 	@layouts.Base(data.PageData) {
@@ -98,11 +105,18 @@ templ RDPConnectionCard(conn RDPConnectionData) {
 			</div>
 			<div class="flex items-center space-x-2">
 				<a
-					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", conn.ID)) }
+					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/session", conn.ID)) }
 					class="p-2 text-gray-400 hover:text-primary-400 hover:bg-dark-700 rounded-lg transition-colors"
-					title="Connect"
+					title="Open Remote Desktop"
 				>
 					<i class="fas fa-desktop text-lg"></i>
+				</a>
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s", conn.ID)) }
+					class="p-2 text-gray-400 hover:text-gray-200 hover:bg-dark-700 rounded-lg transition-colors"
+					title="Settings"
+				>
+					<i class="fas fa-cog"></i>
 				</a>
 			</div>
 		</div>
@@ -318,7 +332,19 @@ templ RDPConnectionDetail(data RDPConnectionDetailData) {
 			</div>
 
 			<!-- Quick Actions -->
-			<div class="grid grid-cols-2 gap-4">
+			<div class="grid grid-cols-3 gap-4">
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/session", data.Connection.ID)) }
+					class="card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors"
+				>
+					<div class="w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center">
+						<i class="fas fa-desktop text-green-400"></i>
+					</div>
+					<div>
+						<p class="text-white font-medium">Open Session</p>
+						<p class="text-xs text-gray-400">Web Remote Desktop</p>
+					</div>
+				</a>
 				<button
 					class="card p-4 flex items-center gap-3 hover:bg-dark-700/50 transition-colors text-left"
 					hx-post={ fmt.Sprintf("/connections/rdp/%s/test", data.Connection.ID) }
@@ -339,11 +365,11 @@ templ RDPConnectionDetail(data RDPConnectionDetailData) {
 					download
 				>
 					<div class="w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center">
-						<i class="fas fa-desktop text-primary-400"></i>
+						<i class="fas fa-download text-primary-400"></i>
 					</div>
 					<div>
-						<p class="text-white font-medium">Connect</p>
-						<p class="text-xs text-gray-400">Download .rdp file</p>
+						<p class="text-white font-medium">Download .rdp</p>
+						<p class="text-xs text-gray-400">Native client file</p>
 					</div>
 				</a>
 			</div>
@@ -473,6 +499,366 @@ templ RDPConnectionDetail(data RDPConnectionDetailData) {
 				</dl>
 			</div>
 		</div>
+	}
+}
+
+// RDPSession renders the web-based RDP session page using Apache Guacamole.
+templ RDPSession(data RDPSessionData) {
+	@layouts.Base(data.PageData) {
+		<!-- Breadcrumb -->
+		<nav class="flex items-center gap-2 text-sm text-gray-400 mb-4">
+			<a href="/connections/rdp" class="hover:text-primary-400 transition-colors">RDP Connections</a>
+			<i class="fas fa-chevron-right text-xs"></i>
+			<a href={ templ.SafeURL("/connections/rdp/" + data.Connection.ID) } class="hover:text-primary-400 transition-colors">{ data.Connection.Name }</a>
+			<i class="fas fa-chevron-right text-xs"></i>
+			<span class="text-white">Session</span>
+		</nav>
+
+		<!-- Header -->
+		<div class="flex items-center justify-between mb-6">
+			<div class="flex items-center gap-4">
+				<div class="w-10 h-10 rounded-lg bg-dark-700 flex items-center justify-center">
+					<i class="fas fa-desktop text-lg text-primary-400"></i>
+				</div>
+				<div>
+					<h1 class="text-2xl font-bold font-display text-white">Remote Desktop</h1>
+					<p class="text-gray-400 text-sm">
+						{ data.Connection.Name } — { formatRDPAddress(data.Connection.Host, data.Connection.Port) }
+						if data.Connection.Username != "" {
+							<span class="text-gray-500"> ({ data.Connection.Username })</span>
+						}
+					</p>
+				</div>
+			</div>
+			<div class="flex items-center gap-2">
+				<a href={ templ.SafeURL("/connections/rdp/" + data.Connection.ID) } class="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg transition-colors">
+					<i class="fas fa-arrow-left mr-2"></i>Back
+				</a>
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)) }
+					class="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg transition-colors"
+					download
+				>
+					<i class="fas fa-download mr-2"></i>.rdp File
+				</a>
+			</div>
+		</div>
+
+		if !data.GuacdEnabled {
+			<!-- Guacd not enabled message -->
+			<div class="bg-dark-800 rounded-xl border border-dark-600 p-8 text-center">
+				<div class="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+					<i class="fas fa-exclamation-triangle text-2xl text-yellow-400"></i>
+				</div>
+				<h3 class="text-lg font-medium text-white mb-2">Web RDP Not Configured</h3>
+				<p class="text-gray-400 mb-4 max-w-lg mx-auto">
+					Web-based Remote Desktop requires Apache Guacamole daemon (guacd). Add guacd to your
+					Docker Compose configuration and set <code class="text-primary-400">GUACD_ENABLED=true</code>.
+				</p>
+				<div class="bg-dark-700 rounded-lg p-4 max-w-md mx-auto text-left mb-6">
+					<p class="text-gray-400 text-xs mb-2">docker-compose.yml:</p>
+					<pre class="text-gray-300 text-sm"><code>guacd:
+  image: guacamole/guacd:latest
+  restart: unless-stopped</code></pre>
+				</div>
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("/connections/rdp/%s/download", data.Connection.ID)) }
+					class="inline-flex items-center px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+					download
+				>
+					<i class="fas fa-download mr-2"></i>Download .rdp File Instead
+				</a>
+			</div>
+		} else {
+			<!-- Guacamole Client JS (bundled locally) -->
+			<script src="/static/js/guacamole-common.min.js?v=1.5.0-2"></script>
+
+			<script>
+				function rdpSession() {
+					return {
+						client: null,
+						tunnel: null,
+						connected: false,
+						connecting: false,
+						connId: '',
+						connName: '',
+						errorMsg: '',
+						_initialized: false,
+						_keyboard: null,
+						_mouse: null,
+
+						init() {
+							if (this._initialized) return;
+							this._initialized = true;
+
+							this.connId = this.$el.dataset.connId;
+							this.connName = this.$el.dataset.connName;
+
+							this.connect();
+						},
+
+						destroy() {
+							if (this.client) {
+								this.client.disconnect();
+								this.client = null;
+							}
+							if (this._keyboard) {
+								this._keyboard.onkeydown = null;
+								this._keyboard.onkeyup = null;
+								this._keyboard = null;
+							}
+						},
+
+						connect() {
+							this.connecting = true;
+							this.connected = false;
+							this.errorMsg = '';
+
+							const display = this.$refs.rdpDisplay;
+
+							// Remove previous display elements
+							const existingCanvas = display.querySelector('.guac-display');
+							if (existingCanvas) existingCanvas.remove();
+
+							// Create WebSocket tunnel to our Go backend
+							const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+							const wsUrl = `${protocol}//${window.location.host}/ws/rdp/${this.connId}`;
+
+							this.tunnel = new Guacamole.WebSocketTunnel(wsUrl);
+							this.client = new Guacamole.Client(this.tunnel);
+
+							// Get display element
+							const guacDisplay = this.client.getDisplay().getElement();
+							guacDisplay.classList.add('guac-display');
+							display.appendChild(guacDisplay);
+
+							// Handle state changes
+							this.client.onstatechange = (state) => {
+								switch(state) {
+									case 0: // IDLE
+										break;
+									case 1: // CONNECTING
+										this.connecting = true;
+										this.connected = false;
+										break;
+									case 2: // WAITING
+										break;
+									case 3: // CONNECTED
+										this.connecting = false;
+										this.connected = true;
+										this.errorMsg = '';
+										break;
+									case 4: // DISCONNECTING
+										break;
+									case 5: // DISCONNECTED
+										this.connecting = false;
+										this.connected = false;
+										break;
+								}
+							};
+
+							// Handle errors
+							this.client.onerror = (error) => {
+								this.connecting = false;
+								this.connected = false;
+								this.errorMsg = error.message || 'Connection error';
+								console.error('Guacamole error:', error);
+							};
+
+							// Handle clipboard
+							this.client.onclipboard = (stream, mimetype) => {
+								if (mimetype === 'text/plain') {
+									let data = '';
+									const reader = new Guacamole.StringReader(stream);
+									reader.ontext = (text) => { data += text; };
+									reader.onend = () => {
+										if (navigator.clipboard) {
+											navigator.clipboard.writeText(data).catch(() => {});
+										}
+									};
+								}
+							};
+
+							// Setup mouse
+							this._mouse = new Guacamole.Mouse(guacDisplay);
+							this._mouse.onEach(['mousedown', 'mousemove', 'mouseup'], (e) => {
+								if (this.client) {
+									this.client.sendMouseState(e.state);
+								}
+							});
+
+							// Setup keyboard
+							this._keyboard = new Guacamole.Keyboard(document);
+							this._keyboard.onkeydown = (keysym) => {
+								if (this.client) this.client.sendKeyEvent(1, keysym);
+							};
+							this._keyboard.onkeyup = (keysym) => {
+								if (this.client) this.client.sendKeyEvent(0, keysym);
+							};
+
+							// Connect (empty string = no additional params, handled server-side)
+							this.client.connect('');
+
+							// Auto-resize display
+							this._setupResize(display);
+						},
+
+						_setupResize(display) {
+							const resizeObserver = new ResizeObserver(() => {
+								if (!this.client || !this.connected) return;
+								const w = display.clientWidth;
+								const h = display.clientHeight;
+								if (w > 0 && h > 0) {
+									this.client.sendSize(w, h);
+								}
+							});
+							resizeObserver.observe(display);
+						},
+
+						reconnect() {
+							if (this.client) {
+								try { this.client.disconnect(); } catch(e) {}
+							}
+							this.connect();
+						},
+
+						toggleFullscreen() {
+							const display = this.$refs.rdpDisplay;
+							if (document.fullscreenElement) {
+								document.exitFullscreen();
+							} else {
+								display.requestFullscreen();
+							}
+						},
+
+						sendCtrlAltDel() {
+							if (!this.client) return;
+							// Key codes for Ctrl+Alt+Del
+							const KEYSYM_CTRL = 0xFFE3;
+							const KEYSYM_ALT = 0xFFE9;
+							const KEYSYM_DEL = 0xFFFF;
+							this.client.sendKeyEvent(1, KEYSYM_CTRL);
+							this.client.sendKeyEvent(1, KEYSYM_ALT);
+							this.client.sendKeyEvent(1, KEYSYM_DEL);
+							this.client.sendKeyEvent(0, KEYSYM_DEL);
+							this.client.sendKeyEvent(0, KEYSYM_ALT);
+							this.client.sendKeyEvent(0, KEYSYM_CTRL);
+						}
+					};
+				}
+			</script>
+
+			<!-- RDP Session Container -->
+			<div
+				x-data="rdpSession()"
+				data-conn-id={ data.Connection.ID }
+				data-conn-name={ data.Connection.Name }
+				class="bg-dark-800 rounded-xl border border-dark-600 overflow-hidden"
+			>
+				<!-- Session Header -->
+				<div class="flex items-center justify-between px-4 py-3 border-b border-dark-600 bg-dark-850">
+					<div class="flex items-center gap-3">
+						<div class="flex items-center gap-1.5">
+							<span class="w-3 h-3 rounded-full bg-red-500"></span>
+							<span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+							<span class="w-3 h-3 rounded-full bg-green-500"></span>
+						</div>
+						<span class="text-sm text-gray-400">
+							{ data.Connection.Name } — { formatRDPAddress(data.Connection.Host, data.Connection.Port) }
+						</span>
+					</div>
+					<div class="flex items-center gap-2">
+						<span x-show="connected" class="flex items-center gap-1.5 text-xs text-green-400">
+							<span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+							Connected
+						</span>
+						<span x-show="!connected && !connecting" class="flex items-center gap-1.5 text-xs text-red-400">
+							<span class="w-2 h-2 bg-red-500 rounded-full"></span>
+							Disconnected
+						</span>
+						<span x-show="connecting" class="flex items-center gap-1.5 text-xs text-yellow-400">
+							<i class="fas fa-spinner fa-spin"></i>
+							Connecting...
+						</span>
+						<button
+							@click="reconnect()"
+							class="p-2 text-gray-400 hover:text-white hover:bg-dark-600 rounded-lg transition-colors"
+							title="Reconnect"
+						>
+							<i class="fas fa-redo"></i>
+						</button>
+						<button
+							@click="toggleFullscreen()"
+							class="p-2 text-gray-400 hover:text-white hover:bg-dark-600 rounded-lg transition-colors"
+							title="Fullscreen"
+						>
+							<i class="fas fa-expand"></i>
+						</button>
+						<button
+							@click="sendCtrlAltDel()"
+							class="p-2 text-gray-400 hover:text-white hover:bg-dark-600 rounded-lg transition-colors"
+							title="Send Ctrl+Alt+Del"
+						>
+							<i class="fas fa-keyboard"></i>
+						</button>
+					</div>
+				</div>
+
+				<!-- RDP Display -->
+				<div
+					x-ref="rdpDisplay"
+					id="rdp-display"
+					class="relative"
+					style="min-height: 500px; background: #000;"
+				>
+					<!-- Loading overlay -->
+					<div x-show="connecting" x-cloak class="absolute inset-0 flex items-center justify-center bg-dark-900/80 z-10">
+						<div class="text-center">
+							<i class="fas fa-spinner fa-spin text-3xl text-primary-400 mb-4"></i>
+							<p class="text-gray-400">Connecting to remote desktop...</p>
+						</div>
+					</div>
+					<!-- Error overlay -->
+					<div x-show="errorMsg" x-cloak class="absolute inset-0 flex items-center justify-center bg-dark-900/80 z-10">
+						<div class="text-center">
+							<i class="fas fa-exclamation-circle text-3xl text-red-400 mb-4"></i>
+							<p class="text-red-400 mb-2" x-text="errorMsg"></p>
+							<button @click="reconnect()" class="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors">
+								Reconnect
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		}
+
+		<style>
+			[x-cloak] {
+				display: none !important;
+			}
+
+			#test-result {
+				color: rgb(255 255 255 / var(--tw-text-opacity, 1));
+			}
+
+			#rdp-display {
+				cursor: none;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+
+			#rdp-display .guac-display {
+				position: relative;
+				z-index: 1;
+			}
+
+			#rdp-display:fullscreen {
+				background: #000;
+				width: 100vw;
+				height: 100vh;
+			}
+		</style>
 	}
 }
 

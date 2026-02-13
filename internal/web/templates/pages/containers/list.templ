@@ -188,6 +188,7 @@ templ ContainersList(data ContainersListData) {
 
 			<!-- Hidden form for bulk actions -->
 			<form id="bulk-action-form" method="post" style="display: none;">
+				<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 				<template x-for="id in selected" :key="id">
 					<input type="hidden" name="container_ids" :value="id"/>
 				</template>

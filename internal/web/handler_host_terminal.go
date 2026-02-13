@@ -30,7 +30,7 @@ import (
 
 // HostTerminalConfig holds host terminal settings from environment variables.
 type HostTerminalConfig struct {
-	Enabled bool   // HOST_TERMINAL_ENABLED (default: false)
+	Enabled bool   // HOST_TERMINAL_ENABLED (default: true)
 	User    string // HOST_TERMINAL_USER (default: nobody_usulnet)
 	Shell   string // HOST_TERMINAL_SHELL (default: /bin/bash)
 }
@@ -40,7 +40,7 @@ type HostTerminalConfig struct {
 // app config (TerminalConfig struct with Viper bindings).
 func loadHostTerminalConfig() HostTerminalConfig {
 	return HostTerminalConfig{
-		Enabled: false,
+		Enabled: true,
 		User:    "nobody_usulnet",
 		Shell:   "/bin/bash",
 	}

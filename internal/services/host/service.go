@@ -353,7 +353,7 @@ func (s *Service) Create(ctx context.Context, input *models.CreateHostInput) (*m
 
 	// For local endpoint, set default URL
 	if input.EndpointType == models.EndpointLocal {
-		url := "unix:///var/run/docker.sock"
+		url := "unix://" + docker.LocalSocketPath()
 		host.EndpointURL = &url
 	}
 
@@ -714,12 +714,12 @@ func (s *Service) buildClientOptions(host *models.Host) (docker.ClientOptions, e
 	// Set host URL
 	switch host.EndpointType {
 	case models.EndpointLocal:
-		opts.Host = "unix:///var/run/docker.sock"
+		opts.Host = "unix://" + docker.LocalSocketPath()
 	case models.EndpointSocket:
 		if host.EndpointURL != nil {
 			opts.Host = *host.EndpointURL
 		} else {
-			opts.Host = "unix:///var/run/docker.sock"
+			opts.Host = "unix://" + docker.LocalSocketPath()
 		}
 	case models.EndpointTCP:
 		if host.EndpointURL == nil {
@@ -872,7 +872,7 @@ func (s *Service) TestConnection(ctx context.Context, input *models.CreateHostIn
 
 	// For local endpoint
 	if input.EndpointType == models.EndpointLocal {
-		url := "unix:///var/run/docker.sock"
+		url := "unix://" + docker.LocalSocketPath()
 		host.EndpointURL = &url
 	}
 
@@ -886,7 +886,7 @@ func (s *Service) TestConnection(ctx context.Context, input *models.CreateHostIn
 		if host.EndpointURL != nil {
 			opts.Host = *host.EndpointURL
 		} else {
-			opts.Host = "unix:///var/run/docker.sock"
+			opts.Host = "unix://" + docker.LocalSocketPath()
 		}
 	case models.EndpointTCP:
 		if host.EndpointURL == nil {
@@ -943,6 +943,13 @@ func dockerInfoToModel(info *docker.DockerInfo) *models.HostDockerInfo {
 		ContainersStopped: info.ContainersStopped,
 		Images:            info.Images,
 		DockerRootDir:     info.DockerRootDir,
+		StorageDriver:     info.StorageDriver,
+		LoggingDriver:     info.LoggingDriver,
+		CgroupDriver:      info.CgroupDriver,
+		CgroupVersion:     info.CgroupVersion,
+		DefaultRuntime:    info.DefaultRuntime,
+		SecurityOptions:   info.SecurityOptions,
+		RuntimeNames:      info.Runtimes,
 		SwarmActive:       info.Swarm,
 	}
 }

@@ -134,9 +134,14 @@ type AvailableUpdate struct {
 
 // NeedsUpdate returns true if an update is available
 func (a *AvailableUpdate) NeedsUpdate() bool {
-	// Compare by digest if available
+	// Compare by digest if both are available (most accurate)
 	if a.CurrentDigest != "" && a.LatestDigest != "" {
 		return a.CurrentDigest != a.LatestDigest
+	}
+	// If current tag is "latest" and we lack digest info for comparison,
+	// we cannot reliably determine update status — assume up-to-date.
+	if a.CurrentVersion == "latest" && a.LatestVersion == "latest" {
+		return false
 	}
 	// Otherwise compare versions
 	return a.CurrentVersion != a.LatestVersion

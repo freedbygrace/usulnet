@@ -80,17 +80,16 @@ func (c *GHCRClient) GetLatestVersion(ctx context.Context, ref *models.ImageRef)
 	currentVariant := extractVariant(currentTag)
 	currentMajor := extractMajorVersion(currentTag)
 
+	// For "latest" tag, get the digest of the "latest" tag itself for
+	// digest-based comparison instead of semver string comparison.
 	if currentTag == "latest" {
-		latestTag := findHighestSemverTag(tags, "", -1)
-		if latestTag == "" {
+		digest, err := c.GetDigest(ctx, ref)
+		if err != nil {
+			c.logger.Debug("Failed to get digest for latest tag", "error", err)
 			return nil, nil
 		}
-		digest, _ := c.GetDigest(ctx, &models.ImageRef{
-			Registry: ref.Registry, Namespace: ref.Namespace,
-			Repository: ref.Repository, Tag: latestTag,
-		})
 		return &models.ImageVersion{
-			Tag: latestTag, Digest: digest, CheckedAt: time.Now(),
+			Tag: "latest", Digest: digest, CheckedAt: time.Now(),
 		}, nil
 	}
 
@@ -459,6 +458,22 @@ func (c *GenericRegistryClient) SupportsRegistry(registry string) bool {
 
 // GetLatestVersion gets the latest version info
 func (c *GenericRegistryClient) GetLatestVersion(ctx context.Context, ref *models.ImageRef) (*models.ImageVersion, error) {
+	currentTag := ref.Tag
+	if currentTag == "" {
+		currentTag = "latest"
+	}
+
+	// For "latest" tag, get the digest of the "latest" tag itself for
+	// digest-based comparison instead of semver string comparison.
+	if currentTag == "latest" {
+		digest, _ := c.GetDigest(ctx, ref)
+		return &models.ImageVersion{
+			Tag:       "latest",
+			Digest:    digest,
+			CheckedAt: time.Now(),
+		}, nil
+	}
+
 	tags, err := c.ListTags(ctx, ref, 100)
 	if err != nil {
 		return nil, err
@@ -479,8 +494,8 @@ func (c *GenericRegistryClient) GetLatestVersion(ctx context.Context, ref *model
 		break
 	}
 
-	if latestTag == "" {
-		latestTag = "latest"
+	if latestTag == "" || latestTag == currentTag {
+		return nil, nil
 	}
 
 	digest, _ := c.GetDigest(ctx, &models.ImageRef{

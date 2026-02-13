@@ -6,7 +6,6 @@ package web
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -516,11 +515,11 @@ func (h *Handler) DashboardLayoutsJSON(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (h *Handler) getUserID(r *http.Request) *uuid.UUID {
-	userIDStr := fmt.Sprintf("%v", r.Context().Value("user_id"))
-	if userIDStr == "" || userIDStr == "<nil>" {
+	user := GetUserFromContext(r.Context())
+	if user == nil || user.ID == "" {
 		return nil
 	}
-	id, err := uuid.Parse(userIDStr)
+	id, err := uuid.Parse(user.ID)
 	if err != nil {
 		return nil
 	}

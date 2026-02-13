@@ -596,6 +596,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Delete("/{id}", h.RDPConnectionDelete)
 				r.Post("/{id}/test", h.RDPConnectionTest)
 				r.Get("/{id}/download", h.RDPConnectionDownload)
+				r.Get("/{id}/session", h.RDPSessionTempl)
 			})
 
 			// SSH Keys
@@ -647,6 +648,9 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 		// WebSocket for SSH Terminal
 		r.Get("/ws/ssh/{id}", h.WSSSHExec)
+
+		// WebSocket for RDP Session (via guacd)
+		r.Get("/ws/rdp/{id}", h.WSRDPExec)
 
 		// Gitea Integration (legacy routes - kept for backwards compatibility)
 		r.Route("/integrations/gitea", func(r chi.Router) {

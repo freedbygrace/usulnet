@@ -34,6 +34,10 @@ services:
       - HOST_TERMINAL_ENABLED=true
       - HOST_TERMINAL_USER=nobody_usulnet
       - HOST_TERMINAL_SHELL=/bin/bash
+      # RDP Web Access (guacd service included)
+      - GUACD_ENABLED=${GUACD_ENABLED:-true}
+      - GUACD_HOST=guacd
+      - GUACD_PORT=4822
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,6 +75,16 @@ services:
     depends_on:
       nats:
         condition: service_started
+    networks:
+      - usulnet-network
+
+  # ==========================================================================
+  # Apache Guacamole Daemon — RDP Web Gateway
+  # ==========================================================================
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: usulnet-guacd
+    restart: unless-stopped
     networks:
       - usulnet-network
 

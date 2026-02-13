@@ -6,6 +6,7 @@ package update
 
 import (
 	"context"
+	"strings"
 
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -112,10 +113,17 @@ func (a *DockerClientAdapter) ContainerList(ctx context.Context) ([]ContainerInf
 	}
 	result := make([]ContainerInfo, 0, len(containers))
 	for _, ct := range containers {
+		// ImageID contains the image digest (sha256:...) which enables
+		// accurate update detection for "latest" tagged containers.
+		digest := ct.ImageID
+		if digest != "" && !strings.HasPrefix(digest, "sha256:") {
+			digest = ""
+		}
 		result = append(result, ContainerInfo{
-			ID:    ct.ID,
-			Name:  ct.Name,
-			Image: ct.Image,
+			ID:     ct.ID,
+			Name:   ct.Name,
+			Image:  ct.Image,
+			Digest: digest,
 		})
 	}
 	return result, nil

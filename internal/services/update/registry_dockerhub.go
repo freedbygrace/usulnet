@@ -94,20 +94,18 @@ func (c *DockerHubClient) GetLatestVersion(ctx context.Context, ref *models.Imag
 		"totalTags", len(tags),
 	)
 
-	// If current tag is "latest", find highest semver without variant restriction
+	// If current tag is "latest", get the digest of the "latest" tag itself.
+	// This enables accurate digest-based comparison with the running container
+	// instead of comparing version strings ("latest" vs "1.27.0") which always
+	// produces false positives.
 	if currentTag == "latest" {
-		latestTag := findHighestSemverTag(tags, "", -1)
-		if latestTag == "" {
+		digest, err := c.GetDigest(ctx, ref)
+		if err != nil {
+			c.logger.Debug("Failed to get digest for latest tag", "error", err)
 			return nil, nil
 		}
-		digest, _ := c.GetDigest(ctx, &models.ImageRef{
-			Registry:   ref.Registry,
-			Namespace:  ref.Namespace,
-			Repository: ref.Repository,
-			Tag:        latestTag,
-		})
 		return &models.ImageVersion{
-			Tag:       latestTag,
+			Tag:       "latest",
 			Digest:    digest,
 			CheckedAt: time.Now(),
 		}, nil

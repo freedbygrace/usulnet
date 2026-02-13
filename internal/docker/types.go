@@ -45,6 +45,13 @@ type DockerInfo struct {
 	MemTotal          int64
 	NCPU              int
 	DockerRootDir     string
+	StorageDriver     string
+	LoggingDriver     string
+	CgroupDriver      string
+	CgroupVersion     string
+	DefaultRuntime    string
+	SecurityOptions   []string
+	Runtimes          []string
 	Swarm             bool
 	RegistryConfig    *registry.ServiceConfig
 }

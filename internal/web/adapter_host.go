@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	dockerpkg "github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/models"
 	hostsvc "github.com/fr4nsys/usulnet/internal/services/host"
 )
@@ -45,6 +46,13 @@ func (a *hostAdapter) GetDockerInfo(ctx context.Context) (*DockerInfoView, error
 		MemTotal:          info.MemTotal,
 		NCPU:              info.NCPU,
 		DockerRootDir:     info.DockerRootDir,
+		StorageDriver:     info.StorageDriver,
+		LoggingDriver:     info.LoggingDriver,
+		CgroupDriver:      info.CgroupDriver,
+		CgroupVersion:     info.CgroupVersion,
+		DefaultRuntime:    info.DefaultRuntime,
+		SecurityOptions:   info.SecurityOptions,
+		Runtimes:          info.RuntimeNames,
 		Swarm:             info.SwarmActive,
 	}, nil
 }
@@ -77,7 +85,7 @@ func (a *hostAdapter) List(ctx context.Context) ([]HostView, error) {
 		if s.EndpointURL != nil {
 			v.Endpoint = *s.EndpointURL
 		} else if s.EndpointType == models.EndpointLocal {
-			v.Endpoint = "unix:///var/run/docker.sock"
+			v.Endpoint = "unix://" + dockerpkg.LocalSocketPath()
 		}
 		if s.DockerVersion != nil {
 			v.DockerVersion = *s.DockerVersion
@@ -145,7 +153,7 @@ func (a *hostAdapter) Get(ctx context.Context, id string) (*HostView, error) {
 	if h.EndpointURL != nil {
 		v.Endpoint = *h.EndpointURL
 	} else if h.EndpointType == models.EndpointLocal {
-		v.Endpoint = "unix:///var/run/docker.sock"
+		v.Endpoint = "unix://" + dockerpkg.LocalSocketPath()
 	}
 	if h.DockerVersion != nil {
 		v.DockerVersion = *h.DockerVersion

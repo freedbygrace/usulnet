@@ -123,6 +123,9 @@ COPY --from=frontend /frontend/css/style.css /app/web/static/css/style.css
 # Copy favicon if exists
 COPY --from=builder /build/web/static/favicon.ico /app/web/static/favicon.ico
 
+# Copy JS assets (guacamole-common-js, etc.)
+COPY --from=builder /build/web/static/js/ /app/web/static/js/
+
 # --- Neovim editor support (Phase 7) ---
 COPY nvim/ /opt/usulnet/nvim-config/
 

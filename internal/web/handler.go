@@ -273,6 +273,13 @@ type DockerInfoView struct {
 	MemTotal          int64
 	NCPU              int
 	DockerRootDir     string
+	StorageDriver     string
+	LoggingDriver     string
+	CgroupDriver      string
+	CgroupVersion     string
+	DefaultRuntime    string
+	SecurityOptions   []string
+	Runtimes          []string
 	Swarm             bool
 }
 
@@ -608,6 +615,8 @@ type Handler struct {
 	manifestSvc   *manifestsvc.Service
 	// Host terminal config (centralized from app config)
 	hostTerminalConfig HostTerminalConfig
+	// Guacd config for web-based RDP sessions
+	guacdConfig GuacdConfig
 	// BaseURL is the external server URL for absolute link generation
 	baseURL string
 }
@@ -669,6 +678,10 @@ type HandlerDeps struct {
 	TerminalEnabled bool
 	TerminalUser    string
 	TerminalShell   string
+	// Guacd config for web-based RDP
+	GuacdEnabled bool
+	GuacdHost    string
+	GuacdPort    int
 }
 
 // NewTemplHandler creates a new web handler with all dependencies injected via HandlerDeps.
@@ -725,6 +738,7 @@ func NewTemplHandler(deps HandlerDeps) *Handler {
 			User:    deps.TerminalUser,
 			Shell:   deps.TerminalShell,
 		},
+		guacdConfig: buildGuacdConfig(deps),
 	}
 }
 
@@ -1595,10 +1609,16 @@ func (h *Handler) BackupCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve human-readable target name (form sends it from the selected option text)
+	targetName := r.FormValue("target_name")
+	if targetName == "" {
+		targetName = targetID // fallback to ID if name not provided
+	}
+
 	opts := BackupCreateInput{
 		Type:          backupType,
 		TargetID:      targetID,
-		TargetName:    targetID,
+		TargetName:    targetName,
 		Compression:   compression,
 		Encrypt:       encrypt,
 		RetentionDays: retentionDays,

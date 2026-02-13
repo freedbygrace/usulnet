@@ -650,12 +650,29 @@ func (h *Handler) HostDetailTempl(w http.ResponseWriter, r *http.Request) {
 		detail.Hostname = dockerInfo.Name
 		detail.OS = dockerInfo.OS
 		detail.KernelVersion = dockerInfo.KernelVersion
+		detail.StorageDriver = dockerInfo.StorageDriver
+		detail.LoggingDriver = dockerInfo.LoggingDriver
+		detail.CgroupDriver = dockerInfo.CgroupDriver
+		detail.CgroupVersion = dockerInfo.CgroupVersion
+		detail.DefaultRuntime = dockerInfo.DefaultRuntime
+		detail.SecurityOpts = dockerInfo.SecurityOptions
+		detail.Runtimes = dockerInfo.Runtimes
 		detail.SwarmActive = dockerInfo.Swarm
 		detail.ContainersTotal = dockerInfo.Containers
 		detail.ContainersRunning = dockerInfo.ContainersRunning
 		detail.ContainersStopped = dockerInfo.ContainersStopped
 		detail.ContainersPaused = dockerInfo.ContainersPaused
 		detail.ImagesTotal = dockerInfo.Images
+		// Use live Docker info as fallback for fields that may be empty in the DB
+		if detail.DockerVersion == "" {
+			detail.DockerVersion = dockerInfo.ServerVersion
+		}
+		if detail.OSType == "" {
+			detail.OSType = dockerInfo.OSType
+		}
+		if detail.Architecture == "" {
+			detail.Architecture = dockerInfo.Architecture
+		}
 		if detail.CPUs == 0 {
 			detail.CPUs = dockerInfo.NCPU
 		}

@@ -423,6 +423,12 @@ templ Detail(data RepoDetailData) {
 							<i class="fas fa-file-code mr-2 text-gray-500"></i>
 						</h3>
 						<div class="flex items-center gap-2">
+							<a id="btn-edit-monaco" href="#" class="hidden btn-sm btn-primary" title="Edit in Monaco">
+								<i class="fas fa-edit mr-1"></i> Monaco
+							</a>
+							<a id="btn-edit-nvim" href="#" class="hidden btn-sm btn-ghost" title="Edit in Neovim">
+								<i class="fas fa-terminal mr-1"></i> Neovim
+							</a>
 							<button onclick="closeFileViewer()" class="btn-sm btn-ghost" title="Close">
 								<i class="fas fa-times"></i>
 							</button>
@@ -447,10 +453,16 @@ templ Detail(data RepoDetailData) {
 			var viewer = document.getElementById('file-viewer');
 			var pathEl = document.getElementById('file-viewer-path');
 			var contentEl = document.getElementById('file-viewer-content');
+			var btnMonaco = document.getElementById('btn-edit-monaco');
+			var btnNvim = document.getElementById('btn-edit-nvim');
 
 			pathEl.innerHTML = '<i class="fas fa-file-code mr-2 text-gray-500"></i>' + path;
 			contentEl.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>Loading...</div>';
+			btnMonaco.classList.add('hidden');
+			btnNvim.classList.add('hidden');
 			viewer.classList.remove('hidden');
+
+			var editorQuery = '?repo=' + encodeURIComponent(repoID) + '&file=' + encodeURIComponent(path) + '&ref=' + encodeURIComponent(ref);
 
 			fetch('/integrations/gitea/repos/' + repoID + '/file?path=' + encodeURIComponent(path) + '&ref=' + encodeURIComponent(ref))
 				.then(function(resp) {
@@ -459,11 +471,18 @@ templ Detail(data RepoDetailData) {
 				})
 				.then(function(text) {
 					var ext = path.split('.').pop().toLowerCase();
-					var isImage = ['png','jpg','jpeg','gif','svg','webp','ico'].indexOf(ext) !== -1;
+					var binaryExts = ['png','jpg','jpeg','gif','svg','webp','ico','bmp','tiff','pdf','zip','gz','tar','7z','rar','exe','dll','so','woff','woff2','ttf','eot','mp3','mp4','avi','mov','wav'];
+					var isBinary = binaryExts.indexOf(ext) !== -1;
 
-					if (isImage) {
-						contentEl.innerHTML = '<div class="p-4 text-center"><p class="text-gray-400 text-sm mb-2">Binary file (image)</p></div>';
+					if (isBinary) {
+						contentEl.innerHTML = '<div class="p-4 text-center"><p class="text-gray-400 text-sm mb-2">Binary file — cannot be edited</p></div>';
 					} else {
+						// Show edit buttons for text files
+						btnMonaco.href = '/editor/monaco' + editorQuery;
+						btnMonaco.classList.remove('hidden');
+						btnNvim.href = '/editor/nvim' + editorQuery;
+						btnNvim.classList.remove('hidden');
+
 						var escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 						var lines = escaped.split('\n');
 						var numbered = lines.map(function(line, i) {

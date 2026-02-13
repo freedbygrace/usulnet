@@ -98,9 +98,16 @@ caddy:
 minio:
   enabled: false
 
-# Docker settings (passed via socket mount, not config)
+# Docker settings
+# When socket is not set, usulnet auto-detects the Docker socket by checking:
+#   1. DOCKER_HOST env var
+#   2. /var/run/docker.sock (standard)
+#   3. $XDG_RUNTIME_DIR/docker.sock and /run/user/<UID>/docker.sock (rootless)
+#   4. docker context inspect (active context)
+# Set explicitly only if auto-detection doesn't work for your setup.
+# Can also be set via USULNET_DOCKER_SOCKET or DOCKER_SOCKET env vars.
 # docker:
-#   socket: "/var/run/docker.sock"
+#   socket: "/run/user/1000/docker.sock"
 
 # Logging
 logging:
