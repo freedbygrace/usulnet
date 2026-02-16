@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
 
 	"github.com/fr4nsys/usulnet/internal/license"
 	"github.com/fr4nsys/usulnet/internal/models"
@@ -609,12 +610,22 @@ func (s *Service) runDueSchedules(ctx context.Context) {
 	}
 }
 
-// calculateNextRun calculates the next run time for a cron expression.
+// calculateNextRun calculates the next run time for a cron expression
+// using the robfig/cron parser. It supports both 5-field standard cron
+// (minute hour dom month dow) and 6-field with seconds.
 func calculateNextRun(cronExpr string) *time.Time {
-	// This is a simplified implementation
-	// In production, use robfig/cron to parse the expression
-	// For now, just return 1 hour from now as a placeholder
-	next := time.Now().Add(1 * time.Hour)
+	// Try 6-field format with seconds first
+	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	sched, err := parser.Parse(cronExpr)
+	if err != nil {
+		// Fall back to standard 5-field format
+		sched, err = cron.ParseStandard(cronExpr)
+		if err != nil {
+			return nil
+		}
+	}
+
+	next := sched.Next(time.Now())
 	return &next
 }
 

@@ -1,4 +1,4 @@
-.PHONY: all build build-agent run test clean dev-up dev-down migrate lint fmt templ css
+.PHONY: all build build-agent run test test-coverage test-check-coverage test-benchmark test-e2e clean dev-up dev-down migrate lint lint-fix fmt vet templ css install-hooks
 
 # Variables
 BINARY_NAME=usulnet
@@ -71,8 +71,20 @@ test:
 	$(GOTEST) -v -race -cover ./...
 
 test-coverage:
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
+	$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+
+test-check-coverage:
+	@echo "Running coverage threshold check..."
+	@bash scripts/check-coverage.sh 40
+
+test-benchmark:
+	@echo "Running benchmarks..."
+	$(GOTEST) -bench=. -benchmem -run=^$$ ./tests/benchmarks/...
+
+test-e2e:
+	@echo "Running E2E tests..."
+	$(GOTEST) -tags=e2e -v -timeout=120s ./tests/e2e/...
 
 clean:
 	@echo "Cleaning..."
@@ -108,6 +120,11 @@ lint:
 	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
 	golangci-lint run ./...
 
+lint-fix:
+	@echo "Running linter with auto-fix..."
+	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+	golangci-lint run --fix ./...
+
 fmt:
 	$(GOFMT) -s -w .
 
@@ -137,3 +154,14 @@ docker-run:
 dev-up-agent:
 	docker compose -f docker-compose.dev.yml --profile agent up -d
 	@echo "Development environment with agent is ready"
+
+# Git hooks
+install-hooks:
+	@echo "Installing git hooks..."
+	@cp scripts/pre-commit .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed"
+
+# Quality gate — run all quality checks
+quality: lint vet test-check-coverage
+	@echo "All quality checks passed!"

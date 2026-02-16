@@ -558,3 +558,42 @@ func (s *Service) SendHostOffline(ctx context.Context, host string, lastSeen tim
 		},
 	})
 }
+
+// SendLicenseExpiring sends a notification that the license is approaching expiration.
+func (s *Service) SendLicenseExpiring(ctx context.Context, edition, licenseID string, daysRemaining int) error {
+	return s.Send(ctx, Message{
+		Type:     channels.TypeLicenseExpiry,
+		Priority: channels.PriorityHigh,
+		Data: map[string]interface{}{
+			"edition":        edition,
+			"license_id":     licenseID,
+			"days_remaining": daysRemaining,
+		},
+	})
+}
+
+// SendLicenseExpired sends a notification that the license has expired.
+func (s *Service) SendLicenseExpired(ctx context.Context, edition, licenseID string) error {
+	return s.Send(ctx, Message{
+		Type:     channels.TypeLicenseExpired,
+		Priority: channels.PriorityCritical,
+		Data: map[string]interface{}{
+			"edition":    edition,
+			"license_id": licenseID,
+		},
+	})
+}
+
+// SendResourceLimitApproaching sends a notification that a resource is near its limit.
+func (s *Service) SendResourceLimitApproaching(ctx context.Context, resource string, current, limit int, percentUsed float64) error {
+	return s.Send(ctx, Message{
+		Type:     channels.TypeResourceThreshold,
+		Priority: channels.PriorityHigh,
+		Data: map[string]interface{}{
+			"resource":     resource,
+			"current":      current,
+			"limit":        limit,
+			"percent_used": percentUsed,
+		},
+	})
+}

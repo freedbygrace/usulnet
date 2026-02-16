@@ -44,6 +44,30 @@ var wsUpgrader = websocket.Upgrader{
 	HandshakeTimeout: 10 * time.Second,
 }
 
+// safeWSConn wraps a WebSocket connection with a write mutex to prevent
+// concurrent write panics (gorilla/websocket requires serial writes).
+type safeWSConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func newSafeWSConn(conn *websocket.Conn) *safeWSConn {
+	return &safeWSConn{conn: conn}
+}
+
+func (s *safeWSConn) WriteJSON(v interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return s.conn.WriteJSON(v)
+}
+
+func (s *safeWSConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn.WriteControl(messageType, data, deadline)
+}
+
 // ============================================================================
 // WebSocket Message Types
 // ============================================================================
@@ -480,12 +504,36 @@ func (h *Handler) WSContainerStats(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Ping/pong keepalive
+	conn.SetReadLimit(512)
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
 	go func() {
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
 				cancel()
 				return
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+					cancel()
+					return
+				}
 			}
 		}
 	}()
@@ -553,12 +601,36 @@ func (h *Handler) WSEvents(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Ping/pong keepalive
+	conn.SetReadLimit(512)
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
 	go func() {
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
 				cancel()
 				return
+			}
+		}
+	}()
+
+	go func() {
+		pingTicker := time.NewTicker(30 * time.Second)
+		defer pingTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-pingTicker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+					cancel()
+					return
+				}
 			}
 		}
 	}()
@@ -629,12 +701,36 @@ func (h *Handler) WSJobProgress(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Ping/pong keepalive
+	conn.SetReadLimit(512)
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
 	go func() {
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
 				cancel()
 				return
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+					cancel()
+					return
+				}
 			}
 		}
 	}()
@@ -728,12 +824,36 @@ func (h *Handler) WSCapture(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Ping/pong keepalive
+	conn.SetReadLimit(512)
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
 	go func() {
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
 				cancel()
 				return
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+					cancel()
+					return
+				}
 			}
 		}
 	}()

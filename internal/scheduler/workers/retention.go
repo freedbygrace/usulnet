@@ -25,6 +25,9 @@ type RetentionService interface {
 	CleanupOldNotificationLogs(ctx context.Context, retentionDays int) (int64, error)
 	CleanupOldRuntimeSecurityEvents(ctx context.Context, retentionDays int) (int64, error)
 	CleanupOldAlertEvents(ctx context.Context, retentionDays int) (int64, error)
+	CleanupOldSecurityScans(ctx context.Context, retentionDays int) (int64, error)
+	CleanupOldCompletedJobs(ctx context.Context, retentionDays int) (int64, error)
+	CleanupOldContainerLogs(ctx context.Context, retentionDays int) (int64, error)
 	CleanupExpiredSessions(ctx context.Context) (int64, error)
 	CleanupExpiredPasswordResetTokens(ctx context.Context) (int64, error)
 }
@@ -47,6 +50,9 @@ type RetentionPayload struct {
 	NotificationLogsDays        int `json:"notification_logs_days,omitempty"`
 	RuntimeSecurityEventsDays   int `json:"runtime_security_events_days,omitempty"`
 	AlertEventsDays             int `json:"alert_events_days,omitempty"`
+	SecurityScansDays           int `json:"security_scans_days,omitempty"`
+	CompletedJobsDays           int `json:"completed_jobs_days,omitempty"`
+	ContainerLogsDays           int `json:"container_logs_days,omitempty"`
 }
 
 // RetentionResult holds the result of a retention cleanup
@@ -112,6 +118,9 @@ func (w *RetentionWorker) Execute(ctx context.Context, job *models.Job) (interfa
 		{"notification_logs", payload.NotificationLogsDays, 30, w.retentionService.CleanupOldNotificationLogs},
 		{"runtime_security_events", payload.RuntimeSecurityEventsDays, 30, w.retentionService.CleanupOldRuntimeSecurityEvents},
 		{"alert_events", payload.AlertEventsDays, 90, w.retentionService.CleanupOldAlertEvents},
+		{"security_scans", payload.SecurityScansDays, 90, w.retentionService.CleanupOldSecurityScans},
+		{"completed_jobs", payload.CompletedJobsDays, 30, w.retentionService.CleanupOldCompletedJobs},
+		{"container_logs", payload.ContainerLogsDays, 14, w.retentionService.CleanupOldContainerLogs},
 	}
 
 	for i, task := range tasks {

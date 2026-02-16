@@ -23,8 +23,9 @@ type AdminConfig struct {
 
 // Apps contains Caddy app modules.
 type Apps struct {
-	HTTP *HTTPApp `json:"http,omitempty"`
-	TLS  *TLSApp `json:"tls,omitempty"`
+	HTTP   *HTTPApp   `json:"http,omitempty"`
+	TLS    *TLSApp    `json:"tls,omitempty"`
+	Layer4 *Layer4App `json:"layer4,omitempty"`
 }
 
 // HTTPApp is the http app configuration.
@@ -235,4 +236,75 @@ type LogWriter struct {
 // LogEncoder defines log format.
 type LogEncoder struct {
 	Format string `json:"format"` // "console", "json"
+}
+
+// ---- Static Response (for redirections and dead hosts) ----
+
+// StaticResponseHandler returns a static HTTP response (used for redirections and error pages).
+type StaticResponseHandler struct {
+	Handler    string              `json:"handler"`               // "static_response"
+	StatusCode string              `json:"status_code,omitempty"` // e.g. "301", "302", "404", "410"
+	Headers    map[string][]string `json:"headers,omitempty"`     // e.g. {"Location": ["https://..."]}
+	Body       string              `json:"body,omitempty"`
+	Close      bool                `json:"close,omitempty"`
+}
+
+// ---- Authentication (for access lists) ----
+
+// AuthenticationHandler provides HTTP authentication.
+type AuthenticationHandler struct {
+	Handler   string             `json:"handler"` // "authentication"
+	Providers *AuthProviders     `json:"providers,omitempty"`
+}
+
+// AuthProviders holds authentication provider configs.
+type AuthProviders struct {
+	HTTPBasic *HTTPBasicAuth `json:"http_basic,omitempty"`
+}
+
+// HTTPBasicAuth configures HTTP basic authentication with bcrypt passwords.
+type HTTPBasicAuth struct {
+	Accounts []BasicAuthAccount `json:"accounts,omitempty"`
+	Hash     *PasswordHash      `json:"hash,omitempty"`
+}
+
+// BasicAuthAccount represents a single basic auth credential.
+type BasicAuthAccount struct {
+	Username string `json:"username"`
+	Password string `json:"password"` // bcrypt hash
+}
+
+// PasswordHash specifies the password hashing algorithm.
+type PasswordHash struct {
+	Algorithm string `json:"algorithm"` // "bcrypt"
+}
+
+// ---- Layer4 (for TCP/UDP stream forwarding) ----
+
+// Layer4App is the layer4 app configuration for TCP/UDP forwarding.
+// Requires the caddy-l4 module to be compiled into Caddy.
+type Layer4App struct {
+	Servers map[string]*Layer4Server `json:"servers,omitempty"`
+}
+
+// Layer4Server listens on addresses and routes layer4 connections.
+type Layer4Server struct {
+	Listen []string      `json:"listen,omitempty"`
+	Routes []Layer4Route `json:"routes,omitempty"`
+}
+
+// Layer4Route defines a layer4 routing rule.
+type Layer4Route struct {
+	Handle []json.RawMessage `json:"handle,omitempty"`
+}
+
+// Layer4ProxyHandler forwards layer4 connections to upstreams.
+type Layer4ProxyHandler struct {
+	Handler   string           `json:"handler"` // "proxy"
+	Upstreams []Layer4Upstream `json:"upstreams,omitempty"`
+}
+
+// Layer4Upstream defines a layer4 upstream destination.
+type Layer4Upstream struct {
+	Dial []string `json:"dial"`
 }

@@ -31,6 +31,7 @@ type CaptureSession struct {
 	Filter       string
 	Status       string // "running", "stopped", "completed"
 	PacketCount  int64
+	FileSize     int64
 	Size         string
 	Duration     string
 	StartedAt    string
@@ -354,9 +355,13 @@ templ PacketCapture(data PacketCaptureData) {
 									}
 								} catch(err) {}
 							};
-							this.ws.onclose = () => {
+							this.ws.onclose = (event) => {
 								const logDiv = document.getElementById('capture-log');
-								if (logDiv && !logDiv.innerHTML.includes('finished')) {
+								const graceful = (event.code === 1000 || event.code === 1001);
+								if (!graceful && logDiv && !logDiv.innerHTML.includes('finished')) {
+									logDiv.innerHTML += '<div class="p-2 text-yellow-400 text-xs"><i class="fas fa-sync-alt mr-1"></i>Stream disconnected — reconnecting...</div>';
+									setTimeout(() => this.connectWS(captureId), 3000);
+								} else if (logDiv && !logDiv.innerHTML.includes('finished')) {
 									logDiv.innerHTML += '<div class="p-2 text-gray-500 text-xs">Stream disconnected</div>';
 								}
 							};
@@ -470,11 +475,31 @@ func countActive(captures []CaptureSession) int {
 }
 
 func totalSize(captures []CaptureSession) string {
-	// In production, calculate actual total
 	if len(captures) == 0 {
 		return "0 B"
 	}
-	return "0 B"
+	var total int64
+	for _, c := range captures {
+		total += c.FileSize
+	}
+	if total == 0 {
+		return "0 B"
+	}
+	const (
+		kb int64 = 1024
+		mb       = 1024 * kb
+		gb       = 1024 * mb
+	)
+	switch {
+	case total >= gb:
+		return fmt.Sprintf("%.1f GB", float64(total)/float64(gb))
+	case total >= mb:
+		return fmt.Sprintf("%.1f MB", float64(total)/float64(mb))
+	case total >= kb:
+		return fmt.Sprintf("%.1f KB", float64(total)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", total)
+	}
 }
 
 func ifaceStatusColor(status string) string {

@@ -35,17 +35,6 @@ type HostTerminalConfig struct {
 	Shell   string // HOST_TERMINAL_SHELL (default: /bin/bash)
 }
 
-// loadHostTerminalConfig returns default terminal config.
-// Actual values are injected via Handler.SetTerminalConfig() from centralized
-// app config (TerminalConfig struct with Viper bindings).
-func loadHostTerminalConfig() HostTerminalConfig {
-	return HostTerminalConfig{
-		Enabled: true,
-		User:    "nobody_usulnet",
-		Shell:   "/bin/bash",
-	}
-}
-
 // =============================================================================
 // Host User Auto-Provisioning
 // =============================================================================
@@ -204,7 +193,7 @@ func (h *Handler) HostTerminalTempl(w http.ResponseWriter, r *http.Request) {
 		id = getIDParam(r)
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
 
 	if !cfg.Enabled {
 		h.RenderErrorTempl(w, r, http.StatusForbidden,
@@ -254,7 +243,7 @@ func (h *Handler) WSHostExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
 	if !cfg.Enabled {
 		http.Error(w, "Host terminal disabled", http.StatusForbidden)
 		return

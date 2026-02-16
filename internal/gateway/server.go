@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,26 +19,12 @@ import (
 
 	inats "github.com/fr4nsys/usulnet/internal/nats"
 	"github.com/fr4nsys/usulnet/internal/gateway/protocol"
+	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
+	containersvc "github.com/fr4nsys/usulnet/internal/services/container"
 )
 
-// HostRepository defines the interface for host data access.
-// This allows the gateway to verify agent tokens and update host status.
-// Note: Token validation uses hash comparison - the repository receives the raw token
-// and compares against the stored hash internally.
-type HostRepository interface {
-	GetByAgentToken(ctx context.Context, token string) (*HostInfo, error)
-	UpdateStatus(ctx context.Context, hostID uuid.UUID, status string, lastSeen time.Time) error
-	UpdateAgentInfo(ctx context.Context, hostID uuid.UUID, info *protocol.AgentInfo) error
-}
 
-// HostInfo contains minimal host information needed by the gateway.
-// Maps to models.Host - AgentToken is validated via hash comparison in repository.
-type HostInfo struct {
-	ID     uuid.UUID
-	Name   string
-	Status string
-}
 
 // AgentConnection represents a connected agent.
 type AgentConnection struct {
@@ -83,6 +70,7 @@ type Server struct {
 	publisher  *inats.Publisher
 	subscriber *inats.Subscriber
 	hostRepo   HostRepository
+	containerService *containersvc.Service
 	config     ServerConfig
 	log        *logger.Logger
 
@@ -99,6 +87,7 @@ type Server struct {
 func NewServer(
 	natsClient *inats.Client,
 	hostRepo HostRepository,
+	containerService *containersvc.Service,
 	config ServerConfig,
 	log *logger.Logger,
 ) (*Server, error) {
@@ -113,6 +102,7 @@ func NewServer(
 		publisher:  inats.NewPublisher(natsClient),
 		subscriber: inats.NewSubscriber(natsClient),
 		hostRepo:   hostRepo,
+		containerService: containerService,
 		config:     config,
 		log:        log.Named("gateway"),
 		agents:     make(map[string]*AgentConnection),
@@ -437,10 +427,66 @@ func (s *Server) handleInventory(msg *nats.Msg) error {
 			"volumes", len(inv.Volumes),
 			"networks", len(inv.Networks),
 		)
-	}
 
-	// Sprint 2: Sync inventory to container/image/volume/network repositories
-	// to enable dashboard data for agent-managed hosts without live queries
+		// Sync containers
+		if s.containerService != nil {
+			containers := make([]*models.Container, len(inv.Containers))
+			for i, c := range inv.Containers {
+				// Map Name (remove leading slash if present)
+				name := ""
+				if len(c.Names) > 0 {
+					name = strings.TrimPrefix(c.Names[0], "/")
+				}
+
+				// Map CreatedAt
+				createdAt := time.Unix(c.Created, 0).UTC()
+
+				// Map Ports
+				ports := make([]models.PortMapping, len(c.Ports))
+				for j, p := range c.Ports {
+					ports[j] = models.PortMapping{
+						PrivatePort: p.PrivatePort,
+						PublicPort:  p.PublicPort,
+						Type:        p.Type,
+						IP:          p.IP,
+					}
+				}
+
+				// Map Mounts
+				mounts := make([]models.MountPoint, len(c.Mounts))
+				for j, m := range c.Mounts {
+					mounts[j] = models.MountPoint{
+						Type:        m.Type,
+						Source:      m.Source,
+						Destination: m.Destination,
+						Mode:        m.Mode,
+						RW:          m.RW,
+					}
+				}
+
+				imageID := c.ImageID
+				
+				containers[i] = &models.Container{
+					ID:              c.ID,
+					HostID:          conn.HostID,
+					Name:            name,
+					Image:           c.Image,
+					ImageID:         &imageID,
+					Status:          c.Status,
+					State:           models.ContainerState(c.State),
+					CreatedAtDocker: &createdAt,
+					Ports:           ports,
+					Labels:          c.Labels,
+					Mounts:          mounts,
+					SyncedAt:        time.Now().UTC(),
+				}
+			}
+
+			if err := s.containerService.SyncInventory(s.ctx, conn.HostID, containers); err != nil {
+				s.log.Error("Failed to sync container inventory", "error", err, "host_id", conn.HostID)
+			}
+		}
+	}
 
 	return nil
 }

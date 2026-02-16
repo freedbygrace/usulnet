@@ -72,7 +72,7 @@ func DefaultJWTConfig(secret string) JWTConfig {
 
 // Claims represents the JWT claims for access tokens.
 type Claims struct {
-	UserID   string          `json:"uid"`
+	UserID   string          `json:"user_id"`
 	Username string          `json:"username"`
 	Email    string          `json:"email,omitempty"`
 	Role     models.UserRole `json:"role"`
@@ -83,8 +83,8 @@ type Claims struct {
 
 // RefreshClaims represents the JWT claims for refresh tokens.
 type RefreshClaims struct {
-	UserID    string    `json:"uid"`
-	SessionID string    `json:"sid"`
+	UserID    string    `json:"user_id"`
+	SessionID string    `json:"session_id"`
 	Type      TokenType `json:"type"`
 	jwt.RegisteredClaims
 }

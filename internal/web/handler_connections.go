@@ -606,6 +606,82 @@ func (h *Handler) SSHConnectionTest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// SSHConnectionDuplicate duplicates an existing SSH connection.
+func (h *Handler) SSHConnectionDuplicate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	connIDStr := chi.URLParam(r, "id")
+	if connIDStr == "" {
+		writeJSONError(w, "connection ID required", http.StatusBadRequest)
+		return
+	}
+
+	connID, err := uuid.Parse(connIDStr)
+	if err != nil {
+		writeJSONError(w, "invalid connection ID", http.StatusBadRequest)
+		return
+	}
+
+	svc := h.getSSHService()
+	if svc == nil {
+		writeJSONError(w, "SSH service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	userData := h.getUserData(r)
+	if userData == nil {
+		writeJSONError(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userData.ID)
+	if err != nil {
+		writeJSONError(w, "invalid user session", http.StatusBadRequest)
+		return
+	}
+
+	// Get the original connection
+	conn, err := svc.GetConnection(ctx, connID)
+	if err != nil {
+		writeJSONError(w, "connection not found", http.StatusNotFound)
+		return
+	}
+
+	// Create a duplicate with "(Copy)" suffix
+	input := models.CreateSSHConnectionInput{
+		Name:     conn.Name + " (Copy)",
+		Host:     conn.Host,
+		Port:     conn.Port,
+		Username: conn.Username,
+		AuthType: conn.AuthType,
+		KeyID:    conn.KeyID,
+		JumpHost: conn.JumpHost,
+		Tags:     conn.Tags,
+	}
+
+	newConn, err := svc.CreateConnection(ctx, input, userID)
+	if err != nil {
+		h.logger.Error("failed to duplicate SSH connection", "error", err)
+		writeJSONError(w, "failed to duplicate: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"id":      newConn.ID.String(),
+	})
+}
+
+// writeJSONError writes a JSON error response.
+func writeJSONError(w http.ResponseWriter, message string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   message,
+	})
+}
+
 // ============================================================================
 // SFTP Browser
 // ============================================================================

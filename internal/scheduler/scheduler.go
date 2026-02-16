@@ -7,6 +7,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -543,6 +544,14 @@ func (s *Scheduler) UpdateScheduledJob(ctx context.Context, id uuid.UUID, input 
 	return job, nil
 }
 
+// DeleteJob deletes a completed/failed/cancelled job record from the database.
+func (s *Scheduler) DeleteJob(ctx context.Context, id uuid.UUID) error {
+	if s.repo == nil {
+		return errors.New(errors.CodeInternal, "no repository configured")
+	}
+	return s.repo.Delete(ctx, id)
+}
+
 // DeleteScheduledJob deletes a scheduled job
 func (s *Scheduler) DeleteScheduledJob(ctx context.Context, id uuid.UUID) error {
 	s.unregisterCronJob(id)
@@ -872,7 +881,15 @@ func (s *Scheduler) registerCronJob(job *models.ScheduledJob) error {
 		s.cron.Remove(entryID)
 	}
 
-	entryID, err := s.cron.AddFunc(job.Schedule, func() {
+	// The cron instance uses WithSeconds() (6-field), but schedules may be
+	// stored as standard 5-field cron expressions. Prepend "0 " (second 0)
+	// to convert 5-field to 6-field when needed.
+	schedule := job.Schedule
+	if len(strings.Fields(schedule)) == 5 {
+		schedule = "0 " + schedule
+	}
+
+	entryID, err := s.cron.AddFunc(schedule, func() {
 		ctx := context.Background()
 		if _, err := s.createJobFromScheduled(ctx, job); err != nil {
 			s.logger.Error("failed to create job from schedule",

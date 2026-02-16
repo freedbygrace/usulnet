@@ -162,6 +162,7 @@ type CommandParams struct {
 	ImageRef      string            `json:"image_ref,omitempty"`
 	Tag           string            `json:"tag,omitempty"`
 	Platform      string            `json:"platform,omitempty"`
+	RegistryAuth  string            `json:"registry_auth,omitempty"` // Base64-encoded JSON credentials for private registries
 	
 	// Volume params
 	VolumeID      string            `json:"volume_id,omitempty"`

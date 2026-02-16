@@ -54,7 +54,7 @@ func editionFeatures() []EditionFeature {
 		{"SSH Connections + Keys", "✓", "✓", "✓"},
 		{"Config Variables (4-level)", "✓", "✓", "✓"},
 		{"TOTP 2FA + Backup Codes", "✓", "✓", "✓"},
-		{"Nodes", "2", "Per license", "Unlimited"},
+		{"Nodes", "1", "Per license", "Unlimited"},
 		{"Users", "3", "Per license", "Unlimited"},
 		{"Teams", "1", "5", "Unlimited"},
 		{"Backup Destinations", "1", "5", "Unlimited"},
@@ -322,7 +322,7 @@ func LicensePage(data LicensePageData) templ.Component {
 					}
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<span class=\"inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-500/10 text-gray-400\"><i class=\"fas fa-infinity\"></i> Free forever</span> <span class=\"inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-dark-700 text-gray-500 border border-dark-600\">AGPLv3</span> <span class=\"text-sm text-gray-500\">2 nodes · 3 users</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<span class=\"inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-500/10 text-gray-400\"><i class=\"fas fa-infinity\"></i> Free forever</span> <span class=\"inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-dark-700 text-gray-500 border border-dark-600\">AGPLv3</span> <span class=\"text-sm text-gray-500\">1 node · 3 users</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

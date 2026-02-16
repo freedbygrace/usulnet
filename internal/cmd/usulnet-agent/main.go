@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/fr4nsys/usulnet/internal/agent"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 )
@@ -141,12 +143,78 @@ func envOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+// agentConfigFile is the YAML-serializable agent configuration.
+type agentConfigFile struct {
+	AgentID        string            `yaml:"agent_id"`
+	Token          string            `yaml:"token"`
+	GatewayURL     string            `yaml:"gateway_url"`
+	DockerHost     string            `yaml:"docker_host"`
+	Hostname       string            `yaml:"hostname"`
+	Labels         map[string]string `yaml:"labels"`
+	LogLevel       string            `yaml:"log_level"`
+	DataDir        string            `yaml:"data_dir"`
+	BackupEnabled  bool              `yaml:"backup_enabled"`
+	ScannerEnabled bool              `yaml:"scanner_enabled"`
+	TLS            struct {
+		Enabled  bool   `yaml:"enabled"`
+		CertFile string `yaml:"cert_file"`
+		KeyFile  string `yaml:"key_file"`
+		CAFile   string `yaml:"ca_file"`
+	} `yaml:"tls"`
+}
+
 // loadConfigFile loads configuration from a YAML file.
+// Environment variables and CLI flags override values set in the file.
 func loadConfigFile(path string, cfg *agent.Config) error {
-	// TODO: Implement YAML config loading
-	// For now, just check file exists
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("config file not found: %w", err)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
 	}
+
+	var fileCfg agentConfigFile
+	if err := yaml.Unmarshal(data, &fileCfg); err != nil {
+		return fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Apply values from file (non-empty only)
+	if fileCfg.AgentID != "" {
+		cfg.AgentID = fileCfg.AgentID
+	}
+	if fileCfg.Token != "" {
+		cfg.Token = fileCfg.Token
+	}
+	if fileCfg.GatewayURL != "" {
+		cfg.GatewayURL = fileCfg.GatewayURL
+	}
+	if fileCfg.DockerHost != "" {
+		cfg.DockerHost = fileCfg.DockerHost
+	}
+	if fileCfg.Hostname != "" {
+		cfg.Hostname = fileCfg.Hostname
+	}
+	if len(fileCfg.Labels) > 0 {
+		cfg.Labels = fileCfg.Labels
+	}
+	if fileCfg.LogLevel != "" {
+		cfg.LogLevel = fileCfg.LogLevel
+	}
+	if fileCfg.DataDir != "" {
+		cfg.DataDir = fileCfg.DataDir
+	}
+	cfg.BackupEnabled = fileCfg.BackupEnabled
+	cfg.ScannerEnabled = fileCfg.ScannerEnabled
+
+	// TLS settings
+	cfg.TLSEnabled = fileCfg.TLS.Enabled
+	if fileCfg.TLS.CertFile != "" {
+		cfg.TLSCertFile = fileCfg.TLS.CertFile
+	}
+	if fileCfg.TLS.KeyFile != "" {
+		cfg.TLSKeyFile = fileCfg.TLS.KeyFile
+	}
+	if fileCfg.TLS.CAFile != "" {
+		cfg.TLSCAFile = fileCfg.TLS.CAFile
+	}
+
 	return nil
 }

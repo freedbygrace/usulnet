@@ -445,15 +445,17 @@ func (r *UserRepository) Unlock(ctx context.Context, id uuid.UUID) error {
 	return r.ResetFailedAttempts(ctx, id)
 }
 
-// UpdatePassword updates a user's password hash.
+// UpdatePassword updates a user's password hash and records the change timestamp.
 func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	now := time.Now().UTC()
 	query := `
 		UPDATE users SET
 			password_hash = $2,
+			password_changed_at = $3,
 			updated_at = $3
 		WHERE id = $1`
 
-	result, err := r.db.Exec(ctx, query, id, passwordHash, time.Now().UTC())
+	result, err := r.db.Exec(ctx, query, id, passwordHash, now)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
@@ -462,6 +464,52 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passw
 		return apperrors.NotFound("user")
 	}
 
+	return nil
+}
+
+// GetPasswordHistory returns the N most recent password hashes for a user.
+func (r *UserRepository) GetPasswordHistory(ctx context.Context, userID uuid.UUID, limit int) ([]string, error) {
+	query := `
+		SELECT password_hash FROM password_history
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2`
+
+	rows, err := r.db.Query(ctx, query, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get password history: %w", err)
+	}
+	defer rows.Close()
+
+	var hashes []string
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			return nil, fmt.Errorf("scan password history: %w", err)
+		}
+		hashes = append(hashes, hash)
+	}
+
+	return hashes, rows.Err()
+}
+
+// SavePasswordHistory adds a password hash to the user's password history.
+func (r *UserRepository) SavePasswordHistory(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	query := `INSERT INTO password_history (user_id, password_hash, created_at) VALUES ($1, $2, $3)`
+	_, err := r.db.Exec(ctx, query, userID, passwordHash, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("save password history: %w", err)
+	}
+	return nil
+}
+
+// UpdatePasswordExpiry updates the password expiration date for a user.
+func (r *UserRepository) UpdatePasswordExpiry(ctx context.Context, userID uuid.UUID, expiresAt *time.Time) error {
+	query := `UPDATE users SET password_expires_at = $2, updated_at = $3 WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, userID, expiresAt, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("update password expiry: %w", err)
+	}
 	return nil
 }
 

@@ -361,10 +361,19 @@ func (m *Middleware) isExcludedPath(path string) bool {
 		return true
 	}
 
-	// Check configured exclude paths
+	// Check configured exclude paths.
+	// Paths ending in "/" are treated as prefixes (e.g. "/static/" matches
+	// "/static/css/style.css"). All others require an exact match so that
+	// "/health" does NOT accidentally exclude "/health-dashboard".
 	for _, p := range m.excludePaths {
-		if strings.HasPrefix(path, p) {
-			return true
+		if strings.HasSuffix(p, "/") {
+			if strings.HasPrefix(path, p) {
+				return true
+			}
+		} else {
+			if path == p {
+				return true
+			}
 		}
 	}
 
@@ -443,6 +452,19 @@ func SecureHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// CSP: all assets self-hosted; unsafe-inline for inline scripts/styles used in templates;
+		// unsafe-eval required by Alpine.js v3 and Monaco editor
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; font-src 'self'; connect-src 'self' wss: ws:; "+
+				"worker-src 'self' blob:; "+
+				"frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -453,7 +475,11 @@ func RecoverPanic(handler *Handler) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
-					log.Printf("[PANIC] recovered: %v, path: %s", err, r.URL.Path)
+					slog.Error("panic recovered in frontend handler",
+						"error", err,
+						"path", r.URL.Path,
+						"method", r.Method,
+					)
 					handler.RenderError(w, r, http.StatusInternalServerError, "Internal Server Error", "An unexpected error occurred")
 				}
 			}()

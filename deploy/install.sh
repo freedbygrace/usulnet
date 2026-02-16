@@ -3,7 +3,7 @@
 # usulnet - Quick Install Script
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/install.sh | sudo bash
 #
 # Or download and run manually:
 #   chmod +x install.sh && ./install.sh
@@ -46,6 +46,13 @@ fi
 # --- Create directory ---
 
 echo "Install directory: ${INSTALL_DIR}"
+if [ ! -w "$(dirname "${INSTALL_DIR}")" ] && [ "$(id -u)" -ne 0 ]; then
+    echo ""
+    echo "ERROR: Cannot write to $(dirname "${INSTALL_DIR}"). Run with sudo or set USULNET_DIR to a writable path."
+    echo "  sudo bash <(curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/install.sh)"
+    echo "  Or: USULNET_DIR=~/usulnet bash <(curl -fsSL ...)"
+    exit 1
+fi
 mkdir -p "${INSTALL_DIR}"
 cd "${INSTALL_DIR}"
 

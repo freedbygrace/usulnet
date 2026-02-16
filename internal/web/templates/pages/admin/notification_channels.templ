@@ -17,8 +17,9 @@ type ChannelView struct {
 
 // NotificationChannelsData holds data for the notification channels page.
 type NotificationChannelsData struct {
-	PageData layouts.PageData
-	Channels []ChannelView
+	PageData    layouts.PageData
+	Channels    []ChannelView
+	EditChannel *ChannelView
 }
 
 // channelIcon returns the Font Awesome icon for a channel type.

@@ -6,6 +6,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/httprate"
@@ -114,7 +115,7 @@ func RateLimitByAPIKey(requestLimit int, window time.Duration) func(http.Handler
 func rateLimitHandler(window time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		retryAfter := int(window.Seconds())
-		w.Header().Set("Retry-After", string(rune(retryAfter)))
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 
 		requestID := GetRequestID(r.Context())
 		apiErr := apierrors.RateLimited(retryAfter)

@@ -64,3 +64,35 @@ func (r *PreferencesRepo) DeleteUserPreferences(userID string) error {
 	}
 	return nil
 }
+
+// GetSidebarPrefs returns the sidebar preferences JSON for a user.
+// Returns empty string if no preferences exist.
+func (r *PreferencesRepo) GetSidebarPrefs(ctx context.Context, userID string) (string, error) {
+	var prefs string
+	err := r.pool.QueryRow(ctx,
+		`SELECT COALESCE(sidebar_prefs::text, '{}') FROM user_preferences WHERE user_id = $1`,
+		userID,
+	).Scan(&prefs)
+
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get sidebar prefs: %w", err)
+	}
+	return prefs, nil
+}
+
+// SaveSidebarPrefs upserts sidebar preferences for a user.
+func (r *PreferencesRepo) SaveSidebarPrefs(ctx context.Context, userID string, prefsJSON string) error {
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO user_preferences (user_id, sidebar_prefs)
+		 VALUES ($1, $2::jsonb)
+		 ON CONFLICT (user_id) DO UPDATE SET sidebar_prefs = $2::jsonb, updated_at = NOW()`,
+		userID, prefsJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("save sidebar prefs: %w", err)
+	}
+	return nil
+}

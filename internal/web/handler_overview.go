@@ -22,11 +22,17 @@ func (h *Handler) OverviewTempl(w http.ResponseWriter, r *http.Request) {
 		PageData: pageData,
 	}
 
+	// Track service errors for dashboard degradation indicator
+	var serviceErrors []string
+
 	// Aggregate data across all hosts
 	hostSvc := h.services.Hosts()
 	if hostSvc != nil {
 		hosts, err := hostSvc.List(ctx)
-		if err == nil {
+		if err != nil {
+			serviceErrors = append(serviceErrors, "hosts")
+			h.logger.Error("overview: failed to list hosts", "error", err)
+		} else {
 			var totalContainers, totalRunning, totalStopped, totalImages int
 			var onlineNodes, offlineNodes int
 
@@ -86,7 +92,10 @@ func (h *Handler) OverviewTempl(w http.ResponseWriter, r *http.Request) {
 	// Get updates available count
 	updateSvc := h.services.Updates()
 	if updateSvc != nil {
-		if available, err := updateSvc.ListAvailable(ctx); err == nil {
+		if available, err := updateSvc.ListAvailable(ctx); err != nil {
+			serviceErrors = append(serviceErrors, "updates")
+			h.logger.Error("overview: failed to list available updates", "error", err)
+		} else {
 			data.UpdatesAvailable = len(available)
 		}
 	}
@@ -94,7 +103,10 @@ func (h *Handler) OverviewTempl(w http.ResponseWriter, r *http.Request) {
 	// Get security info
 	secSvc := h.services.Security()
 	if secSvc != nil {
-		if overview, err := secSvc.GetOverview(ctx); err == nil {
+		if overview, err := secSvc.GetOverview(ctx); err != nil {
+			serviceErrors = append(serviceErrors, "security")
+			h.logger.Error("overview: failed to get security overview", "error", err)
+		} else {
 			data.SecurityScore = int(overview.AverageScore)
 			data.SecurityIssues = overview.CriticalCount + overview.HighCount + overview.MediumCount
 			// Determine grade from average score
@@ -113,11 +125,18 @@ func (h *Handler) OverviewTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Set degraded status if any service errors occurred
+	if len(serviceErrors) > 0 {
+		data.HasServiceErrors = true
+	}
+
 	// Get recent alerts
 	alertSvc := h.getAlertService()
 	if alertSvc != nil {
 		events, _, err := alertSvc.ListEvents(ctx, models.AlertEventListOptions{Limit: 5})
-		if err == nil {
+		if err != nil {
+			h.logger.Error("overview: failed to list alert events", "error", err)
+		} else {
 			for _, e := range events {
 				data.RecentAlerts = append(data.RecentAlerts, overviewtmpl.AlertSummary{
 					RuleName:  fmt.Sprintf("Alert %s", e.AlertID.String()[:8]),

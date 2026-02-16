@@ -298,6 +298,21 @@ type APIPermissions struct {
 	Pull     bool `json:"pull"`
 }
 
+// APIRef represents a GitHub git reference (branch or tag)
+type APIRef struct {
+	Ref    string       `json:"ref"`
+	NodeID string       `json:"node_id"`
+	URL    string       `json:"url"`
+	Object APIRefObject `json:"object"`
+}
+
+// APIRefObject is the object a ref points to
+type APIRefObject struct {
+	Type string `json:"type"` // commit, tag
+	SHA  string `json:"sha"`
+	URL  string `json:"url"`
+}
+
 // APIError represents a GitHub API error response
 type APIError struct {
 	Message          string      `json:"message"`

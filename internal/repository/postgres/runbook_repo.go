@@ -183,6 +183,34 @@ func (r *RunbookRepository) ListExecutions(ctx context.Context, runbookID uuid.U
 	return execs, nil
 }
 
+// ListRecentExecutions returns the most recent executions across all runbooks.
+func (r *RunbookRepository) ListRecentExecutions(ctx context.Context, limit int) ([]*models.RunbookExecution, error) {
+	q := `SELECT id, runbook_id, status, trigger, trigger_ref, step_results, started_at, finished_at, executed_by, created_at
+		FROM runbook_executions ORDER BY started_at DESC`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := r.db.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var execs []*models.RunbookExecution
+	for rows.Next() {
+		e := &models.RunbookExecution{}
+		if err := rows.Scan(
+			&e.ID, &e.RunbookID, &e.Status, &e.Trigger, &e.TriggerRef,
+			&e.StepResults, &e.StartedAt, &e.FinishedAt, &e.ExecutedBy, &e.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		execs = append(execs, e)
+	}
+	return execs, nil
+}
+
 // GetExecution retrieves a single execution by ID.
 func (r *RunbookRepository) GetExecution(ctx context.Context, id uuid.UUID) (*models.RunbookExecution, error) {
 	e := &models.RunbookExecution{}

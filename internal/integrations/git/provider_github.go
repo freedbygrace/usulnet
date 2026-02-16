@@ -178,15 +178,40 @@ func (p *GitHubProvider) GetBranch(ctx context.Context, repoID, branch string) (
 }
 
 func (p *GitHubProvider) CreateBranch(ctx context.Context, repoID string, opts CreateBranchOptions) (*models.GitBranch, error) {
-	// GitHub doesn't have a direct "create branch" API
-	// You need to create a reference: POST /repos/{owner}/{repo}/git/refs
-	// For now, return not implemented
-	return nil, fmt.Errorf("create branch not implemented for GitHub - use git push")
+	owner, repo, err := githubParseRepoID(repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve the source to a SHA if it's a branch name
+	sha := opts.Source
+	if !isHexSHA(sha) {
+		sourceBranch, err := p.client.GetBranch(ctx, owner, repo, opts.Source)
+		if err != nil {
+			return nil, fmt.Errorf("resolve source branch %q: %w", opts.Source, err)
+		}
+		sha = sourceBranch.Commit.SHA
+	}
+
+	// Create the ref via the Git refs API
+	ref, err := p.client.CreateRef(ctx, owner, repo, "refs/heads/"+opts.Name, sha)
+	if err != nil {
+		return nil, fmt.Errorf("create branch ref: %w", err)
+	}
+
+	return &models.GitBranch{
+		Name:      opts.Name,
+		CommitSHA: ref.Object.SHA,
+	}, nil
 }
 
 func (p *GitHubProvider) DeleteBranch(ctx context.Context, repoID, branch string) error {
-	// GitHub uses: DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
-	return fmt.Errorf("delete branch not implemented for GitHub - use git push")
+	owner, repo, err := githubParseRepoID(repoID)
+	if err != nil {
+		return err
+	}
+
+	return p.client.DeleteRef(ctx, owner, repo, "heads/"+branch)
 }
 
 // ============================================================================
@@ -215,11 +240,41 @@ func (p *GitHubProvider) ListTags(ctx context.Context, repoID string) ([]models.
 }
 
 func (p *GitHubProvider) CreateTag(ctx context.Context, repoID string, opts CreateTagOptions) (*models.GitTag, error) {
-	return nil, fmt.Errorf("create tag not implemented for GitHub - use git push")
+	owner, repo, err := githubParseRepoID(repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve the target to a SHA if it's a branch name
+	sha := opts.Target
+	if !isHexSHA(sha) {
+		targetBranch, err := p.client.GetBranch(ctx, owner, repo, opts.Target)
+		if err != nil {
+			return nil, fmt.Errorf("resolve target ref %q: %w", opts.Target, err)
+		}
+		sha = targetBranch.Commit.SHA
+	}
+
+	// Create the tag ref via the Git refs API (lightweight tag)
+	ref, err := p.client.CreateRef(ctx, owner, repo, "refs/tags/"+opts.Name, sha)
+	if err != nil {
+		return nil, fmt.Errorf("create tag ref: %w", err)
+	}
+
+	return &models.GitTag{
+		Name:      opts.Name,
+		CommitSHA: ref.Object.SHA,
+		Message:   opts.Message,
+	}, nil
 }
 
 func (p *GitHubProvider) DeleteTag(ctx context.Context, repoID, tag string) error {
-	return fmt.Errorf("delete tag not implemented for GitHub - use git push")
+	owner, repo, err := githubParseRepoID(repoID)
+	if err != nil {
+		return err
+	}
+
+	return p.client.DeleteRef(ctx, owner, repo, "tags/"+tag)
 }
 
 // ============================================================================
@@ -721,6 +776,19 @@ func (p *GitHubProvider) ListLicenseTemplates(ctx context.Context) ([]LicenseTem
 		{Key: "unlicense", Name: "The Unlicense"},
 		{Key: "mpl-2.0", Name: "Mozilla Public License 2.0"},
 	}, nil
+}
+
+// isHexSHA checks if a string looks like a full 40-character hex SHA
+func isHexSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // ============================================================================

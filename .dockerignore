@@ -1,0 +1,67 @@
+# =============================================================================
+# usulnet .dockerignore
+# Excludes files not needed in Docker build context to reduce image size
+# and speed up builds.
+# =============================================================================
+
+# Version control
+.git
+.gitignore
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Build artifacts
+bin/
+dist/
+coverage.out
+coverage.html
+
+# CI/CD
+.github/
+
+# Documentation (not needed in runtime image)
+docs/
+*.md
+!docker-entrypoint*.sh
+
+# Environment files (secrets — never include in images)
+.env
+.env.*
+!.env.example
+
+# Development files
+docker-compose.dev.yml
+docker-compose.test.yml
+Makefile
+
+# Test files
+*_test.go
+testdata/
+**/*_test.go
+
+# Project management
+TASK_DEPARTMENTS.md
+DEPARTMENT_BRIEFS.md
+PROJECT_STATUS.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+*.tmp
+*.log
+
+# Node modules (if any — Tailwind standalone doesn't need them)
+node_modules/
+
+# Go build cache (handled by Docker layer caching)
+vendor/
+# Exception: self-hosted vendor assets must be included in builds
+!web/static/vendor/

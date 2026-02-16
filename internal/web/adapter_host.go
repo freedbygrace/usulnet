@@ -262,3 +262,31 @@ func (a *hostAdapter) GenerateAgentToken(ctx context.Context, id string) (string
 	}
 	return a.svc.GenerateAgentToken(ctx, uid)
 }
+
+func (a *hostAdapter) GetMetrics(ctx context.Context, id string) (*HostMetricsView, error) {
+	if a.svc == nil {
+		return nil, nil
+	}
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid host ID: %w", err)
+	}
+	m, err := a.svc.GetMetrics(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, nil
+	}
+	return &HostMetricsView{
+		CPUPercent:    m.CPUPercent,
+		MemoryUsed:    m.MemoryUsed,
+		MemoryPercent: m.MemoryPercent,
+		MemoryUsedStr: humanSize(m.MemoryUsed),
+		DiskPercent:   m.DiskPercent,
+		DiskUsedStr:   humanSize(m.DiskUsed),
+		DiskTotalStr:  humanSize(m.DiskTotal),
+		NetworkRxStr:  humanSize(m.NetworkRxBytes),
+		NetworkTxStr:  humanSize(m.NetworkTxBytes),
+	}, nil
+}

@@ -240,6 +240,34 @@ func (c *Client) GetBranch(ctx context.Context, owner, repo, branch string) (*AP
 	return decodeJSON[*APIBranch](resp)
 }
 
+// CreateRef creates a git reference (for branches or tags)
+func (c *Client) CreateRef(ctx context.Context, owner, repo, ref, sha string) (*APIRef, error) {
+	path := fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo)
+	body := map[string]string{
+		"ref": ref,
+		"sha": sha,
+	}
+	resp, err := c.post(ctx, path, body)
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSON[*APIRef](resp)
+}
+
+// DeleteRef deletes a git reference (for branches or tags)
+func (c *Client) DeleteRef(ctx context.Context, owner, repo, ref string) error {
+	path := fmt.Sprintf("/repos/%s/%s/git/refs/%s", owner, repo, ref)
+	resp, err := c.delete(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("delete ref failed: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ============================================================================
 // Commits
 // ============================================================================

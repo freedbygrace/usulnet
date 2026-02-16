@@ -353,11 +353,11 @@ templ hostFileBrowser(data HostFilesData) {
 	</div>
 
 	<!-- Monaco Editor CDN -->
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+	<script src="/static/vendor/monaco-editor/min/vs/loader.js"></script>
 	<script>
 		// Monaco loader config
 		require.config({
-			paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' }
+			paths: { vs: '/static/vendor/monaco-editor/min/vs' }
 		});
 
 		function hostBrowser(hostID, initialPath) {

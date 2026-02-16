@@ -217,6 +217,72 @@ func (s *Service) GetLive(ctx context.Context, hostID uuid.UUID, containerID str
 // Container Lifecycle Operations
 // ============================================================================
 
+
+// SyncInventory synchronizes the container inventory from an agent.
+// It reconciles the received list with the database, updating existing records,
+// inserting new ones, and marking missing ones as removed.
+func (s *Service) SyncInventory(ctx context.Context, hostID uuid.UUID, containers []*models.Container) error {
+	s.logger.Info("Syncing container inventory",
+		"host_id", hostID,
+		"count", len(containers),
+	)
+
+	// 1. Get existing containers for this host
+	existing, err := s.repo.ListByHost(ctx, hostID)
+	if err != nil {
+		return fmt.Errorf("failed to list existing containers: %w", err)
+	}
+
+	// 2. Build map of new inventory for quick lookup
+	inventoryMap := make(map[string]*models.Container)
+	for _, c := range containers {
+		c.HostID = hostID // Ensure hostID is set
+		// Ensure timestamps are set if missing
+		if c.CreatedAt.IsZero() {
+			c.CreatedAt = time.Now().UTC()
+		}
+		if c.SyncedAt.IsZero() {
+			c.SyncedAt = time.Now().UTC()
+		}
+		inventoryMap[c.ID] = c
+	}
+
+	// 3. Identify containers to remove (present in DB but not in inventory)
+	// For now, we will soft-delete or just mark as status="missing" / state="dead"?
+	// The repo.DeleteByHost deletes all. accessing repo.Delete(id) for each missing might be slow.
+	// But ListByHost returns pointers.
+	// Let's iterate existing and check if they exist in inventory.
+	var toRemove []string
+	for _, e := range existing {
+		if _, found := inventoryMap[e.ID]; !found {
+			toRemove = append(toRemove, e.ID)
+		}
+	}
+
+	// 4. Remove missing containers
+	// TODO: Bulk delete support in repo would be better
+	for _, id := range toRemove {
+		if err := s.repo.Delete(ctx, id); err != nil {
+			s.logger.Warn("Failed to remove stale container", "id", id, "error", err)
+		}
+	}
+
+	// 5. Upsert new/updated containers
+	if len(containers) > 0 {
+		if err := s.repo.UpsertBatch(ctx, containers); err != nil {
+			return fmt.Errorf("failed to callback upsert batch: %w", err)
+		}
+	}
+
+	s.logger.Info("Inventory sync complete",
+		"host_id", hostID,
+		"updated", len(containers),
+		"removed", len(toRemove),
+	)
+
+	return nil
+}
+
 // Start starts a container.
 func (s *Service) StartContainer(ctx context.Context, hostID uuid.UUID, containerID string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)

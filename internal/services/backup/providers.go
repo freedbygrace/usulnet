@@ -7,15 +7,21 @@
 package backup
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/models"
 	containerservice "github.com/fr4nsys/usulnet/internal/services/container"
 	hostservice "github.com/fr4nsys/usulnet/internal/services/host"
+	stackservice "github.com/fr4nsys/usulnet/internal/services/stack"
 	volumeservice "github.com/fr4nsys/usulnet/internal/services/volume"
 )
 
@@ -122,6 +128,98 @@ func (p *DockerVolumeProvider) ListVolumes(ctx context.Context, hostID uuid.UUID
 	}
 
 	return result, nil
+}
+
+// CopyVolumeData copies volume data to a destination directory using Docker API.
+// This is used when the volume mountpoint is not accessible from the local filesystem
+// (e.g., when running inside a Docker container).
+func (p *DockerVolumeProvider) CopyVolumeData(ctx context.Context, hostID uuid.UUID, volumeName string, destPath string) error {
+	client, err := p.hostService.GetClient(ctx, hostID)
+	if err != nil {
+		return fmt.Errorf("get docker client: %w", err)
+	}
+
+	// Create a temporary helper container that mounts the volume
+	helperName := fmt.Sprintf("usulnet-backup-helper-%s", volumeName)
+	containerID, err := client.ContainerCreate(ctx, docker.ContainerCreateOptions{
+		Name:   helperName,
+		Image:  "busybox:latest",
+		Cmd:    []string{"true"},
+		Binds:  []string{volumeName + ":/backup-data:ro"},
+		Labels: map[string]string{"usulnet.backup-helper": "true"},
+	})
+	if err != nil {
+		return fmt.Errorf("create helper container: %w", err)
+	}
+
+	// Always clean up the helper container
+	defer func() {
+		_ = client.ContainerRemove(ctx, containerID, true, false)
+	}()
+
+	// Copy data from the helper container using Docker API
+	reader, _, err := client.ContainerCopyFromContainer(ctx, containerID, "/backup-data")
+	if err != nil {
+		return fmt.Errorf("copy from container: %w", err)
+	}
+	defer reader.Close()
+
+	// Extract the tar stream to the destination path
+	return extractTar(reader, destPath, "backup-data")
+}
+
+// extractTar extracts a tar stream to a destination directory, stripping the given prefix.
+func extractTar(r io.Reader, destPath string, stripPrefix string) error {
+	tr := tar.NewReader(r)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar: %w", err)
+		}
+
+		// Strip the prefix directory from the path
+		name := header.Name
+		if stripPrefix != "" {
+			rel, err := filepath.Rel(stripPrefix, name)
+			if err != nil || rel == "." {
+				continue
+			}
+			name = rel
+		}
+
+		target := filepath.Join(destPath, name)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
+				return fmt.Errorf("create dir %s: %w", target, err)
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return fmt.Errorf("create parent dir: %w", err)
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return fmt.Errorf("create file %s: %w", target, err)
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return fmt.Errorf("write file %s: %w", target, err)
+			}
+			f.Close()
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return fmt.Errorf("create parent dir: %w", err)
+			}
+			if err := os.Symlink(header.Linkname, target); err != nil {
+				return fmt.Errorf("create symlink %s: %w", target, err)
+			}
+		}
+	}
+	return nil
 }
 
 // VolumeInfo contains volume information for backup operations.
@@ -273,6 +371,9 @@ type VolumeProvider interface {
 	VolumeExists(ctx context.Context, hostID uuid.UUID, name string) (bool, error)
 	CreateVolume(ctx context.Context, hostID uuid.UUID, opts CreateVolumeOptions) (*VolumeInfo, error)
 	ListVolumes(ctx context.Context, hostID uuid.UUID) ([]*VolumeInfo, error)
+	// CopyVolumeData copies volume contents to destPath using Docker API.
+	// Used when the volume mountpoint is not accessible from the local filesystem.
+	CopyVolumeData(ctx context.Context, hostID uuid.UUID, volumeName string, destPath string) error
 }
 
 // ContainerProvider interface for backup service dependency injection.
@@ -285,6 +386,79 @@ type ContainerProvider interface {
 	ListContainersUsingVolume(ctx context.Context, hostID uuid.UUID, volumeName string) ([]*ContainerInfo, error)
 }
 
+// ============================================================================
+// Stack Provider
+// ============================================================================
+
+// DockerStackProvider provides stack operations for backup service.
+// Implements StackProvider interface using the stack service.
+type DockerStackProvider struct {
+	stackService     *stackservice.Service
+	containerService *containerservice.Service
+}
+
+// NewDockerStackProvider creates a new Docker stack provider.
+func NewDockerStackProvider(
+	stackService *stackservice.Service,
+	containerService *containerservice.Service,
+) *DockerStackProvider {
+	return &DockerStackProvider{
+		stackService:     stackService,
+		containerService: containerService,
+	}
+}
+
+// GetStack retrieves a stack by ID.
+func (p *DockerStackProvider) GetStack(ctx context.Context, id uuid.UUID) (*StackInfo, error) {
+	stack, err := p.stackService.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get stack %s: %w", id, err)
+	}
+
+	var serviceNames []string
+	for _, svc := range stack.Services {
+		serviceNames = append(serviceNames, svc.Name)
+	}
+
+	return &StackInfo{
+		ID:          stack.ID,
+		HostID:      stack.HostID,
+		Name:        stack.Name,
+		ComposeFile: stack.ComposeFile,
+		EnvFile:     stack.EnvFile,
+		Services:    serviceNames,
+		Labels:      stack.Variables,
+	}, nil
+}
+
+// GetStackContainers retrieves containers belonging to a stack.
+func (p *DockerStackProvider) GetStackContainers(ctx context.Context, id uuid.UUID) ([]StackContainerInfo, error) {
+	containers, err := p.stackService.GetContainers(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get stack containers for %s: %w", id, err)
+	}
+
+	result := make([]StackContainerInfo, 0, len(containers))
+	for _, c := range containers {
+		var volumes []string
+		for _, m := range c.Mounts {
+			if m.Type == "volume" {
+				volumes = append(volumes, m.Source)
+			}
+		}
+		result = append(result, StackContainerInfo{
+			ID:      c.ID,
+			Name:    c.Name,
+			Image:   c.Image,
+			Volumes: volumes,
+			Labels:  c.Labels,
+		})
+	}
+
+	return result, nil
+}
+
 // Verify interface compliance at compile time
 var _ VolumeProvider = (*DockerVolumeProvider)(nil)
 var _ ContainerProvider = (*DockerContainerProvider)(nil)
+var _ StackProvider = (*DockerStackProvider)(nil)

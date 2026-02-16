@@ -209,7 +209,7 @@ func writeDeployStatusHTML(w http.ResponseWriter, result *deploy.DeployResult) {
 // writeDeployPageHTML writes a full deployment status page.
 func writeDeployPageHTML(w http.ResponseWriter, result *deploy.DeployResult) {
 	w.Write([]byte(`<!DOCTYPE html><html><head><title>Agent Deployment</title>
-<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+<script src="/static/vendor/js/htmx-2.0.4.min.js"></script>
 <link href="/static/css/style.css" rel="stylesheet">
 </head><body class="bg-dark-900 text-white p-8">
 <div class="max-w-3xl mx-auto">

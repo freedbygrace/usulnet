@@ -122,8 +122,8 @@ templ List(data ConfigData) {
 									<td class="text-gray-400 text-sm">{ v.UpdatedAt }</td>
 									<td>
 										<div class="flex items-center gap-2">
-											<button class="text-primary-400 hover:text-primary-300 text-sm">Edit</button>
-											<button 
+											<a href={ templ.SafeURL("/config/variables/" + v.ID) } class="text-primary-400 hover:text-primary-300 text-sm">Edit</a>
+											<button
 												hx-delete={ "/config/variables/" + v.ID }
 												hx-confirm="Delete this variable?"
 												class="text-red-400 hover:text-red-300 text-sm">

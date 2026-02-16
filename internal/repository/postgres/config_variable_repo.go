@@ -582,6 +582,61 @@ func (r *ConfigVariableRepository) scanVariable(row pgx.Row) (*models.ConfigVari
 	return v, nil
 }
 
+// Upsert inserts a new variable or updates if one with the same name and scope already exists.
+func (r *ConfigVariableRepository) Upsert(ctx context.Context, v *models.ConfigVariable) error {
+	if v.ID == uuid.Nil {
+		v.ID = uuid.New()
+	}
+	now := time.Now()
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = now
+	}
+	v.UpdatedAt = now
+	if v.Version == 0 {
+		v.Version = 1
+	}
+
+	query := `
+		INSERT INTO config_variables (
+			id, name, value, type, scope, scope_id, description,
+			is_required, default_value, version, created_by, updated_by,
+			created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11, $12,
+			$13, $14
+		)
+		ON CONFLICT (name, scope) WHERE scope_id IS NULL
+		DO UPDATE SET
+			value = EXCLUDED.value,
+			updated_by = EXCLUDED.updated_by,
+			updated_at = EXCLUDED.updated_at,
+			version = config_variables.version + 1`
+
+	_, err := r.db.Exec(ctx, query,
+		v.ID,
+		v.Name,
+		v.Value,
+		string(v.Type),
+		string(v.Scope),
+		v.ScopeID,
+		v.Description,
+		v.IsRequired,
+		v.DefaultValue,
+		v.Version,
+		v.CreatedBy,
+		v.UpdatedBy,
+		v.CreatedAt,
+		v.UpdatedAt,
+	)
+
+	if err != nil {
+		return errors.Wrap(err, errors.CodeDatabaseError, "failed to upsert config variable")
+	}
+
+	return nil
+}
+
 // scanVariables scans multiple rows into ConfigVariables
 func (r *ConfigVariableRepository) scanVariables(rows pgx.Rows) ([]*models.ConfigVariable, error) {
 	var variables []*models.ConfigVariable

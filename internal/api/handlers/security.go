@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/services/security"
@@ -36,32 +37,45 @@ func NewSecurityHandler(securityService *security.Service, log *logger.Logger) *
 func (h *SecurityHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Scans
+	// Read-only routes (viewer+)
 	r.Get("/scans", h.ListScans)
 	r.Route("/scans/{scanID}", func(r chi.Router) {
 		r.Get("/", h.GetScan)
-		r.Delete("/", h.DeleteScan)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Delete("/", h.DeleteScan)
+		})
 	})
 
-	// Container scans
+	// Container scans (viewer+)
 	r.Get("/containers/{containerID}/scans", h.GetContainerScans)
 	r.Get("/containers/{containerID}/scans/latest", h.GetLatestScan)
 	r.Get("/containers/{containerID}/issues", h.GetContainerIssues)
 
-	// Host scans
+	// Host scans (viewer+)
 	r.Get("/hosts/{hostID}/scans", h.GetHostScans)
 	r.Get("/hosts/{hostID}/issues", h.GetHostIssues)
 	r.Get("/hosts/{hostID}/summary", h.GetSecuritySummary)
 
 	// Issues
 	r.Get("/issues/{issueID}", h.GetIssue)
-	r.Put("/issues/{issueID}", h.UpdateIssueStatus)
 
-	// Summary
+	// Operator+ for issue status changes
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireOperator)
+		r.Put("/issues/{issueID}", h.UpdateIssueStatus)
+	})
+
+	// Summary (viewer+)
 	r.Get("/summary", h.GetSummary)
 
-	// Maintenance
-	r.Post("/cleanup", h.CleanupOldScans)
+	// Admin-only maintenance
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAdmin)
+		r.Post("/cleanup", h.CleanupOldScans)
+	})
 
 	return r
 }

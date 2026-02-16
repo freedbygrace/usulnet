@@ -46,29 +46,45 @@ func (h *BackupHandler) SetLicenseProvider(provider middleware.LicenseProvider) 
 func (h *BackupHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Backup operations
+	// Read-only routes (viewer+)
 	r.Get("/", h.ListBackups)
-	r.Post("/", h.CreateBackup)
+	r.Get("/stats", h.GetStats)
+	r.Get("/storage", h.GetStorageInfo)
+	r.Get("/target/{hostID}/{targetID}", h.ListByTarget)
 
 	r.Route("/{backupID}", func(r chi.Router) {
 		r.Get("/", h.GetBackup)
-		r.Delete("/", h.DeleteBackup)
 		r.Get("/contents", h.ListContents)
 		r.Get("/download", h.Download)
-		r.Post("/restore", h.Restore)
-		r.Post("/verify", h.Verify)
-	})
 
-	// Target-based operations
-	r.Get("/target/{hostID}/{targetID}", h.ListByTarget)
-	r.Post("/target/{hostID}/{targetID}/prune", h.PruneTarget)
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Delete("/", h.DeleteBackup)
+			r.Post("/restore", h.Restore)
+			r.Post("/verify", h.Verify)
+		})
+	})
 
 	// Schedules
 	r.Route("/schedules", func(r chi.Router) {
 		r.Get("/", h.ListSchedules)
 
-		// Schedule creation enforces MaxBackupDestinations limit
+		r.Route("/{scheduleID}", func(r chi.Router) {
+			r.Get("/", h.GetSchedule)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Put("/", h.UpdateSchedule)
+				r.Delete("/", h.DeleteSchedule)
+				r.Post("/run", h.RunSchedule)
+			})
+		})
+
+		// Schedule creation — operator+ with license limit
 		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
 			if h.licenseProvider != nil {
 				r.Use(middleware.RequireLimit(
 					h.licenseProvider,
@@ -85,20 +101,21 @@ func (h *BackupHandler) Routes() chi.Router {
 			}
 			r.Post("/", h.CreateSchedule)
 		})
-
-		r.Route("/{scheduleID}", func(r chi.Router) {
-			r.Get("/", h.GetSchedule)
-			r.Put("/", h.UpdateSchedule)
-			r.Delete("/", h.DeleteSchedule)
-			r.Post("/run", h.RunSchedule)
-		})
 	})
 
-	// Stats and maintenance
-	r.Get("/stats", h.GetStats)
-	r.Get("/storage", h.GetStorageInfo)
-	r.Post("/cleanup", h.Cleanup)
-	r.Post("/cleanup/orphaned", h.CleanupOrphaned)
+	// Operator+ for other mutations
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireOperator)
+		r.Post("/", h.CreateBackup)
+		r.Post("/target/{hostID}/{targetID}/prune", h.PruneTarget)
+	})
+
+	// Admin-only maintenance
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAdmin)
+		r.Post("/cleanup", h.Cleanup)
+		r.Post("/cleanup/orphaned", h.CleanupOrphaned)
+	})
 
 	return r
 }

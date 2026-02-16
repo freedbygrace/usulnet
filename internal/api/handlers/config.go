@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
@@ -41,48 +42,79 @@ func (h *ConfigHandler) Routes() chi.Router {
 
 	// Variables
 	r.Route("/variables", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.ListVariables)
-		r.Post("/", h.CreateVariable)
 
 		r.Route("/{variableID}", func(r chi.Router) {
 			r.Get("/", h.GetVariable)
-			r.Put("/", h.UpdateVariable)
-			r.Delete("/", h.DeleteVariable)
 			r.Get("/usage", h.GetVariableUsage)
 			r.Get("/history", h.GetVariableHistory)
-			r.Post("/rollback", h.RollbackVariable)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Put("/", h.UpdateVariable)
+				r.Delete("/", h.DeleteVariable)
+				r.Post("/rollback", h.RollbackVariable)
+			})
+		})
+
+		// Operator+ for creation
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.CreateVariable)
 		})
 	})
 
 	// Templates
 	r.Route("/templates", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.ListTemplates)
-		r.Post("/", h.CreateTemplate)
 
 		r.Route("/{templateID}", func(r chi.Router) {
 			r.Get("/", h.GetTemplate)
-			r.Put("/", h.UpdateTemplate)
-			r.Delete("/", h.DeleteTemplate)
-			r.Post("/default", h.SetDefaultTemplate)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Put("/", h.UpdateTemplate)
+				r.Delete("/", h.DeleteTemplate)
+				r.Post("/default", h.SetDefaultTemplate)
+			})
+		})
+
+		// Operator+ for creation
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.CreateTemplate)
 		})
 	})
 
 	// Sync - Configuration synchronization to containers
 	r.Route("/sync", func(r chi.Router) {
-		r.Post("/", h.SyncConfig)
-		r.Post("/preview", h.PreviewSync)
-		r.Post("/bulk", h.BulkSyncConfig)
+		// Read-only (viewer+)
 		r.Get("/outdated", h.ListOutdatedSyncs)
 		r.Get("/stats", h.GetSyncStats)
 		r.Get("/{hostID}/{containerID}", h.GetSyncStatus)
-		r.Delete("/{hostID}/{containerID}", h.RemoveSync)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.SyncConfig)
+			r.Post("/preview", h.PreviewSync)
+			r.Post("/bulk", h.BulkSyncConfig)
+			r.Delete("/{hostID}/{containerID}", h.RemoveSync)
+		})
 	})
 
-	// Export/Import
-	r.Post("/export", h.ExportConfig)
-	r.Post("/import", h.ImportConfig)
+	// Admin-only: Export/Import
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAdmin)
+		r.Post("/export", h.ExportConfig)
+		r.Post("/import", h.ImportConfig)
+	})
 
-	// Audit
+	// Audit (viewer+)
 	r.Get("/audit", h.GetAuditLog)
 
 	return r

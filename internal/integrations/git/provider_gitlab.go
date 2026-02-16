@@ -7,7 +7,6 @@ package git
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -197,13 +196,20 @@ func (p *GitLabProvider) ListTags(ctx context.Context, repoID string) ([]models.
 }
 
 func (p *GitLabProvider) CreateTag(ctx context.Context, repoID string, opts CreateTagOptions) (*models.GitTag, error) {
-	// GitLab: POST /projects/:id/repository/tags
-	return nil, fmt.Errorf("create tag not implemented for GitLab via API")
+	apiTag, err := p.client.CreateTag(ctx, repoID, opts.Name, opts.Target, opts.Message)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.GitTag{
+		Name:      apiTag.Name,
+		CommitSHA: apiTag.Target,
+		Message:   apiTag.Message,
+	}, nil
 }
 
 func (p *GitLabProvider) DeleteTag(ctx context.Context, repoID, tag string) error {
-	// GitLab: DELETE /projects/:id/repository/tags/:tag_name
-	return fmt.Errorf("delete tag not implemented for GitLab via API")
+	return p.client.DeleteTag(ctx, repoID, tag)
 }
 
 // ============================================================================

@@ -184,12 +184,13 @@ func (s *Server) Start() error {
 	httpAddr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 
 	s.httpServer = &http.Server{
-		Addr:           httpAddr,
-		Handler:        s.router,
-		ReadTimeout:    s.config.ReadTimeout,
-		WriteTimeout:   s.config.WriteTimeout,
-		IdleTimeout:    s.config.IdleTimeout,
-		MaxHeaderBytes: s.config.MaxHeaderBytes,
+		Addr:              httpAddr,
+		Handler:           s.router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       s.config.ReadTimeout,
+		WriteTimeout:      s.config.WriteTimeout,
+		IdleTimeout:       s.config.IdleTimeout,
+		MaxHeaderBytes:    s.config.MaxHeaderBytes,
 	}
 
 	// Start HTTPS server if TLS is configured (dual-port mode)
@@ -201,13 +202,14 @@ func (s *Server) Start() error {
 		httpsAddr := fmt.Sprintf("%s:%d", s.config.Host, httpsPort)
 
 		s.httpsServer = &http.Server{
-			Addr:           httpsAddr,
-			Handler:        s.router,
-			TLSConfig:      s.config.TLSConfig,
-			ReadTimeout:    s.config.ReadTimeout,
-			WriteTimeout:   s.config.WriteTimeout,
-			IdleTimeout:    s.config.IdleTimeout,
-			MaxHeaderBytes: s.config.MaxHeaderBytes,
+			Addr:              httpsAddr,
+			Handler:           s.router,
+			TLSConfig:         s.config.TLSConfig,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       s.config.ReadTimeout,
+			WriteTimeout:      s.config.WriteTimeout,
+			IdleTimeout:       s.config.IdleTimeout,
+			MaxHeaderBytes:    s.config.MaxHeaderBytes,
 		}
 
 		httpsListener, err := tls.Listen("tcp", httpsAddr, s.config.TLSConfig)

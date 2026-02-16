@@ -27,6 +27,7 @@ import (
 	securitytmpl "github.com/fr4nsys/usulnet/internal/web/templates/pages/security"
 	updatestmpl "github.com/fr4nsys/usulnet/internal/web/templates/pages/updates"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/volumes"
+	"github.com/fr4nsys/usulnet/internal/web/templates/types"
 )
 
 // ============================================================================
@@ -66,6 +67,58 @@ func (h *Handler) preparePageData(r *http.Request, title, active string) *PageDa
 	data.Stats = GetStatsFromContext(r.Context())
 	data.Flash = GetFlashFromContext(r.Context())
 	data.Version = h.version
+
+	// Templ layout fields: host selector
+	activeHostID := GetActiveHostIDFromContext(r.Context())
+	activeHostName := "Local"
+	if h.services != nil && h.services.Hosts() != nil {
+		if hostList, err := h.services.Hosts().List(r.Context()); err == nil {
+			for _, ho := range hostList {
+				data.TemplHosts = append(data.TemplHosts, types.HostSelectorItem{
+					ID:           ho.ID,
+					Name:         ho.Name,
+					Status:       ho.Status,
+					EndpointType: ho.EndpointType,
+				})
+				if ho.ID == activeHostID {
+					activeHostName = ho.Name
+				}
+			}
+		}
+	}
+	if activeHostID == "" && len(data.TemplHosts) > 0 {
+		activeHostID = data.TemplHosts[0].ID
+		activeHostName = data.TemplHosts[0].Name
+	}
+	data.TemplActiveHostID = activeHostID
+	data.TemplActiveHostName = activeHostName
+
+	// Templ layout fields: license edition
+	data.TemplEdition = "ce"
+	data.TemplEditionName = "Community Edition"
+	if h.licenseProvider != nil {
+		if info := h.licenseProvider.GetInfo(); info != nil {
+			data.TemplEdition = string(info.Edition)
+			data.TemplEditionName = info.EditionName()
+		}
+	}
+
+	// Templ layout fields: sidebar preferences
+	data.TemplSidebarPrefs = types.DefaultSidebarPreferences()
+	if h.prefsRepo != nil && data.User != nil {
+		if prefsJSON, err := h.prefsRepo.GetSidebarPrefs(r.Context(), data.User.ID); err == nil && prefsJSON != "" {
+			var sp types.SidebarPreferences
+			if err := json.Unmarshal([]byte(prefsJSON), &sp); err == nil {
+				if sp.Collapsed == nil {
+					sp.Collapsed = types.DefaultSidebarPreferences().Collapsed
+				}
+				if sp.Hidden == nil {
+					sp.Hidden = map[string]bool{}
+				}
+				data.TemplSidebarPrefs = &sp
+			}
+		}
+	}
 
 	return data
 }
@@ -167,6 +220,7 @@ func (h *Handler) TOTPVerifySubmit(w http.ResponseWriter, r *http.Request) {
 	// Validate TOTP code
 	valid, err := h.services.Users().ValidateTOTPCode(r.Context(), userID, code)
 	if err != nil || !valid {
+		RecordAccessEvent("", userID, "login_failed", "session", "", "", "Invalid TOTP code", getClientIP(r), r.UserAgent(), false, "invalid totp code")
 		// Redirect back to TOTP page with error
 		redirectURL := "/login/totp?token=" + token + "&error=Invalid+code,+please+try+again"
 		if returnURL != "" {
@@ -194,6 +248,8 @@ func (h *Handler) TOTPVerifySubmit(w http.ResponseWriter, r *http.Request) {
 		h.redirect(w, r, "/login?error=Session+creation+failed")
 		return
 	}
+
+	RecordAccessEvent(userCtx.Username, userCtx.ID, "login", "session", session.ID, "", "Login successful (TOTP)", getClientIP(r), r.UserAgent(), true, "")
 
 	if returnURL != "" && returnURL != "/login" && strings.HasPrefix(returnURL, "/") && !strings.HasPrefix(returnURL, "//") {
 		h.redirect(w, r, returnURL)
@@ -388,6 +444,7 @@ func (h *Handler) OAuthCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	userCtx, err := h.services.Auth().OAuthCallback(r.Context(), providerName, code, r.UserAgent(), getClientIP(r))
 	if err != nil {
 		slog.Error("OAuth callback failed", "provider", providerName, "error", err)
+		RecordAccessEvent("", "", "login_failed", "session", "", "", "OAuth callback failed: "+providerName, getClientIP(r), r.UserAgent(), false, err.Error())
 		h.redirect(w, r, "/login?error=OAuth+authentication+failed")
 		return
 	}
@@ -404,6 +461,8 @@ func (h *Handler) OAuthCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		h.redirect(w, r, "/login?error=Session+creation+failed")
 		return
 	}
+
+	RecordAccessEvent(userCtx.Username, userCtx.ID, "login", "session", session.ID, "", "Login successful (OAuth: "+providerName+")", getClientIP(r), r.UserAgent(), true, "")
 
 	h.redirect(w, r, "/")
 }

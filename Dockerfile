@@ -1,6 +1,6 @@
 # =============================================================================
 # usulnet Docker Management Platform
-# Templ-based frontend (no Pongo2)
+# Optimized multi-stage production build
 # =============================================================================
 
 # Default BUILDPLATFORM for non-buildx environments (legacy Docker build)
@@ -33,12 +33,13 @@ RUN templ generate
 # Tidy modules after templ generate (adds templ runtime dependency)
 RUN go mod tidy
 
-# Build the binary
+# Build the binary with optimizations
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -trimpath \
     -ldflags="-w -s \
         -X github.com/fr4nsys/usulnet/internal/app.Version=${VERSION} \
         -X github.com/fr4nsys/usulnet/internal/app.Commit=${COMMIT} \
@@ -78,20 +79,31 @@ RUN mkdir -p css && \
     tailwindcss --config ./tailwind.config.js -i src/input.css -o css/style.css --minify
 
 # =============================================================================
-# Stage 3: Runtime image
+# Stage 3: Runtime image (production-optimized)
 # =============================================================================
 FROM alpine:3.21
 
 ARG TARGETARCH
 
+# OCI image metadata labels
+LABEL org.opencontainers.image.title="usulnet" \
+      org.opencontainers.image.description="Docker Management Platform" \
+      org.opencontainers.image.url="https://github.com/fr4nsys/usulnet" \
+      org.opencontainers.image.source="https://github.com/fr4nsys/usulnet" \
+      org.opencontainers.image.vendor="usulnet" \
+      org.opencontainers.image.licenses="AGPL-3.0"
+
 # All runtime packages in a single layer (includes nvim editor deps)
+# Minimized apk cache by combining all installs
 RUN apk add --no-cache \
     ca-certificates tzdata curl su-exec util-linux \
     docker-cli docker-cli-compose \
     neovim git ripgrep fd \
     musl-locales musl-locales-lang && \
     # Install Trivy vulnerability scanner
-    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin && \
+    # Clean up curl caches
+    rm -rf /tmp/* /var/cache/apk/*
 
 # Overwrite Alpine's docker-cli (27.x, API 1.47) with Docker 29.2.0 (API 1.53)
 # to match host daemon. Compose plugin stays from Alpine package.
@@ -100,34 +112,40 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then DOCKER_ARCH="aarch64"; else DOCKER_AR
     rm -f /usr/bin/docker && \
     curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-29.2.0.tgz" | \
     tar xz --strip-components=1 -C /usr/bin docker/docker && \
-    chmod +x /usr/bin/docker
+    chmod +x /usr/bin/docker && \
+    rm -rf /tmp/*
 
 # Locale for nvim unicode support (musl-based)
 ENV LANG=en_US.UTF-8
 ENV MUSL_LOCPATH=/usr/share/i18n/locales/musl
 
+# Create non-root user
 RUN addgroup -g 1000 usulnet && \
     adduser -u 1000 -G usulnet -s /bin/sh -D usulnet
 
+# Create required directories with proper ownership in a single layer
 RUN mkdir -p /app/data /app/config /app/web/static/css /var/lib/usulnet/trivy && \
     chown -R usulnet:usulnet /app /var/lib/usulnet
 
 WORKDIR /app
 
 # Copy binary (Templ templates compiled into it)
-COPY --from=builder /build/usulnet /app/usulnet
+COPY --from=builder --chown=usulnet:usulnet /build/usulnet /app/usulnet
 
 # Copy compiled CSS
-COPY --from=frontend /frontend/css/style.css /app/web/static/css/style.css
+COPY --from=frontend --chown=usulnet:usulnet /frontend/css/style.css /app/web/static/css/style.css
 
 # Copy favicon if exists
-COPY --from=builder /build/web/static/favicon.ico /app/web/static/favicon.ico
+COPY --from=builder --chown=usulnet:usulnet /build/web/static/favicon.ico /app/web/static/favicon.ico
 
 # Copy JS assets (guacamole-common-js, etc.)
-COPY --from=builder /build/web/static/js/ /app/web/static/js/
+COPY --from=builder --chown=usulnet:usulnet /build/web/static/js/ /app/web/static/js/
+
+# Copy self-hosted vendor assets (HTMX, Alpine.js, Font Awesome, fonts)
+COPY --from=builder --chown=usulnet:usulnet /build/web/static/vendor/ /app/web/static/vendor/
 
 # --- Neovim editor support (Phase 7) ---
-COPY nvim/ /opt/usulnet/nvim-config/
+COPY --chown=usulnet:usulnet nvim/ /opt/usulnet/nvim-config/
 
 # Pre-install lazy.nvim + plugins so first session is instant.
 # Runs as root during build, data copied to shared location.
@@ -153,8 +171,8 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8080 7443
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -sf http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["/app/usulnet", "serve", "--config", "/app/config/config.yaml"]

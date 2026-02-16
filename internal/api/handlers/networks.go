@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/services/network"
@@ -35,41 +36,41 @@ func (h *NetworkHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Route("/{hostID}", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.ListNetworks)
-		r.Post("/", h.CreateNetwork)
 		r.Get("/stats", h.GetStats)
 		r.Get("/topology", h.GetTopology)
-		r.Post("/prune", h.PruneNetworks)
-
-		// DNS configuration endpoints
 		r.Get("/dns", h.ListDNSConfigs)
-		r.Post("/dns/validate", h.ValidateSubnet)
-
-		// Analysis endpoints
 		r.Get("/subnets/conflicts", h.GetSubnetConflicts)
 		r.Get("/isolation", h.GetIsolationAnalysis)
-
-		// Port analysis endpoints
 		r.Get("/ports", h.GetHostPortMap)
 		r.Get("/ports/conflicts", h.GetPortConflicts)
-		r.Post("/ports/suggest", h.SuggestPorts)
-
-		// Traffic flow analysis
 		r.Get("/traffic", h.GetTrafficFlow)
 
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.CreateNetwork)
+			r.Post("/prune", h.PruneNetworks)
+			r.Post("/dns/validate", h.ValidateSubnet)
+			r.Post("/ports/suggest", h.SuggestPorts)
+		})
+
 		r.Route("/{networkID}", func(r chi.Router) {
+			// Read-only (viewer+)
 			r.Get("/", h.GetNetwork)
-			r.Delete("/", h.DeleteNetwork)
 			r.Get("/containers", h.GetContainers)
-			r.Post("/connect", h.ConnectContainer)
-			r.Post("/disconnect", h.DisconnectContainer)
-
-			// DNS configuration per network
 			r.Get("/dns", h.GetDNSConfig)
-			r.Put("/dns", h.SetDNSConfig)
-
-			// Isolation analysis per network
 			r.Get("/isolation", h.GetNetworkIsolation)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Delete("/", h.DeleteNetwork)
+				r.Post("/connect", h.ConnectContainer)
+				r.Post("/disconnect", h.DisconnectContainer)
+				r.Put("/dns", h.SetDNSConfig)
+			})
 		})
 	})
 

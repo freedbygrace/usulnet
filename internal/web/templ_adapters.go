@@ -70,6 +70,14 @@ func ToTemplPageData(p *PageData) layouts.PageData {
 		}
 	}
 
+	// Templ layout fields (hosts, edition, sidebar prefs)
+	data.Hosts = p.TemplHosts
+	data.ActiveHostID = p.TemplActiveHostID
+	data.ActiveHostName = p.TemplActiveHostName
+	data.Edition = p.TemplEdition
+	data.EditionName = p.TemplEditionName
+	data.SidebarPrefs = p.TemplSidebarPrefs
+
 	return data
 }
 

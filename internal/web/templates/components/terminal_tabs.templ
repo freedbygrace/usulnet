@@ -122,16 +122,24 @@ templ TerminalTabs(data TerminalTabsData) {
 			</div>
 		</div>
 
-		<!-- Terminal Containers -->
+		<!-- Terminal Containers — visibility managed by switchTab() via style.display,
+		     NOT Alpine x-show, to avoid conflicts with dynamically added tabs. -->
 		<div class="flex-1 relative bg-black">
-			for _, tab := range data.Tabs {
-				<div
-					x-show={ fmt.Sprintf("activeTab === '%s'", tab.ID) }
-					x-cloak
-					:id={ fmt.Sprintf("'terminal-container-%s'", tab.ID) }
-					class="absolute inset-0"
-					data-terminal-tab={ tab.ID }
-				></div>
+			for i, tab := range data.Tabs {
+				if tab.Active || i == 0 {
+					<div
+						id={ fmt.Sprintf("terminal-container-%s", tab.ID) }
+						class="absolute inset-0"
+						data-terminal-tab={ tab.ID }
+					></div>
+				} else {
+					<div
+						id={ fmt.Sprintf("terminal-container-%s", tab.ID) }
+						class="absolute inset-0"
+						data-terminal-tab={ tab.ID }
+						style="display: none"
+					></div>
+				}
 			}
 		</div>
 
@@ -147,7 +155,7 @@ templ TerminalTabs(data TerminalTabsData) {
 					<h3 class="text-lg font-semibold text-white mb-4">Open New Terminal</h3>
 					<div
 						hx-get={ data.NewTabURL }
-						hx-trigger="load"
+						hx-trigger="intersect once"
 						hx-target="#new-tab-content"
 					>
 						<div id="new-tab-content" class="space-y-4">
@@ -172,13 +180,11 @@ templ TerminalTabs(data TerminalTabsData) {
 
 // TerminalTabsScript returns the JavaScript for the multi-tab terminal manager.
 templ TerminalTabsScript() {
-	<!-- xterm.js CSS -->
-	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css"/>
-
-	<!-- xterm.js Scripts -->
-	<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-	<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-	<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+	<!-- xterm.js (self-hosted) -->
+	<link rel="stylesheet" href="/static/vendor/xterm/css/xterm.css"/>
+	<script src="/static/vendor/xterm/lib/xterm.js"></script>
+	<script src="/static/vendor/xterm/addons/xterm-addon-fit.js"></script>
+	<script src="/static/vendor/xterm/addons/xterm-addon-web-links.js"></script>
 
 	<script>
 		function multiTabTerminal() {
@@ -188,13 +194,19 @@ templ TerminalTabsScript() {
 				newTabModalOpen: false,
 				_initialized: false,
 				_resizeHandler: null,
+				_rootEl: null,
 
 				init() {
 					if (this._initialized) return;
 					this._initialized = true;
 
+					// Store root element — $el is reliable here in init(),
+					// but inside @click handlers it resolves to the clicked
+					// element, not the component root.
+					this._rootEl = this.$el;
+
 					// Initialize tabs from DOM
-					const tabButtons = this.$el.querySelectorAll('[data-tab-id]');
+					const tabButtons = this._rootEl.querySelectorAll('[data-tab-id]');
 					tabButtons.forEach(btn => {
 						const tabId = btn.dataset.tabId;
 						const tabType = btn.dataset.tabType;
@@ -219,6 +231,11 @@ templ TerminalTabsScript() {
 							this.activeTab = tabId;
 						}
 					});
+
+					// Expose addTab globally so HTMX-injected picker buttons can call it
+					window._terminalAddTab = (id, type, targetId, name) => {
+						this.addTab(id, type, targetId, name);
+					};
 
 					// Initialize active tab terminal
 					if (this.activeTab) {
@@ -342,7 +359,9 @@ templ TerminalTabsScript() {
 
 					tab.ws.onopen = () => {
 						tab.status = 'connected';
-						tab.term.focus();
+						if (this.activeTab === tabId) {
+							tab.term.focus();
+						}
 					};
 
 					tab.ws.onmessage = (event) => {
@@ -362,9 +381,13 @@ templ TerminalTabsScript() {
 						}
 					};
 
-					tab.ws.onclose = () => {
+					tab.ws.onclose = (event) => {
 						tab.status = 'disconnected';
-						tab.term.write('\r\n\x1b[31mDisconnected\x1b[0m\r\n');
+						const graceful = (event.code === 1000 || event.code === 1001);
+						tab.term.write('\r\n\x1b[31mDisconnected' + (graceful ? '.' : ' — reconnecting...') + '\x1b[0m\r\n');
+						if (!this._destroyed && !graceful) {
+							setTimeout(() => this.connect(tabId), 3000);
+						}
 					};
 
 					tab.ws.onerror = () => {
@@ -387,6 +410,23 @@ templ TerminalTabsScript() {
 					this.activeTab = tabId;
 					const tab = this.tabs.get(tabId);
 
+					// Show/hide terminal containers (use _rootEl, not $el,
+					// because $el resolves to the clicked button in @click handlers)
+					this._rootEl.querySelectorAll('[data-terminal-tab]').forEach(el => {
+						el.style.display = (el.dataset.terminalTab === tabId) ? '' : 'none';
+					});
+
+					// Update tab button styling
+					this._rootEl.querySelectorAll('[data-tab-id]').forEach(btn => {
+						if (btn.dataset.tabId === tabId) {
+							btn.classList.add('bg-dark-700', 'text-white', 'border-primary-500');
+							btn.classList.remove('text-gray-400', 'border-transparent');
+						} else {
+							btn.classList.remove('bg-dark-700', 'text-white', 'border-primary-500');
+							btn.classList.add('text-gray-400', 'border-transparent');
+						}
+					});
+
 					// Initialize if not already
 					if (!tab.term) {
 						this.$nextTick(() => {
@@ -395,7 +435,7 @@ templ TerminalTabsScript() {
 					} else {
 						this.$nextTick(() => {
 							tab.fitAddon.fit();
-							tab.term.focus();
+							setTimeout(() => tab.term.focus(), 0);
 						});
 					}
 				},
@@ -415,7 +455,7 @@ templ TerminalTabsScript() {
 					}
 
 					// Remove tab button from DOM
-					const btn = this.$el.querySelector(`[data-tab-id="${tabId}"]`);
+					const btn = this._rootEl.querySelector(`[data-tab-id="${tabId}"]`);
 					if (btn) btn.remove();
 
 					// Remove terminal container
@@ -493,9 +533,42 @@ templ TerminalTabsScript() {
 						status: 'disconnected'
 					});
 
-					// Create DOM elements (tab button and container)
-					// This would typically be done via HTMX or a reload
-					window.location.reload();
+					// Create tab button in the tab bar
+					const tabBar = this._rootEl.querySelector('.overflow-x-auto.flex-1');
+					if (tabBar) {
+						const btn = document.createElement('button');
+						btn.setAttribute('data-tab-id', id);
+						btn.setAttribute('data-tab-type', type);
+						btn.setAttribute('data-target-id', targetId);
+						btn.setAttribute('data-tab-name', name);
+						btn.className = 'flex items-center gap-2 px-3 py-1.5 rounded-t-lg border-b-2 text-sm whitespace-nowrap transition-colors group text-gray-400 hover:text-white hover:bg-dark-700 border-transparent';
+						btn.innerHTML = '<i class="fas fa-terminal text-xs"></i>' +
+							'<span>' + name + '</span>' +
+							'<i class="fas fa-times text-xs opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity ml-1" data-close="' + id + '"></i>';
+						btn.addEventListener('click', (e) => {
+							if (e.target.dataset.close) {
+								this.closeTab(e.target.dataset.close);
+							} else {
+								this.switchTab(id);
+							}
+						});
+						tabBar.appendChild(btn);
+					}
+
+					// Create terminal container div
+					const termArea = this._rootEl.querySelector('.flex-1.relative.bg-black');
+					if (termArea) {
+						const div = document.createElement('div');
+						div.id = 'terminal-container-' + id;
+						div.className = 'absolute inset-0';
+						div.setAttribute('data-terminal-tab', id);
+						div.style.display = 'none';
+						termArea.appendChild(div);
+					}
+
+					// Switch to the new tab and initialize its terminal
+					this.switchTab(id);
+					this.newTabModalOpen = false;
 				}
 			};
 		}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -21,7 +22,10 @@ import (
 
 // MonitoringPage renders the main monitoring dashboard.
 func (h *Handler) MonitoringPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	// Use a dedicated context so browser disconnection doesn't cancel Docker calls.
+	// Total budget: 10 seconds for the entire page.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	cli, err := h.getDockerClient(r)
 	if err != nil {
@@ -29,8 +33,10 @@ func (h *Handler) MonitoringPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gather host info
-	info, err := cli.Info(ctx)
+	// Gather host info (with short timeout)
+	infoCtx, infoCancel := context.WithTimeout(ctx, 5*time.Second)
+	info, err := cli.Info(infoCtx)
+	infoCancel()
 	if err != nil {
 		h.RenderError(w, r, http.StatusInternalServerError, "Error", "Failed to get Docker info")
 		return
@@ -50,8 +56,10 @@ func (h *Handler) MonitoringPage(w http.ResponseWriter, r *http.Request) {
 		MemTotal:      uint64(info.MemTotal),
 	}
 
-	// Fetch disk usage from system df
-	du, err := cli.DiskUsage(ctx, types.DiskUsageOptions{})
+	// Fetch disk usage (non-blocking, short timeout — can be slow on busy hosts)
+	duCtx, duCancel := context.WithTimeout(ctx, 3*time.Second)
+	du, err := cli.DiskUsage(duCtx, types.DiskUsageOptions{})
+	duCancel()
 	if err == nil {
 		for _, v := range du.Volumes {
 			if v.UsageData.Size > 0 {
@@ -60,19 +68,26 @@ func (h *Handler) MonitoringPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get container list with stats snapshot
+	// Get container list with stats snapshot (concurrent)
 	containers, err := cli.ContainerList(ctx, container.ListOptions{All: false})
 	if err != nil {
 		h.RenderError(w, r, http.StatusInternalServerError, "Error", "Failed to list containers")
 		return
 	}
 
-	stats := make([]monitoring.ContainerStat, 0, len(containers))
-	for _, c := range containers {
-		cs := containerToStat(ctx, cli, c)
-		stats = append(stats, cs)
+	stats := make([]monitoring.ContainerStat, len(containers))
+	var wg sync.WaitGroup
+	for i, c := range containers {
+		wg.Add(1)
+		go func(idx int, ctr types.Container) {
+			defer wg.Done()
+			stats[idx] = containerToStat(ctx, cli, ctr)
+		}(i, c)
+	}
+	wg.Wait()
 
-		// Aggregate for host CPU/mem
+	// Aggregate for host CPU/mem
+	for _, cs := range stats {
 		host.CPUPercent += cs.CPUPercent
 		if host.MemTotal > 0 {
 			host.MemUsed += cs.MemUsage
@@ -170,16 +185,17 @@ func containerToStat(ctx context.Context, cli *dockerClient.Client, c types.Cont
 
 	// Quick stats snapshot (stream=false for a single read)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
 	statsResp, err := cli.ContainerStats(ctxTimeout, c.ID, false)
 	if err != nil {
+		cancel()
 		return cs
 	}
-	defer statsResp.Body.Close()
 
 	var stat container.StatsResponse
-	if err := decodeStats(statsResp.Body, &stat); err != nil {
+	err = decodeStats(statsResp.Body, &stat)
+	statsResp.Body.Close()
+	cancel()
+	if err != nil {
 		return cs
 	}
 

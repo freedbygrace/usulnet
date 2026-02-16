@@ -39,6 +39,7 @@ type CaptureSession struct {
 	Filter      string
 	Status      string // "running", "stopped", "completed"
 	PacketCount int64
+	FileSize    int64
 	Size        string
 	Duration    string
 	StartedAt   string
@@ -99,7 +100,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Interfaces)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 82, Col: 91}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 83, Col: 91}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -112,7 +113,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", countActive(data.Captures)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 93, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 94, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -125,7 +126,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Captures)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 104, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 105, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -138,7 +139,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(totalSize(data.Captures))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 115, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 116, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -184,7 +185,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(iface.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 144, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 145, Col: 58}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -197,7 +198,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(iface.IP)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 145, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 146, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
@@ -210,7 +211,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs("$store.capture.start('" + iface.Name + "')")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 148, Col: 63}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 149, Col: 63}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 				if templ_7745c5c3_Err != nil {
@@ -245,7 +246,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var13 templ.SafeURL
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/tools/capture/" + cap.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 174, Col: 57}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 175, Col: 57}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
@@ -271,7 +272,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var15 string
 				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(cap.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 179, Col: 57}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 180, Col: 57}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 				if templ_7745c5c3_Err != nil {
@@ -306,7 +307,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var18 string
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(cap.Status)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 181, Col: 23}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 182, Col: 23}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 				if templ_7745c5c3_Err != nil {
@@ -319,7 +320,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var19 string
 				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(cap.Interface)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 185, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 186, Col: 31}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 				if templ_7745c5c3_Err != nil {
@@ -332,7 +333,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d packets", cap.PacketCount))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 187, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 188, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
@@ -345,7 +346,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(cap.Size)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 189, Col: 26}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 190, Col: 26}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
@@ -412,7 +413,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var26 string
 				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(data.Active.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 207, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 208, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 				if templ_7745c5c3_Err != nil {
@@ -425,7 +426,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var27 string
 				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(data.Active.Filter)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 208, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 209, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 				if templ_7745c5c3_Err != nil {
@@ -443,7 +444,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 					var templ_7745c5c3_Var28 string
 					templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs("/tools/capture/" + data.Active.ID + "/stop")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 214, Col: 65}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 215, Col: 65}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 					if templ_7745c5c3_Err != nil {
@@ -461,7 +462,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 					var templ_7745c5c3_Var29 templ.SafeURL
 					templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/tools/capture/" + data.Active.ID + "/download"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 222, Col: 81}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 223, Col: 81}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 					if templ_7745c5c3_Err != nil {
@@ -474,7 +475,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 					var templ_7745c5c3_Var30 string
 					templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs("/tools/capture/" + data.Active.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 228, Col: 57}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 229, Col: 57}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 					if templ_7745c5c3_Err != nil {
@@ -492,7 +493,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(data.Active.Interface)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 243, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 244, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 				if templ_7745c5c3_Err != nil {
@@ -505,7 +506,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var32 string
 				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Active.PacketCount))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 247, Col: 110}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 248, Col: 110}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 				if templ_7745c5c3_Err != nil {
@@ -518,7 +519,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var33 string
 				templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(data.Active.Size)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 251, Col: 81}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 252, Col: 81}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 				if templ_7745c5c3_Err != nil {
@@ -531,7 +532,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var34 string
 				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(data.Active.Duration)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 255, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 256, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 				if templ_7745c5c3_Err != nil {
@@ -544,7 +545,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 				var templ_7745c5c3_Var35 string
 				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(data.Active.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 263, Col: 40}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 264, Col: 40}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 				if templ_7745c5c3_Err != nil {
@@ -567,7 +568,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 					var templ_7745c5c3_Var36 string
 					templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(data.Active.Status)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 273, Col: 41}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 274, Col: 41}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 					if templ_7745c5c3_Err != nil {
@@ -624,7 +625,7 @@ func PacketCapture(data PacketCaptureData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<script>\n\t\t\t\tdocument.addEventListener('alpine:init', () => {\n\t\t\t\t\tAlpine.store('capture', {\n\t\t\t\t\t\tstart(iface) {\n\t\t\t\t\t\t\tdocument.getElementById('capture-interface').value = iface;\n\t\t\t\t\t\t\tdocument.getElementById('new-capture-modal').classList.remove('hidden');\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t});\n\n\t\t\t\tfunction captureApp() {\n\t\t\t\t\treturn {\n\t\t\t\t\t\tws: null,\n\t\t\t\t\t\tinit() {\n\t\t\t\t\t\t\tconst el = document.getElementById('capture-live');\n\t\t\t\t\t\t\tif (el && el.dataset.captureId) {\n\t\t\t\t\t\t\t\tthis.connectWS(el.dataset.captureId);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t},\n\t\t\t\t\t\tconnectWS(captureId) {\n\t\t\t\t\t\t\tconst protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';\n\t\t\t\t\t\t\tthis.ws = new WebSocket(protocol + '//' + window.location.host + '/ws/capture/' + captureId);\n\t\t\t\t\t\t\tthis.ws.onmessage = (e) => {\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tconst msg = JSON.parse(e.data);\n\t\t\t\t\t\t\t\t\tif (msg.type === 'stats') {\n\t\t\t\t\t\t\t\t\t\tconst packetEl = document.getElementById('live-packet-count');\n\t\t\t\t\t\t\t\t\t\tconst sizeEl = document.getElementById('live-file-size');\n\t\t\t\t\t\t\t\t\t\tif (packetEl) packetEl.textContent = msg.packet_count;\n\t\t\t\t\t\t\t\t\t\tif (sizeEl) sizeEl.textContent = this.formatSize(msg.file_size);\n\t\t\t\t\t\t\t\t\t} else if (msg.type === 'finished') {\n\t\t\t\t\t\t\t\t\t\tconst logDiv = document.getElementById('capture-log');\n\t\t\t\t\t\t\t\t\t\tif (logDiv) {\n\t\t\t\t\t\t\t\t\t\t\tlogDiv.innerHTML = '<div class=\"p-4 text-center text-yellow-400\"><i class=\"fas fa-check-circle mr-2\"></i>' + (msg.message || 'Capture finished') + '</div>';\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tsetTimeout(function() { location.reload(); }, 2000);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch(err) {}\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\tthis.ws.onclose = () => {\n\t\t\t\t\t\t\t\tconst logDiv = document.getElementById('capture-log');\n\t\t\t\t\t\t\t\tif (logDiv && !logDiv.innerHTML.includes('finished')) {\n\t\t\t\t\t\t\t\t\tlogDiv.innerHTML += '<div class=\"p-2 text-gray-500 text-xs\">Stream disconnected</div>';\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t},\n\t\t\t\t\t\tformatSize(bytes) {\n\t\t\t\t\t\t\tif (bytes === 0) return '0 B';\n\t\t\t\t\t\t\tconst k = 1024;\n\t\t\t\t\t\t\tconst sizes = ['B', 'KB', 'MB', 'GB'];\n\t\t\t\t\t\t\tconst i = Math.floor(Math.log(bytes) / Math.log(k));\n\t\t\t\t\t\t\treturn parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];\n\t\t\t\t\t\t},\n\t\t\t\t\t\tdestroy() {\n\t\t\t\t\t\t\tif (this.ws) this.ws.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t}\n\t\t\t</script></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<script>\n\t\t\t\tdocument.addEventListener('alpine:init', () => {\n\t\t\t\t\tAlpine.store('capture', {\n\t\t\t\t\t\tstart(iface) {\n\t\t\t\t\t\t\tdocument.getElementById('capture-interface').value = iface;\n\t\t\t\t\t\t\tdocument.getElementById('new-capture-modal').classList.remove('hidden');\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t});\n\n\t\t\t\tfunction captureApp() {\n\t\t\t\t\treturn {\n\t\t\t\t\t\tws: null,\n\t\t\t\t\t\tinit() {\n\t\t\t\t\t\t\tconst el = document.getElementById('capture-live');\n\t\t\t\t\t\t\tif (el && el.dataset.captureId) {\n\t\t\t\t\t\t\t\tthis.connectWS(el.dataset.captureId);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t},\n\t\t\t\t\t\tconnectWS(captureId) {\n\t\t\t\t\t\t\tconst protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';\n\t\t\t\t\t\t\tthis.ws = new WebSocket(protocol + '//' + window.location.host + '/ws/capture/' + captureId);\n\t\t\t\t\t\t\tthis.ws.onmessage = (e) => {\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tconst msg = JSON.parse(e.data);\n\t\t\t\t\t\t\t\t\tif (msg.type === 'stats') {\n\t\t\t\t\t\t\t\t\t\tconst packetEl = document.getElementById('live-packet-count');\n\t\t\t\t\t\t\t\t\t\tconst sizeEl = document.getElementById('live-file-size');\n\t\t\t\t\t\t\t\t\t\tif (packetEl) packetEl.textContent = msg.packet_count;\n\t\t\t\t\t\t\t\t\t\tif (sizeEl) sizeEl.textContent = this.formatSize(msg.file_size);\n\t\t\t\t\t\t\t\t\t} else if (msg.type === 'finished') {\n\t\t\t\t\t\t\t\t\t\tconst logDiv = document.getElementById('capture-log');\n\t\t\t\t\t\t\t\t\t\tif (logDiv) {\n\t\t\t\t\t\t\t\t\t\t\tlogDiv.innerHTML = '<div class=\"p-4 text-center text-yellow-400\"><i class=\"fas fa-check-circle mr-2\"></i>' + (msg.message || 'Capture finished') + '</div>';\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tsetTimeout(function() { location.reload(); }, 2000);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch(err) {}\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\tthis.ws.onclose = (event) => {\n\t\t\t\t\t\t\t\tconst logDiv = document.getElementById('capture-log');\n\t\t\t\t\t\t\t\tconst graceful = (event.code === 1000 || event.code === 1001);\n\t\t\t\t\t\t\t\tif (!graceful && logDiv && !logDiv.innerHTML.includes('finished')) {\n\t\t\t\t\t\t\t\t\tlogDiv.innerHTML += '<div class=\"p-2 text-yellow-400 text-xs\"><i class=\"fas fa-sync-alt mr-1\"></i>Stream disconnected — reconnecting...</div>';\n\t\t\t\t\t\t\t\t\tsetTimeout(() => this.connectWS(captureId), 3000);\n\t\t\t\t\t\t\t\t} else if (logDiv && !logDiv.innerHTML.includes('finished')) {\n\t\t\t\t\t\t\t\t\tlogDiv.innerHTML += '<div class=\"p-2 text-gray-500 text-xs\">Stream disconnected</div>';\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t},\n\t\t\t\t\t\tformatSize(bytes) {\n\t\t\t\t\t\t\tif (bytes === 0) return '0 B';\n\t\t\t\t\t\t\tconst k = 1024;\n\t\t\t\t\t\t\tconst sizes = ['B', 'KB', 'MB', 'GB'];\n\t\t\t\t\t\t\tconst i = Math.floor(Math.log(bytes) / Math.log(k));\n\t\t\t\t\t\t\treturn parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];\n\t\t\t\t\t\t},\n\t\t\t\t\t\tdestroy() {\n\t\t\t\t\t\t\tif (this.ws) this.ws.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t}\n\t\t\t</script></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -666,7 +667,7 @@ func filterCard(title, filter, description string) templ.Component {
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 383, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 388, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
@@ -679,7 +680,7 @@ func filterCard(title, filter, description string) templ.Component {
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(filter)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 384, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 389, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 		if templ_7745c5c3_Err != nil {
@@ -692,7 +693,7 @@ func filterCard(title, filter, description string) templ.Component {
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 385, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 390, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 		if templ_7745c5c3_Err != nil {
@@ -734,7 +735,7 @@ func newCaptureModal(csrfToken string, interfaces []NetworkInterface) templ.Comp
 		var templ_7745c5c3_Var42 string
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(csrfToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 405, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 410, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 		if templ_7745c5c3_Err != nil {
@@ -752,7 +753,7 @@ func newCaptureModal(csrfToken string, interfaces []NetworkInterface) templ.Comp
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(iface.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 418, Col: 34}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 423, Col: 34}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
@@ -765,7 +766,7 @@ func newCaptureModal(csrfToken string, interfaces []NetworkInterface) templ.Comp
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(iface.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 418, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 423, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 			if templ_7745c5c3_Err != nil {
@@ -778,7 +779,7 @@ func newCaptureModal(csrfToken string, interfaces []NetworkInterface) templ.Comp
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(iface.IP)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 418, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/tools/capture.templ`, Line: 423, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -812,11 +813,31 @@ func countActive(captures []CaptureSession) int {
 }
 
 func totalSize(captures []CaptureSession) string {
-	// In production, calculate actual total
 	if len(captures) == 0 {
 		return "0 B"
 	}
-	return "0 B"
+	var total int64
+	for _, c := range captures {
+		total += c.FileSize
+	}
+	if total == 0 {
+		return "0 B"
+	}
+	const (
+		kb int64 = 1024
+		mb       = 1024 * kb
+		gb       = 1024 * mb
+	)
+	switch {
+	case total >= gb:
+		return fmt.Sprintf("%.1f GB", float64(total)/float64(gb))
+	case total >= mb:
+		return fmt.Sprintf("%.1f MB", float64(total)/float64(mb))
+	case total >= kb:
+		return fmt.Sprintf("%.1f KB", float64(total)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", total)
+	}
 }
 
 func ifaceStatusColor(status string) string {

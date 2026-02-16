@@ -221,6 +221,27 @@ func (c *Creator) createVolumeBackup(ctx context.Context, backup *models.Backup,
 		})
 	}
 
+	// Check if the volume path is directly accessible (host install).
+	// If not (containerized install), use Docker API to copy volume data.
+	if _, statErr := os.Stat(volumePath); statErr != nil && os.IsNotExist(statErr) {
+		c.logger.Info("volume path not accessible locally, using Docker API",
+			"volume", opts.TargetID,
+			"path", volumePath,
+		)
+
+		tmpDir, mkErr := os.MkdirTemp("", "usulnet-vol-backup-*")
+		if mkErr != nil {
+			return nil, errors.Wrap(mkErr, errors.CodeBackupFailed, "failed to create temp directory")
+		}
+		defer os.RemoveAll(tmpDir)
+
+		if copyErr := c.volumeProvider.CopyVolumeData(ctx, opts.HostID, opts.TargetID, tmpDir); copyErr != nil {
+			return nil, errors.Wrap(copyErr, errors.CodeBackupFailed, "failed to copy volume data via Docker API")
+		}
+
+		volumePath = tmpDir
+	}
+
 	// Create archive
 	return c.createArchive(ctx, backup, volumePath, opts)
 }

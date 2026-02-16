@@ -81,15 +81,9 @@ func (h *Handler) ImageDetailTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := images.ImageDetailData{
-		PageData: layouts.PageData{
-			Title:     imgData.PrimaryTag,
-			Active:    "images",
-			User:      h.getUserData(r),
-			Stats:     h.getStatsData(ctx),
-			CSRFToken: GetCSRFTokenFromContext(ctx),
-		},
-		Image: imgData,
-		Tab:   tab,
+		PageData: h.prepareTemplPageData(r, imgData.PrimaryTag, "images"),
+		Image:    imgData,
+		Tab:      tab,
 	}
 
 	component := images.ImageDetail(data)
@@ -145,15 +139,9 @@ func (h *Handler) VolumeDetailTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := volumes.VolumeDetailData{
-		PageData: layouts.PageData{
-			Title:     volume.Name,
-			Active:    "volumes",
-			User:      h.getUserData(r),
-			Stats:     h.getStatsData(ctx),
-			CSRFToken: GetCSRFTokenFromContext(ctx),
-		},
-		Volume: volData,
-		Tab:    tab,
+		PageData: h.prepareTemplPageData(r, volume.Name, "volumes"),
+		Volume:   volData,
+		Tab:      tab,
 	}
 
 	component := volumes.VolumeDetail(data)
@@ -241,15 +229,9 @@ func (h *Handler) NetworkDetailTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := networks.NetworkDetailData{
-		PageData: layouts.PageData{
-			Title:     network.Name,
-			Active:    "networks",
-			User:      h.getUserData(r),
-			Stats:     h.getStatsData(ctx),
-			CSRFToken: GetCSRFTokenFromContext(ctx),
-		},
-		Network: netData,
-		Tab:     tab,
+		PageData: h.prepareTemplPageData(r, network.Name, "networks"),
+		Network:  netData,
+		Tab:      tab,
 	}
 
 	component := networks.NetworkDetail(data)

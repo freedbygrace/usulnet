@@ -6,6 +6,8 @@ package web
 
 import (
 	"time"
+
+	"github.com/fr4nsys/usulnet/internal/web/templates/types"
 )
 
 // PageData contains all data passed to page templates.
@@ -73,6 +75,14 @@ type PageData struct {
 	ProxyHosts       interface{} `json:"proxy_hosts,omitempty"`
 	Logs             interface{} `json:"logs,omitempty"`
 	LogContainers    interface{} `json:"log_containers,omitempty"`
+
+	// Templ layout fields (populated by preparePageData, used by ToTemplPageData)
+	TemplHosts          []types.HostSelectorItem  `json:"-"`
+	TemplActiveHostID   string                    `json:"-"`
+	TemplActiveHostName string                    `json:"-"`
+	TemplEdition        string                    `json:"-"`
+	TemplEditionName    string                    `json:"-"`
+	TemplSidebarPrefs   *types.SidebarPreferences `json:"-"`
 
 	// Pagination
 	Pagination *PaginationData `json:"pagination,omitempty"`
@@ -356,6 +366,7 @@ type ContainerSecurityView struct {
 // IssueView for security issue display.
 type IssueView struct {
 	ID             string  `json:"id"`
+	ContainerID    string  `json:"container_id,omitempty"`
 	Severity       string  `json:"severity"`
 	Category       string  `json:"category"`
 	Title          string  `json:"title"`

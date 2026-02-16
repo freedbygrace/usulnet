@@ -145,6 +145,10 @@ const (
 	CheckImageVulnerability = "CVE_001"
 	CheckLoggingDriver      = "LOG_001"
 	CheckRestartPolicy      = "REL_001"
+	CheckNamespaceSharing   = "NS_001"
+	CheckDockerSocket       = "SOCK_001"
+	CheckLatestTag          = "IMG_001"
+	CheckPrivilegedPorts    = "PORT_003"
 )
 
 // DefaultSecurityChecks returns the default security checks
@@ -291,6 +295,50 @@ func DefaultSecurityChecks() []SecurityCheck {
 			IsEnabled:   true,
 			FixCommand:  "Add restart: unless-stopped in compose",
 			DocURL:      "https://docs.docker.com/config/containers/start-containers-automatically/",
+		},
+		{
+			ID:          CheckNamespaceSharing,
+			Name:        "Namespace Sharing",
+			Description: "Container should not share host PID, network, or IPC namespaces unless necessary",
+			Category:    IssueCategorySecurity,
+			Severity:    IssueSeverityHigh,
+			ScoreImpact: 15,
+			IsEnabled:   true,
+			FixCommand:  "Remove pid: host, network_mode: host, or ipc: host from compose",
+			DocURL:      "https://docs.docker.com/engine/reference/run/#pid-settings---pid",
+		},
+		{
+			ID:          CheckDockerSocket,
+			Name:        "Docker Socket Mounted",
+			Description: "Docker socket should not be mounted into containers as it gives full Docker control",
+			Category:    IssueCategorySecurity,
+			Severity:    IssueSeverityCritical,
+			ScoreImpact: 25,
+			IsEnabled:   true,
+			FixCommand:  "Remove /var/run/docker.sock mount or use Docker-in-Docker with proper isolation",
+			DocURL:      "https://docs.docker.com/engine/security/#docker-daemon-attack-surface",
+		},
+		{
+			ID:          CheckLatestTag,
+			Name:        "Latest Tag Usage",
+			Description: "Container image should use a specific version tag instead of 'latest' to prevent drift",
+			Category:    IssueCategoryReliability,
+			Severity:    IssueSeverityMedium,
+			ScoreImpact: 10,
+			IsEnabled:   true,
+			FixCommand:  "Pin image to a specific version tag (e.g., nginx:1.25 instead of nginx:latest)",
+			DocURL:      "https://docs.docker.com/develop/security-best-practices/",
+		},
+		{
+			ID:          CheckPrivilegedPorts,
+			Name:        "Privileged Port Exposure",
+			Description: "Container exposes ports below 1024 which typically require root privileges",
+			Category:    IssueCategorySecurity,
+			Severity:    IssueSeverityLow,
+			ScoreImpact: 5,
+			IsEnabled:   true,
+			FixCommand:  "Map privileged ports to unprivileged host ports if possible",
+			DocURL:      "https://docs.docker.com/engine/reference/run/#expose-incoming-ports",
 		},
 	}
 }

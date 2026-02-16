@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
+
+	dockertypes "github.com/docker/docker/api/types"
 
 	hdtmpl "github.com/fr4nsys/usulnet/internal/web/templates/pages/healthdash"
 )
@@ -37,6 +40,37 @@ func (h *Handler) HealthDashTempl(w http.ResponseWriter, r *http.Request) {
 	// Try to get Docker client for detailed health check info
 	dockerClient, _ := containerSvc.GetDockerClient(ctx)
 
+	// Pre-fetch all running container inspections in parallel to avoid N+1 sequential calls
+	inspectCache := make(map[string]dockertypes.ContainerJSON)
+	if dockerClient != nil {
+		var runningIDs []string
+		for _, c := range containers {
+			if c.State == "running" {
+				runningIDs = append(runningIDs, c.ID)
+			}
+		}
+		if len(runningIDs) > 0 {
+			var mu sync.Mutex
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, 10) // limit concurrent Docker API calls
+			for _, id := range runningIDs {
+				wg.Add(1)
+				go func(containerID string) {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+					data, err := dockerClient.ContainerInspectRaw(ctx, containerID)
+					if err == nil {
+						mu.Lock()
+						inspectCache[containerID] = data
+						mu.Unlock()
+					}
+				}(id)
+			}
+			wg.Wait()
+		}
+	}
+
 	stats := hdtmpl.HealthStats{
 		TotalContainers: len(containers),
 	}
@@ -63,61 +97,58 @@ func (h *Handler) HealthDashTempl(w http.ResponseWriter, r *http.Request) {
 			stats.NoHealthCheck++
 		}
 
-		// Get detailed health check info from Docker inspect
-		if dockerClient != nil && c.State == "running" {
-			inspectData, err := dockerClient.ContainerInspectRaw(ctx, c.ID)
-			if err == nil {
-				// Extract health check config
-				if inspectData.Config != nil && inspectData.Config.Healthcheck != nil {
-					hcConfig := inspectData.Config.Healthcheck
-					hc.HealthCheck = hdtmpl.HealthCheckConfig{
-						IsConfigured: true,
-						Retries:      hcConfig.Retries,
-					}
-					if len(hcConfig.Test) > 0 {
-						// First element is the check type (CMD, CMD-SHELL, NONE)
-						if hcConfig.Test[0] == "CMD-SHELL" && len(hcConfig.Test) > 1 {
-							hc.HealthCheck.Test = hcConfig.Test[1]
-						} else if hcConfig.Test[0] == "CMD" && len(hcConfig.Test) > 1 {
-							hc.HealthCheck.Test = strings.Join(hcConfig.Test[1:], " ")
-						} else {
-							hc.HealthCheck.Test = strings.Join(hcConfig.Test, " ")
-						}
-					}
-					if hcConfig.Interval > 0 {
-						hc.HealthCheck.Interval = formatHealthDuration(hcConfig.Interval)
-					}
-					if hcConfig.Timeout > 0 {
-						hc.HealthCheck.Timeout = formatHealthDuration(hcConfig.Timeout)
-					}
-					if hcConfig.StartPeriod > 0 {
-						hc.HealthCheck.StartPeriod = formatHealthDuration(hcConfig.StartPeriod)
+		// Use pre-fetched inspect data for detailed health check info
+		if inspectData, ok := inspectCache[c.ID]; ok {
+			// Extract health check config
+			if inspectData.Config != nil && inspectData.Config.Healthcheck != nil {
+				hcConfig := inspectData.Config.Healthcheck
+				hc.HealthCheck = hdtmpl.HealthCheckConfig{
+					IsConfigured: true,
+					Retries:      hcConfig.Retries,
+				}
+				if len(hcConfig.Test) > 0 {
+					// First element is the check type (CMD, CMD-SHELL, NONE)
+					if hcConfig.Test[0] == "CMD-SHELL" && len(hcConfig.Test) > 1 {
+						hc.HealthCheck.Test = hcConfig.Test[1]
+					} else if hcConfig.Test[0] == "CMD" && len(hcConfig.Test) > 1 {
+						hc.HealthCheck.Test = strings.Join(hcConfig.Test[1:], " ")
+					} else {
+						hc.HealthCheck.Test = strings.Join(hcConfig.Test, " ")
 					}
 				}
+				if hcConfig.Interval > 0 {
+					hc.HealthCheck.Interval = formatHealthDuration(hcConfig.Interval)
+				}
+				if hcConfig.Timeout > 0 {
+					hc.HealthCheck.Timeout = formatHealthDuration(hcConfig.Timeout)
+				}
+				if hcConfig.StartPeriod > 0 {
+					hc.HealthCheck.StartPeriod = formatHealthDuration(hcConfig.StartPeriod)
+				}
+			}
 
-				// Extract health check logs
-				if inspectData.State != nil && inspectData.State.Health != nil {
-					hc.FailingStreak = inspectData.State.Health.FailingStreak
-					for _, logEntry := range inspectData.State.Health.Log {
-						entry := hdtmpl.HealthLogEntry{
-							ExitCode: logEntry.ExitCode,
-							Output:   truncateHealthOutput(logEntry.Output),
-						}
-						if !logEntry.Start.IsZero() {
-							entry.Start = logEntry.Start.Format("Jan 02 15:04:05")
-						}
-						if !logEntry.End.IsZero() {
-							entry.End = logEntry.End.Format("Jan 02 15:04:05")
-						}
-						hc.HealthLogs = append(hc.HealthLogs, entry)
+			// Extract health check logs
+			if inspectData.State != nil && inspectData.State.Health != nil {
+				hc.FailingStreak = inspectData.State.Health.FailingStreak
+				for _, logEntry := range inspectData.State.Health.Log {
+					entry := hdtmpl.HealthLogEntry{
+						ExitCode: logEntry.ExitCode,
+						Output:   truncateHealthOutput(logEntry.Output),
 					}
-					// Show most recent logs first
-					for i, j := 0, len(hc.HealthLogs)-1; i < j; i, j = i+1, j-1 {
-						hc.HealthLogs[i], hc.HealthLogs[j] = hc.HealthLogs[j], hc.HealthLogs[i]
+					if !logEntry.Start.IsZero() {
+						entry.Start = logEntry.Start.Format("Jan 02 15:04:05")
 					}
-					if len(hc.HealthLogs) > 0 {
-						hc.LastCheckedAt = hc.HealthLogs[0].Start
+					if !logEntry.End.IsZero() {
+						entry.End = logEntry.End.Format("Jan 02 15:04:05")
 					}
+					hc.HealthLogs = append(hc.HealthLogs, entry)
+				}
+				// Show most recent logs first
+				for i, j := 0, len(hc.HealthLogs)-1; i < j; i, j = i+1, j-1 {
+					hc.HealthLogs[i], hc.HealthLogs[j] = hc.HealthLogs[j], hc.HealthLogs[i]
+				}
+				if len(hc.HealthLogs) > 0 {
+					hc.LastCheckedAt = hc.HealthLogs[0].Start
 				}
 			}
 		} else if c.Health != "" && c.Health != "none" {

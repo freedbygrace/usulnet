@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,7 +116,17 @@ func (h *Handler) WSEditorNvim(w http.ResponseWriter, r *http.Request) {
 
 	// ── Upgrade WebSocket ────────────────────────────────────────────
 	upgrader := websocket.Upgrader{
-		CheckOrigin:     func(r *http.Request) bool { return true },
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			return u.Host == r.Host
+		},
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 	}
@@ -453,5 +464,6 @@ func editorWSSendError(conn *websocket.Conn, msg string) {
 // editorWSSendJSON sends a typed JSON message over the editor WebSocket.
 func editorWSSendJSON(conn *websocket.Conn, msg wsEditorMsg) {
 	data, _ := json.Marshal(msg)
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	conn.WriteMessage(websocket.TextMessage, data)
 }

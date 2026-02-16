@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/services/update"
@@ -34,38 +35,55 @@ func NewUpdateHandler(updateService *update.Service, log *logger.Logger) *Update
 func (h *UpdateHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Check for updates
-	r.Post("/check/{hostID}", h.CheckForUpdates)
-	r.Post("/check/{hostID}/{containerID}", h.CheckContainerForUpdate)
-
-	// Apply update
-	r.Post("/apply/{hostID}", h.ApplyUpdate)
-
-	// Rollback
-	r.Post("/rollback", h.RollbackUpdate)
-
-	// History
+	// Read-only routes (viewer+)
 	r.Get("/", h.ListUpdates)
 	r.Get("/history/{hostID}", h.GetHistory)
 	r.Get("/history/{hostID}/{targetID}", h.GetTargetHistory)
 	r.Get("/stats", h.GetStats)
 	r.Get("/stats/{hostID}", h.GetHostStats)
 
+	// Operator+ for mutations
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireOperator)
+
+		// Check for updates
+		r.Post("/check/{hostID}", h.CheckForUpdates)
+		r.Post("/check/{hostID}/{containerID}", h.CheckContainerForUpdate)
+
+		// Apply update
+		r.Post("/apply/{hostID}", h.ApplyUpdate)
+
+		// Rollback
+		r.Post("/rollback", h.RollbackUpdate)
+	})
+
 	// Policies
 	r.Route("/policies", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.ListPolicies)
 		r.Get("/{hostID}", h.ListHostPolicies)
-		r.Post("/{hostID}", h.CreatePolicy)
 		r.Get("/{hostID}/{policyID}", h.GetPolicy)
-		r.Put("/{hostID}/{policyID}", h.UpdatePolicy)
-		r.Delete("/{hostID}/{policyID}", h.DeletePolicy)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/{hostID}", h.CreatePolicy)
+			r.Put("/{hostID}/{policyID}", h.UpdatePolicy)
+			r.Delete("/{hostID}/{policyID}", h.DeletePolicy)
+		})
 	})
 
 	// Webhooks
 	r.Route("/webhooks", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/{hostID}", h.ListWebhooks)
-		r.Post("/{hostID}", h.CreateWebhook)
-		r.Delete("/{hostID}/{webhookID}", h.DeleteWebhook)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/{hostID}", h.CreateWebhook)
+			r.Delete("/{hostID}/{webhookID}", h.DeleteWebhook)
+		})
 	})
 
 	return r

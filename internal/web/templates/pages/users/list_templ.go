@@ -652,7 +652,7 @@ func New(data UserNewData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\"><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Username</label> <input type=\"text\" name=\"username\" required minlength=\"3\" maxlength=\"50\" class=\"input\" placeholder=\"e.g. jsmith\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Email</label> <input type=\"email\" name=\"email\" class=\"input\" placeholder=\"Optional\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Password</label> <input type=\"password\" name=\"password\" required minlength=\"8\" class=\"input\"><p class=\"text-xs text-gray-500 mt-1\">Minimum 8 characters</p></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Role</label> <select name=\"role_id\" class=\"input\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\"><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Username</label> <input type=\"text\" name=\"username\" required minlength=\"3\" maxlength=\"50\" class=\"input\" placeholder=\"e.g. jsmith\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Email</label> <input type=\"email\" name=\"email\" class=\"input\" placeholder=\"Optional\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Password</label> <input type=\"password\" name=\"password\" required minlength=\"8\" class=\"input\"><p class=\"text-xs text-gray-500 mt-1\">Minimum 8 characters</p></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Role</label> <select name=\"role\" class=\"input\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -662,9 +662,9 @@ func New(data UserNewData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var38 string
-				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(role.ID)
+				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(role.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/users/list.templ`, Line: 263, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/users/list.templ`, Line: 263, Col: 32}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 				if templ_7745c5c3_Err != nil {
@@ -849,7 +849,7 @@ func Edit(data UserEditData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "\" class=\"input\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Role</label> <select name=\"role_id\" class=\"input\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "\" class=\"input\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Role</label> <select name=\"role\" class=\"input\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -859,9 +859,9 @@ func Edit(data UserEditData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var49 string
-				templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(role.ID)
+				templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(role.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/users/list.templ`, Line: 322, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/users/list.templ`, Line: 322, Col: 32}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 				if templ_7745c5c3_Err != nil {
@@ -871,7 +871,7 @@ func Edit(data UserEditData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if data.User.RoleID == role.ID {
+				if data.User.RoleName == role.Name {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, " selected")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err

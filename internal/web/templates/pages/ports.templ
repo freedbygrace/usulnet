@@ -10,6 +10,7 @@ type PortsData struct {
 	Ports           []PortMapping
 	Conflicts       []PortConflict
 	Recommendations []PortRecommendation
+	Error           string
 }
 
 type PortMapping struct {
@@ -30,6 +31,7 @@ type PortConflict struct {
 }
 
 type PortRecommendation struct {
+	ContainerID   string
 	ContainerName string
 	Port          int
 	Issue         string
@@ -59,6 +61,18 @@ templ Ports(data PortsData) {
 					<p class="text-gray-400 mt-1">Monitor exposed ports and detect conflicts</p>
 				</div>
 			</div>
+
+			if data.Error != "" {
+				<div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+					<div class="flex items-center gap-3">
+						<i class="fas fa-exclamation-circle text-red-400 text-xl"></i>
+						<div>
+							<h3 class="text-white font-medium">Failed to load port data</h3>
+							<p class="text-gray-400 text-sm mt-1">{ data.Error }</p>
+						</div>
+					</div>
+				</div>
+			}
 
 			<!-- Conflicts -->
 			if len(data.Conflicts) > 0 {
@@ -101,7 +115,7 @@ templ Ports(data PortsData) {
 									<p class="text-sm text-yellow-400">{ rec.Issue }</p>
 									<p class="text-sm text-gray-400 mt-1">{ rec.Suggestion }</p>
 								</div>
-								<button class="btn-secondary text-sm">Fix</button>
+								<a href={ templ.SafeURL("/containers/" + rec.ContainerID + "/settings") } class="btn-secondary text-sm" title="Changing port bindings requires container recreation">Configure</a>
 							</div>
 						}
 					</div>
@@ -159,9 +173,9 @@ templ Ports(data PortsData) {
 									</td>
 									<td>
 										if port.ExposureLevel == "internet" {
-											<button class="text-sm text-yellow-400 hover:text-yellow-300" title="Change to localhost">
-												Restrict
-											</button>
+											<a href={ templ.SafeURL("/containers/" + port.ContainerID + "/settings") } class="text-sm text-yellow-400 hover:text-yellow-300" title="Changing port bindings requires container recreation">
+												Configure
+											</a>
 										}
 									</td>
 								</tr>

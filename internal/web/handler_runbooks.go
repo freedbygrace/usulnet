@@ -37,7 +37,11 @@ func (h *Handler) RunbooksTempl(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Error("Failed to list runbooks", "error", err)
 		} else {
+			// Build runbook name lookup for execution display
+			rbNameMap := make(map[string]string) // runbook ID → name
 			for _, rb := range rbs {
+				rbNameMap[rb.ID.String()] = rb.Name
+
 				var steps []models.RunbookStep
 				if rb.Steps != nil {
 					if err := json.Unmarshal(rb.Steps, &steps); err != nil {
@@ -56,6 +60,35 @@ func (h *Handler) RunbooksTempl(w http.ResponseWriter, r *http.Request) {
 					CreatedAt:   rb.CreatedAt.Format("2006-01-02 15:04"),
 					UpdatedAt:   rb.UpdatedAt.Format("2006-01-02 15:04"),
 				})
+			}
+
+			// Populate execution history
+			if execs, execErr := h.runbookRepo.ListRecentExecutions(r.Context(), 50); execErr == nil {
+				for _, e := range execs {
+					item := runbooks.ExecutionItem{
+						ID:        e.ID.String(),
+						Status:    e.Status,
+						Trigger:   e.Trigger,
+						StartedAt: e.StartedAt.Format("2006-01-02 15:04:05"),
+					}
+					if name, ok := rbNameMap[e.RunbookID.String()]; ok {
+						item.RunbookName = name
+					} else {
+						item.RunbookName = e.RunbookID.String()[:8]
+					}
+					if e.FinishedAt != nil {
+						item.FinishedAt = e.FinishedAt.Format("2006-01-02 15:04:05")
+						duration := e.FinishedAt.Sub(e.StartedAt)
+						if duration < time.Second {
+							item.Duration = fmt.Sprintf("%dms", duration.Milliseconds())
+						} else {
+							item.Duration = fmt.Sprintf("%.1fs", duration.Seconds())
+						}
+					}
+					execItems = append(execItems, item)
+				}
+			} else {
+				slog.Error("Failed to list executions", "error", execErr)
 			}
 		}
 	}
@@ -201,6 +234,7 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 	// Execute steps sequentially
 	stepResults := make([]map[string]interface{}, 0, len(steps))
 	execStatus := "completed"
+	hasStepFailures := false
 
 	for _, step := range steps {
 		stepStart := time.Now()
@@ -283,14 +317,20 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 		result["finished_at"] = time.Now().Format(time.RFC3339)
 		stepResults = append(stepResults, result)
 
-		// Check if step failed and on_failure is "stop"
-		if result["status"] == "failed" && step.OnFailure == "stop" {
-			execStatus = "failed"
-			break
+		// Track step failures
+		if result["status"] == "failed" {
+			hasStepFailures = true
+			if step.OnFailure == "stop" {
+				execStatus = "failed"
+				break
+			}
 		}
 	}
 
 	// Finalize execution
+	if hasStepFailures && execStatus != "failed" {
+		execStatus = "partial_failure"
+	}
 	now := time.Now()
 	exec.FinishedAt = &now
 	exec.Status = execStatus
@@ -306,9 +346,12 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Runbook executed", "id", id, "name", rb.Name, "status", execStatus,
 		"steps", len(steps), "results", len(stepResults))
 
-	if execStatus == "completed" {
+	switch execStatus {
+	case "completed":
 		h.setFlash(w, r, "success", "Runbook '"+rb.Name+"' executed successfully")
-	} else {
+	case "partial_failure":
+		h.setFlash(w, r, "warning", "Runbook '"+rb.Name+"' completed with step failures")
+	default:
 		h.setFlash(w, r, "error", "Runbook '"+rb.Name+"' execution failed")
 	}
 	h.redirect(w, r, "/runbooks?tab=executions")

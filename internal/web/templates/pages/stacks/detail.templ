@@ -42,7 +42,7 @@ type VersionInfo struct {
 
 templ Detail(data StackDetailData) {
 	@layouts.Base(data.PageData) {
-		<div class="space-y-6" x-data="stackDetail()" data-stack-name={ data.Stack.Name }>
+		<div class="space-y-6" x-data="stackDetail()" data-stack-name={ data.Stack.Name } data-stack-id={ data.Stack.ID }>
 			<!-- Header -->
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-4">
@@ -385,7 +385,7 @@ templ Detail(data StackDetailData) {
 		</div>
 
 		<!-- Monaco Editor CDN -->
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+		<script src="/static/vendor/monaco-editor/min/vs/loader.js"></script>
 		<script>
 			function stackDetail() {
 				return {
@@ -399,16 +399,18 @@ templ Detail(data StackDetailData) {
 					monacoDiffEditor: null,
 					monacoReady: false,
 					stackName: '',
+					stackID: '',
 					currentCompose: '',
 
 					init() {
 						this.stackName = this.$el.dataset.stackName || '';
+						this.stackID = this.$el.dataset.stackId || '';
 						this.currentCompose = document.getElementById('compose-content')?.textContent || '';
 						this.loadMonaco();
 					},
 
 					loadMonaco() {
-						require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' }});
+						require.config({ paths: { 'vs': '/static/vendor/monaco-editor/min/vs' }});
 						require(['vs/editor/editor.main'], () => {
 							monaco.editor.defineTheme('usulnet-dark', {
 								base: 'vs-dark',
@@ -431,7 +433,7 @@ templ Detail(data StackDetailData) {
 						this.diffMode = false;
 
 						try {
-							const resp = await fetch(`/api/v1/stacks/${this.stackName}/versions/${version}`);
+							const resp = await fetch(`/api/v1/stacks/${this.stackID}/versions/${version}`);
 							const data = await resp.json();
 							this.showVersionContent(data.compose_file || '');
 						} catch (err) {
@@ -486,13 +488,13 @@ templ Detail(data StackDetailData) {
 
 						try {
 							// Fetch both versions
-							const fromResp = await fetch(`/api/v1/stacks/${this.stackName}/versions/${this.compareFrom}`);
+							const fromResp = await fetch(`/api/v1/stacks/${this.stackID}/versions/${this.compareFrom}`);
 							const fromData = await fromResp.json();
 							const fromContent = fromData.compose_file || '';
 
 							let toContent = this.currentCompose;
 							if (this.compareTo !== 'current') {
-								const toResp = await fetch(`/api/v1/stacks/${this.stackName}/versions/${this.compareTo}`);
+								const toResp = await fetch(`/api/v1/stacks/${this.stackID}/versions/${this.compareTo}`);
 								const toData = await toResp.json();
 								toContent = toData.compose_file || '';
 							}
@@ -524,7 +526,7 @@ templ Detail(data StackDetailData) {
 						if (comment === null) return;
 
 						try {
-							const resp = await fetch(`/api/v1/stacks/${this.stackName}/versions`, {
+							const resp = await fetch(`/api/v1/stacks/${this.stackID}/versions`, {
 								method: 'POST',
 								headers: {
 									'Content-Type': 'application/json',
@@ -548,7 +550,7 @@ templ Detail(data StackDetailData) {
 						if (!confirm(`Restore to version ${this.selectedVersion}? This will update the compose file.`)) return;
 
 						try {
-							const resp = await fetch(`/api/v1/stacks/${this.stackName}/versions/${this.selectedVersion}/restore`, {
+							const resp = await fetch(`/api/v1/stacks/${this.stackID}/versions/${this.selectedVersion}/restore`, {
 								method: 'POST',
 								headers: {
 									'X-CSRF-Token': document.querySelector('input[name="csrf_token"]')?.value || ''

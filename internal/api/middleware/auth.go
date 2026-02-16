@@ -52,6 +52,11 @@ type AuthConfig struct {
 	// Secret is the JWT signing secret (required)
 	Secret string
 
+	// AdditionalSecrets contains previous signing secrets for key rotation support.
+	// Tokens signed with any of these keys will be accepted for validation.
+	// The primary Secret is always tried first, then AdditionalSecrets in order.
+	AdditionalSecrets []string
+
 	// TokenLookup defines how to extract the token from the request.
 	// Format: "<source>:<name>", e.g., "header:Authorization", "query:token", "cookie:auth"
 	// Multiple lookups can be specified, separated by comma.
@@ -146,27 +151,40 @@ func Auth(config AuthConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Parse and validate token
-			token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, func(token *jwt.Token) (any, error) {
-				// Validate signing method
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, jwt.ErrSignatureInvalid
-				}
-				return []byte(config.Secret), nil
-			})
+			// Build list of secrets to try (primary + rotation keys)
+			secrets := []string{config.Secret}
+			secrets = append(secrets, config.AdditionalSecrets...)
 
-			if err != nil {
-				switch {
-				case strings.Contains(err.Error(), "expired"):
-					config.ErrorHandler(w, r, apierrors.ExpiredToken())
-				default:
-					config.ErrorHandler(w, r, apierrors.InvalidToken(err.Error()))
+			// Parse and validate token, trying each secret for key rotation support
+			var token *jwt.Token
+			var lastErr error
+			for _, secret := range secrets {
+				if secret == "" {
+					continue
 				}
-				return
+				s := secret // capture for closure
+				token, lastErr = jwt.ParseWithClaims(tokenString, &UserClaims{}, func(token *jwt.Token) (any, error) {
+					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, jwt.ErrSignatureInvalid
+					}
+					return []byte(s), nil
+				})
+				if lastErr == nil && token.Valid {
+					break
+				}
 			}
 
-			if !token.Valid {
-				config.ErrorHandler(w, r, apierrors.InvalidToken(""))
+			if lastErr != nil || token == nil || !token.Valid {
+				if lastErr != nil {
+					switch {
+					case strings.Contains(lastErr.Error(), "expired"):
+						config.ErrorHandler(w, r, apierrors.ExpiredToken())
+					default:
+						config.ErrorHandler(w, r, apierrors.InvalidToken(lastErr.Error()))
+					}
+				} else {
+					config.ErrorHandler(w, r, apierrors.InvalidToken(""))
+				}
 				return
 			}
 

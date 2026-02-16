@@ -352,6 +352,37 @@ func (c *Client) ListTags(ctx context.Context, projectID string, page, perPage i
 	return decodeJSON[[]APITag](resp)
 }
 
+// CreateTag creates a new tag
+func (c *Client) CreateTag(ctx context.Context, projectID, tagName, ref, message string) (*APITag, error) {
+	path := fmt.Sprintf("/projects/%s/repository/tags", encodeProjectID(projectID))
+	body := map[string]string{
+		"tag_name": tagName,
+		"ref":      ref,
+	}
+	if message != "" {
+		body["message"] = message
+	}
+	resp, err := c.post(ctx, path, body)
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSON[*APITag](resp)
+}
+
+// DeleteTag deletes a tag
+func (c *Client) DeleteTag(ctx context.Context, projectID, tagName string) error {
+	path := fmt.Sprintf("/projects/%s/repository/tags/%s", encodeProjectID(projectID), url.PathEscape(tagName))
+	resp, err := c.delete(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("delete tag failed: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ============================================================================
 // Files / Repository Tree
 // ============================================================================

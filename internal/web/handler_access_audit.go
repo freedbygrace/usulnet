@@ -10,12 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	aatmpl "github.com/fr4nsys/usulnet/internal/web/templates/pages/accessaudit"
 )
 
-// In-memory access audit tracking (production would use the existing audit_log DB table).
+// In-memory access audit cache. Entries persist across requests but not across restarts.
+// The API layer's audit service (internal/services/audit) handles persistent DB logging
+// via the audit_log table. This cache is for the access-audit dashboard's fast rendering.
 var (
 	accessAuditEntries []accessAuditEntry
 	accessAuditMu      sync.RWMutex
@@ -57,8 +60,8 @@ func RecordAccessEvent(userName, userID, action, resourceType, resourceID, resou
 		ErrorMsg:     errMsg,
 		CreatedAt:    time.Now(),
 	}}, accessAuditEntries...)
-	if len(accessAuditEntries) > 500 {
-		accessAuditEntries = accessAuditEntries[:500]
+	if len(accessAuditEntries) > 10000 {
+		accessAuditEntries = accessAuditEntries[:10000]
 	}
 }
 
@@ -181,6 +184,13 @@ func (h *Handler) AccessAuditTempl(w http.ResponseWriter, r *http.Request) {
 	}
 	accessAuditMu.RUnlock()
 
+	// Count active sessions (those within last 24h)
+	for _, s := range sessions {
+		if s.IsActive {
+			stats.ActiveSessions++
+		}
+	}
+
 	data := aatmpl.AccessAuditData{
 		PageData:  pageData,
 		AuditLogs: auditLogs,
@@ -213,6 +223,38 @@ func (h *Handler) AccessAuditExport(w http.ResponseWriter, r *http.Request) {
 			entry.CreatedAt.Format(time.RFC3339), entry.UserName, entry.Action,
 			entry.ResourceType, entry.ResourceID, entry.IPAddress, entry.Success, errMsg)
 	}
+}
+
+// AccessAuditSessionRevoke revokes/terminates a user session.
+func (h *Handler) AccessAuditSessionRevoke(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		h.setFlash(w, r, "error", "Session ID is required")
+		http.Redirect(w, r, "/access-audit?tab=sessions", http.StatusSeeOther)
+		return
+	}
+
+	// Attempt to invalidate the session via auth service Logout
+	authSvc := h.services.Auth()
+	if authSvc != nil {
+		if err := authSvc.Logout(r.Context(), sessionID); err != nil {
+			h.logger.Error("failed to revoke session", "session_id", sessionID, "error", err)
+			// Even if revocation fails, record the attempt
+		}
+	}
+
+	// Record the revocation in access audit
+	user := h.getUserData(r)
+	userName := "system"
+	userID := ""
+	if user != nil {
+		userName = user.Username
+		userID = user.ID
+	}
+	RecordAccessEvent(userName, userID, "session_revoke", "session", sessionID, "", "Session revoked by admin", getRealIP(r), r.UserAgent(), true, "")
+
+	h.setFlash(w, r, "success", "Session revoked successfully")
+	http.Redirect(w, r, "/access-audit?tab=sessions", http.StatusSeeOther)
 }
 
 // auditActionIcon returns a FontAwesome icon class for an audit action.

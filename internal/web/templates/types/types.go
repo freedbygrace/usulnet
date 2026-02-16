@@ -23,6 +23,51 @@ type PageData struct {
 	Hosts              []HostSelectorItem
 	ActiveHostID       string
 	ActiveHostName     string
+	SidebarPrefs       *SidebarPreferences
+}
+
+// SidebarPreferences controls per-user sidebar collapse state and item visibility.
+type SidebarPreferences struct {
+	// Collapsed tracks which collapsible sections are collapsed.
+	// Keys: "operations", "connections", "tools", "integrations", "monitoring"
+	Collapsed map[string]bool `json:"collapsed"`
+
+	// Hidden tracks which individual nav items the user has hidden.
+	// Keys match the sidebar item identifiers (e.g. "swarm", "capture").
+	Hidden map[string]bool `json:"hidden"`
+}
+
+// DefaultSidebarPreferences returns the default sidebar configuration.
+func DefaultSidebarPreferences() *SidebarPreferences {
+	return &SidebarPreferences{
+		Collapsed: map[string]bool{
+			"tools":        true,
+			"integrations": true,
+			"monitoring":   true,
+		},
+		Hidden: map[string]bool{},
+	}
+}
+
+// IsCollapsed returns true if the given section should be collapsed.
+func (p *SidebarPreferences) IsCollapsed(section string) bool {
+	if p == nil || p.Collapsed == nil {
+		// Apply defaults for unset prefs
+		switch section {
+		case "tools", "integrations", "monitoring":
+			return true
+		}
+		return false
+	}
+	return p.Collapsed[section]
+}
+
+// IsHidden returns true if the given nav item should be hidden.
+func (p *SidebarPreferences) IsHidden(item string) bool {
+	if p == nil || p.Hidden == nil {
+		return false
+	}
+	return p.Hidden[item]
 }
 
 // HostSelectorItem represents a host in the header dropdown selector

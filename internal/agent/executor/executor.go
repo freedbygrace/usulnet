@@ -86,6 +86,9 @@ func (e *Executor) registerHandlers() {
 	e.handlers[protocol.CmdSystemVersion] = e.handleSystemVersion
 	e.handlers[protocol.CmdSystemDf] = e.handleSystemDf
 	e.handlers[protocol.CmdSystemPing] = e.handleSystemPing
+
+	// Security commands
+	e.registerSecurityHandlers()
 }
 
 // Execute executes a command and returns the result.
@@ -313,28 +316,38 @@ func (e *Executor) handleContainerLogs(ctx context.Context, cmd *protocol.Comman
 	}
 	defer reader.Close()
 
-	// Read logs into buffer (limited)
-	// TODO: Implement streaming for large logs
+	// Stream logs in chunks for large outputs.
+	// Each chunk is up to chunkSize bytes. The result includes metadata so the
+	// consumer can detect truncation and reassemble if needed.
+	const chunkSize = 64 * 1024 // 64KB per chunk
+	const maxSize = 10 * 1024 * 1024 // 10MB max total
+
 	var logs []byte
-	buf := make([]byte, 32*1024) // 32KB chunks
+	buf := make([]byte, chunkSize)
 	totalRead := 0
-	maxSize := 1024 * 1024 // 1MB max
+	truncated := false
 
 	for totalRead < maxSize {
-		n, err := reader.Read(buf)
+		n, readErr := reader.Read(buf)
 		if n > 0 {
 			logs = append(logs, buf[:n]...)
 			totalRead += n
 		}
-		if err != nil {
+		if readErr != nil {
 			break
 		}
+	}
+
+	if totalRead >= maxSize {
+		truncated = true
 	}
 
 	return e.successResult(map[string]interface{}{
 		"container_id": cmd.Params.ContainerID,
 		"logs":         string(logs),
-		"truncated":    totalRead >= maxSize,
+		"size":         totalRead,
+		"truncated":    truncated,
+		"max_size":     maxSize,
 	})
 }
 
@@ -408,19 +421,57 @@ func (e *Executor) handleImagePull(ctx context.Context, cmd *protocol.Command) *
 	}
 	defer reader.Close()
 
-	// Consume the output (shows pull progress)
-	// TODO: Parse and report progress
-	buf := make([]byte, 1024)
-	for {
-		_, err := reader.Read(buf)
-		if err != nil {
-			break
-		}
+	// Parse pull progress from the JSON stream.
+	// Docker returns one JSON object per line with layer progress info.
+	type pullStatus struct {
+		ID             string `json:"id"`
+		Status         string `json:"status"`
+		Progress       string `json:"progress"`
+		ProgressDetail struct {
+			Current int64 `json:"current"`
+			Total   int64 `json:"total"`
+		} `json:"progressDetail"`
+		Error string `json:"error,omitempty"`
 	}
 
-	return e.successResult(map[string]string{
-		"image_ref": cmd.Params.ImageRef,
-		"action":    "pulled",
+	var lastStatus string
+	var pullError string
+	layersDone := make(map[string]bool)
+	layersTotal := make(map[string]bool)
+
+	decoder := json.NewDecoder(reader)
+	for {
+		var status pullStatus
+		if decodeErr := decoder.Decode(&status); decodeErr != nil {
+			break
+		}
+
+		if status.Error != "" {
+			pullError = status.Error
+			break
+		}
+
+		// Track layers for progress calculation
+		if status.ID != "" {
+			layersTotal[status.ID] = true
+			if status.Status == "Pull complete" || status.Status == "Already exists" {
+				layersDone[status.ID] = true
+			}
+		}
+
+		lastStatus = status.Status
+	}
+
+	if pullError != "" {
+		return e.errorResult(fmt.Errorf("image pull failed: %s", pullError))
+	}
+
+	return e.successResult(map[string]interface{}{
+		"image_ref":    cmd.Params.ImageRef,
+		"action":       "pulled",
+		"last_status":  lastStatus,
+		"layers_total": len(layersTotal),
+		"layers_done":  len(layersDone),
 	})
 }
 

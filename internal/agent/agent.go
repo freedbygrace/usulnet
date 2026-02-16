@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 
@@ -44,6 +46,10 @@ type Config struct {
 	LogLevel string
 	// DataDir is the directory for local state storage
 	DataDir string
+	// BackupEnabled enables backup capabilities on this agent
+	BackupEnabled bool
+	// ScannerEnabled enables security scanning capabilities on this agent
+	ScannerEnabled bool
 	// TLS configuration for NATS
 	TLSEnabled   bool
 	TLSCertFile  string
@@ -531,9 +537,13 @@ func (a *Agent) getCapabilities() []string {
 		"stack.deploy",
 	}
 
-	// Add conditional capabilities
-	// TODO: Check if backup/scanner enabled
-	caps = append(caps, "backup", "security.scan")
+	// Add conditional capabilities based on agent configuration
+	if a.config.BackupEnabled {
+		caps = append(caps, "backup")
+	}
+	if a.config.ScannerEnabled {
+		caps = append(caps, "security.scan")
+	}
 
 	return caps
 }
@@ -569,10 +579,76 @@ func (a *Agent) collectInventory() (*protocol.Inventory, error) {
 	}
 
 	// Collect containers
-	// TODO: Implement container listing
+	cli := a.docker.Raw()
+	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		a.log.Warn("Failed to list containers for inventory", "error", err)
+	} else {
+		for _, c := range containers {
+			ci := protocol.ContainerInfo{
+				ID:      c.ID,
+				Image:   c.Image,
+				ImageID: c.ImageID,
+				Command: c.Command,
+				Created: c.Created,
+				State:   string(c.State),
+				Status:  c.Status,
+				Labels:  c.Labels,
+			}
+			// Names
+			for _, name := range c.Names {
+				if len(name) > 0 && name[0] == '/' {
+					ci.Names = append(ci.Names, name[1:])
+				} else {
+					ci.Names = append(ci.Names, name)
+				}
+			}
+			// Ports
+			for _, p := range c.Ports {
+				ci.Ports = append(ci.Ports, protocol.PortBinding{
+					IP:          p.IP,
+					PrivatePort: p.PrivatePort,
+					PublicPort:  p.PublicPort,
+					Type:        p.Type,
+				})
+			}
+			// Mounts
+			for _, m := range c.Mounts {
+				ci.Mounts = append(ci.Mounts, protocol.MountInfo{
+					Type:        string(m.Type),
+					Name:        m.Name,
+					Source:      m.Source,
+					Destination: m.Destination,
+					Mode:        m.Mode,
+					RW:          m.RW,
+				})
+			}
+			// Network mode
+			if c.HostConfig.NetworkMode != "" {
+				ci.NetworkMode = c.HostConfig.NetworkMode
+			}
+			inv.Containers = append(inv.Containers, ci)
+		}
+	}
 
 	// Collect images
-	// TODO: Implement image listing
+	images, err := cli.ImageList(ctx, image.ListOptions{All: false})
+	if err != nil {
+		a.log.Warn("Failed to list images for inventory", "error", err)
+	} else {
+		for _, img := range images {
+			ii := protocol.ImageInfo{
+				ID:          img.ID,
+				RepoTags:    img.RepoTags,
+				RepoDigests: img.RepoDigests,
+				Created:     img.Created,
+				Size:        img.Size,
+				VirtualSize: img.VirtualSize,
+				Labels:      img.Labels,
+			}
+			inv.Images = append(inv.Images, ii)
+		}
+	}
 
 	// Collect system info
 	info, err := a.docker.Info(ctx)

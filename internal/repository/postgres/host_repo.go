@@ -16,13 +16,12 @@ import (
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/fr4nsys/usulnet/internal/gateway"
 	"github.com/fr4nsys/usulnet/internal/gateway/protocol"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/errors"
 )
 
-// HostRepository implements gateway.HostRepository for PostgreSQL.
+// HostRepository implements HostRepository interface.
 type HostRepository struct {
 	db *sqlx.DB
 }
@@ -32,11 +31,10 @@ func NewHostRepository(db *sqlx.DB) *HostRepository {
 	return &HostRepository{db: db}
 }
 
-// Ensure HostRepository implements gateway.HostRepository
-var _ gateway.HostRepository = (*HostRepository)(nil)
+
 
 // GetByAgentToken finds a host by validating the agent token against stored hash.
-func (r *HostRepository) GetByAgentToken(ctx context.Context, token string) (*gateway.HostInfo, error) {
+func (r *HostRepository) GetByAgentToken(ctx context.Context, token string) (*models.HostInfo, error) {
 	query := `
 		SELECT id, name, agent_token_hash, status
 		FROM hosts
@@ -59,7 +57,7 @@ func (r *HostRepository) GetByAgentToken(ctx context.Context, token string) (*ga
 
 	for _, h := range hosts {
 		if err := bcrypt.CompareHashAndPassword([]byte(h.AgentTokenHash), []byte(token)); err == nil {
-			return &gateway.HostInfo{
+			return &models.HostInfo{
 				ID:     h.ID,
 				Name:   h.Name,
 				Status: h.Status,

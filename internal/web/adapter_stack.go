@@ -179,15 +179,23 @@ func (a *stackAdapter) Deploy(ctx context.Context, name, composeFile string) err
 
 	result, err := a.svc.Deploy(ctx, stack.ID)
 	if err != nil {
-		slog.Error("stackAdapter.Deploy: deploy returned error", "name", name, "error", err)
+		slog.Error("stackAdapter.Deploy: deploy returned error, cleaning up", "name", name, "error", err)
+		// Clean up the DB record so the user can retry with the same name
+		if delErr := a.svc.Delete(ctx, stack.ID, true); delErr != nil {
+			slog.Warn("stackAdapter.Deploy: failed to clean up stack after deploy error", "name", name, "error", delErr)
+		}
 		return err
 	}
 	if result != nil && !result.Success {
-		slog.Error("stackAdapter.Deploy: deploy failed",
+		slog.Error("stackAdapter.Deploy: deploy failed, cleaning up",
 			"name", name,
 			"output", result.Output,
 			"error", result.Error,
 		)
+		// Clean up the DB record so the user can retry with the same name
+		if delErr := a.svc.Delete(ctx, stack.ID, true); delErr != nil {
+			slog.Warn("stackAdapter.Deploy: failed to clean up stack after deploy failure", "name", name, "error", delErr)
+		}
 		return fmt.Errorf("docker compose failed: %s\nOutput: %s", result.Error, result.Output)
 	}
 	slog.Info("stackAdapter.Deploy: deploy succeeded", "name", name)

@@ -303,15 +303,29 @@ func (h *Handler) QuotaToggle(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) QuotaDelete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	if h.resourceQuotaRepo != nil {
-		uid, err := uuid.Parse(id)
-		if err == nil {
-			h.resourceQuotaRepo.Delete(r.Context(), uid)
-		}
+	if h.resourceQuotaRepo == nil {
+		h.setFlash(w, r, "error", "Quota service not configured")
+		h.redirectQuotas(w, r)
+		return
 	}
 
-	h.setFlash(w, r, "success", "Resource quota deleted")
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		h.setFlash(w, r, "error", "Invalid quota ID")
+		h.redirectQuotas(w, r)
+		return
+	}
 
+	if err := h.resourceQuotaRepo.Delete(r.Context(), uid); err != nil {
+		h.setFlash(w, r, "error", "Failed to delete quota: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Resource quota deleted")
+	}
+
+	h.redirectQuotas(w, r)
+}
+
+func (h *Handler) redirectQuotas(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", "/quotas")
 		w.WriteHeader(http.StatusOK)

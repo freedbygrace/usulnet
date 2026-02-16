@@ -77,6 +77,13 @@ const (
 	HostStatusUnknown      HostStatus = "unknown"
 )
 
+// HostInfo contains minimal host information needed by the gateway.
+type HostInfo struct {
+	ID     uuid.UUID
+	Name   string
+	Status string
+}
+
 // Host represents a Docker host
 type Host struct {
 	ID             uuid.UUID        `json:"id" db:"id"`

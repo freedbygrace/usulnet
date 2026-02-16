@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fr4nsys/usulnet/internal/gateway/protocol"
+	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 )
 
@@ -880,9 +881,9 @@ type mockStatusUpdate struct {
 	Status string
 }
 
-func (m *mockHostRepo) GetByAgentToken(_ context.Context, token string) (*HostInfo, error) {
+func (m *mockHostRepo) GetByAgentToken(_ context.Context, token string) (*models.HostInfo, error) {
 	if token == "valid-token" {
-		return &HostInfo{
+		return &models.HostInfo{
 			ID:     uuid.New(),
 			Name:   "test-host",
 			Status: "pending",

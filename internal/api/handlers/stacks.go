@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
@@ -37,47 +38,49 @@ func NewStackHandler(stackService *stack.Service, log *logger.Logger) *StackHand
 func (h *StackHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
+	// Read-only (viewer+)
 	r.Get("/", h.ListStacks)
-	r.Post("/", h.CreateStack)
-	r.Post("/validate", h.ValidateCompose)
-	r.Post("/dry-run", h.DryRunContent)
+
+	// Operator+ for creation and validation
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireOperator)
+		r.Post("/", h.CreateStack)
+		r.Post("/validate", h.ValidateCompose)
+		r.Post("/dry-run", h.DryRunContent)
+	})
 
 	r.Route("/{stackID}", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.GetStack)
-		r.Put("/", h.UpdateStack)
-		r.Delete("/", h.DeleteStack)
-
-		r.Post("/deploy", h.DeployStack)
-		r.Post("/redeploy", h.RedeployStack)
-		r.Post("/start", h.StartStack)
-		r.Post("/stop", h.StopStack)
-		r.Post("/restart", h.RestartStack)
-		r.Post("/pull", h.PullStack)
-
 		r.Get("/status", h.GetStatus)
 		r.Get("/containers", h.GetContainers)
 		r.Get("/compose", h.GetComposeConfig)
-
-		// Versioning endpoints
 		r.Get("/versions", h.ListVersions)
-		r.Post("/versions", h.CreateVersion)
 		r.Get("/versions/{version}", h.GetVersion)
 		r.Get("/versions/{fromVersion}/diff/{toVersion}", h.DiffVersions)
-		r.Post("/versions/{version}/restore", h.RestoreVersion)
-
-		// Dry run
-		r.Post("/dry-run", h.DryRun)
-
-		// Dependencies
 		r.Get("/dependencies", h.ListDependencies)
-		r.Post("/dependencies", h.AddDependency)
-		r.Delete("/dependencies/{dependsOnID}", h.RemoveDependency)
 		r.Get("/dependents", h.GetDependents)
-
-		// Service operations
-		r.Post("/services/{serviceName}/scale", h.ScaleService)
-		r.Post("/services/{serviceName}/restart", h.RestartService)
 		r.Get("/services/{serviceName}/logs", h.GetServiceLogs)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Put("/", h.UpdateStack)
+			r.Delete("/", h.DeleteStack)
+			r.Post("/deploy", h.DeployStack)
+			r.Post("/redeploy", h.RedeployStack)
+			r.Post("/start", h.StartStack)
+			r.Post("/stop", h.StopStack)
+			r.Post("/restart", h.RestartStack)
+			r.Post("/pull", h.PullStack)
+			r.Post("/versions", h.CreateVersion)
+			r.Post("/versions/{version}/restore", h.RestoreVersion)
+			r.Post("/dry-run", h.DryRun)
+			r.Post("/dependencies", h.AddDependency)
+			r.Delete("/dependencies/{dependsOnID}", h.RemoveDependency)
+			r.Post("/services/{serviceName}/scale", h.ScaleService)
+			r.Post("/services/{serviceName}/restart", h.RestartService)
+		})
 	})
 
 	return r

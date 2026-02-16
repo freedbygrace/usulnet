@@ -5,7 +5,10 @@
 package web
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/pkg/crypto"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/profile"
+	"github.com/fr4nsys/usulnet/internal/web/templates/types"
 )
 
 // ============================================================================
@@ -36,6 +40,8 @@ type PreferencesRepository interface {
 	PreferencesLoader // embeds GetUserPreferences
 	SaveUserPreferences(userID string, prefsJSON string) error
 	DeleteUserPreferences(userID string) error
+	GetSidebarPrefs(ctx context.Context, userID string) (string, error)
+	SaveSidebarPrefs(ctx context.Context, userID string, prefsJSON string) error
 }
 
 // SessionRepository defines operations for user sessions.
@@ -489,6 +495,78 @@ func (h *Handler) ToggleTheme(w http.ResponseWriter, r *http.Request) {
 		referer = "/"
 	}
 	h.redirect(w, r, referer)
+}
+
+// ============================================================================
+// Update Sidebar Preferences (PUT /profile/sidebar-prefs)
+// ============================================================================
+
+// UpdateSidebarPrefs handles sidebar collapse/visibility state updates.
+// Accepts JSON body with optional "collapsed" and/or "hidden" maps.
+// Merges incoming values into existing preferences.
+func (h *Handler) UpdateSidebarPrefs(w http.ResponseWriter, r *http.Request) {
+	user := GetUserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	var incoming struct {
+		Collapsed map[string]bool `json:"collapsed"`
+		Hidden    map[string]bool `json:"hidden"`
+	}
+	if err := json.Unmarshal(body, &incoming); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Load existing prefs from DB
+	existing := types.DefaultSidebarPreferences()
+	if h.prefsRepo != nil {
+		prefsJSON, err := h.prefsRepo.GetSidebarPrefs(r.Context(), user.ID)
+		if err == nil && prefsJSON != "" {
+			var sp types.SidebarPreferences
+			if err := json.Unmarshal([]byte(prefsJSON), &sp); err == nil {
+				if sp.Collapsed != nil {
+					existing.Collapsed = sp.Collapsed
+				}
+				if sp.Hidden != nil {
+					existing.Hidden = sp.Hidden
+				}
+			}
+		}
+	}
+
+	// Merge incoming state
+	if incoming.Collapsed != nil {
+		existing.Collapsed = incoming.Collapsed
+	}
+	if incoming.Hidden != nil {
+		existing.Hidden = incoming.Hidden
+	}
+
+	// Save back to DB
+	if h.prefsRepo != nil {
+		out, err := json.Marshal(existing)
+		if err != nil {
+			http.Error(w, "Failed to serialize", http.StatusInternalServerError)
+			return
+		}
+		if err := h.prefsRepo.SaveSidebarPrefs(r.Context(), user.ID, string(out)); err != nil {
+			slog.Error("Failed to save sidebar prefs", "user_id", user.ID, "error", err)
+			http.Error(w, "Failed to save", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok":true}`))
 }
 
 // ============================================================================

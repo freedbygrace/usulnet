@@ -39,14 +39,16 @@ func RegisterConfigRoutes(r chi.Router, h *handlers.ConfigHandler) {
 			})
 		})
 
-		// Sync - TODO: Implement sync handlers when sync service is ready
-		// r.Route("/sync", func(r chi.Router) {
-		// 	r.Post("/", h.SyncConfig)
-		// 	r.Post("/bulk", h.BulkSyncConfig)
-		// 	r.Get("/outdated", h.ListOutdatedSyncs)
-		// 	r.Get("/stats", h.GetSyncStats)
-		// 	r.Get("/{container_id}", h.GetSyncStatus)
-		// })
+		// Sync - Configuration synchronization to containers
+		r.Route("/sync", func(r chi.Router) {
+			r.Post("/", h.SyncConfig)
+			r.Post("/preview", h.PreviewSync)
+			r.Post("/bulk", h.BulkSyncConfig)
+			r.Get("/outdated", h.ListOutdatedSyncs)
+			r.Get("/stats", h.GetSyncStats)
+			r.Get("/{hostID}/{containerID}", h.GetSyncStatus)
+			r.Delete("/{hostID}/{containerID}", h.RemoveSync)
+		})
 
 		// Export/Import
 		r.Get("/export", h.ExportConfig)

@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/scheduler"
@@ -35,28 +36,49 @@ func NewJobsHandler(sched *scheduler.Scheduler, log *logger.Logger) *JobsHandler
 func (h *JobsHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Job operations
+	// Read-only routes (viewer+)
 	r.Get("/", h.ListJobs)
-	r.Post("/", h.EnqueueJob)
 	r.Get("/stats", h.GetStats)
 	r.Get("/queue-stats", h.GetQueueStats)
 	r.Get("/pool-stats", h.GetPoolStats)
 
 	r.Route("/{jobID}", func(r chi.Router) {
 		r.Get("/", h.GetJob)
-		r.Delete("/", h.CancelJob)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Delete("/", h.CancelJob)
+		})
+	})
+
+	// Operator+ for enqueue
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireOperator)
+		r.Post("/", h.EnqueueJob)
 	})
 
 	// Scheduled job operations
 	r.Route("/scheduled", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.ListScheduledJobs)
-		r.Post("/", h.CreateScheduledJob)
 
 		r.Route("/{scheduledJobID}", func(r chi.Router) {
 			r.Get("/", h.GetScheduledJob)
-			r.Put("/", h.UpdateScheduledJob)
-			r.Delete("/", h.DeleteScheduledJob)
-			r.Post("/run", h.RunScheduledJobNow)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Put("/", h.UpdateScheduledJob)
+				r.Delete("/", h.DeleteScheduledJob)
+				r.Post("/run", h.RunScheduledJobNow)
+			})
+		})
+
+		// Operator+ for creation
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.CreateScheduledJob)
 		})
 	})
 

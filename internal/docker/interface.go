@@ -73,6 +73,9 @@ type ClientAPI interface {
 	ImageDigest(ctx context.Context, ref string) (string, error)
 	ImageSize(ctx context.Context, ref string) (int64, error)
 
+	// Build cache operations
+	BuildCachePrune(ctx context.Context, all bool) (int64, error)
+
 	// Volume operations
 	VolumeList(ctx context.Context, opts VolumeListOptions) ([]Volume, error)
 	VolumeGet(ctx context.Context, volumeName string) (*Volume, error)

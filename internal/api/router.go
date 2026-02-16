@@ -13,7 +13,6 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/api/handlers"
 	"github.com/fr4nsys/usulnet/internal/api/middleware"
-	"github.com/fr4nsys/usulnet/internal/license"
 )
 
 // RouterConfig contains configuration for setting up routes.
@@ -88,6 +87,8 @@ type Handlers struct {
 	NPM           *handlers.NPMHandler
 	SSH           *handlers.SSHHandler
 	OpenAPI       *handlers.OpenAPIHandler
+	Settings      *handlers.SettingsHandler
+	License       *handlers.LicenseHandler
 }
 
 // NewRouter creates a new chi router with all routes configured.
@@ -396,28 +397,33 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 					r.Mount("/audit", h.Audit.Routes())
 				}
 
-				// Settings (placeholder until settings handler exists)
-				r.Route("/settings", func(r chi.Router) {
-					r.Get("/", notImplemented)
-					r.Put("/", notImplemented)
-
-					// LDAP settings require FeatureLDAP (Business+)
-					r.Route("/ldap", func(r chi.Router) {
-						if config.LicenseProvider != nil {
-							r.Use(middleware.RequireFeature(config.LicenseProvider, license.FeatureLDAP))
-						}
+				// Settings (admin-only)
+				if h.Settings != nil {
+					h.Settings.SetLicenseProvider(config.LicenseProvider)
+					r.Mount("/settings", h.Settings.Routes())
+				} else {
+					// Fallback placeholders if handler not initialized
+					r.Route("/settings", func(r chi.Router) {
 						r.Get("/", notImplemented)
 						r.Put("/", notImplemented)
-						r.Post("/test", notImplemented)
+						r.Route("/ldap", func(r chi.Router) {
+							r.Get("/", notImplemented)
+							r.Put("/", notImplemented)
+							r.Post("/test", notImplemented)
+						})
 					})
-				})
+				}
 
-				// License
-				r.Route("/license", func(r chi.Router) {
-					r.Get("/", notImplemented)
-					r.Post("/", notImplemented)
-					r.Delete("/", notImplemented)
-				})
+				// License (admin-only)
+				if h.License != nil {
+					r.Mount("/license", h.License.Routes())
+				} else {
+					r.Route("/license", func(r chi.Router) {
+						r.Get("/", notImplemented)
+						r.Post("/", notImplemented)
+						r.Delete("/", notImplemented)
+					})
+				}
 			})
 		})
 	})
@@ -425,9 +431,19 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 	// =========================================================================
 	// API WebSocket routes (at /api/v1/ws, outside timeout to preserve http.Hijacker)
 	// Note: Frontend WebSocket routes are at /ws (registered by routes_frontend.go)
+	// Auth is applied here but timeout is NOT (to preserve http.Hijacker for WS upgrade).
 	// =========================================================================
 	if h.WebSocket != nil {
-		r.Mount("/api/v1/ws", h.WebSocket.Routes())
+		r.Route("/api/v1/ws", func(r chi.Router) {
+			// Apply authentication to WebSocket routes
+			r.Use(middleware.Auth(middleware.AuthConfig{
+				Secret:      config.JWTSecret,
+				TokenLookup: "header:Authorization,query:token,cookie:auth_token",
+				APIKeyAuth:  config.APIKeyAuth,
+			}))
+			r.Use(middleware.RequireViewer)
+			r.Mount("/", h.WebSocket.Routes())
+		})
 	}
 
 	// =========================================================================

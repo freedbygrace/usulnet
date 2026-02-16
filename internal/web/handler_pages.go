@@ -6,6 +6,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -121,6 +122,7 @@ func (h *Handler) StackDetailTempl(w http.ResponseWriter, r *http.Request) {
 	data := stacks.StackDetailData{
 		PageData: pageData,
 		Stack: stacks.StackInfo{
+			ID:        stack.ID,
 			Name:      stack.Name,
 			Status:    stack.Status,
 			Path:      stack.Path,
@@ -132,6 +134,12 @@ func (h *Handler) StackDetailTempl(w http.ResponseWriter, r *http.Request) {
 		Versions:   versions,
 	}
 	h.renderTempl(w, r, stacks.Detail(data))
+}
+
+// StackEditTempl redirects to the stack detail page with the compose editor tab active.
+func (h *Handler) StackEditTempl(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	http.Redirect(w, r, "/stacks/"+name+"#compose", http.StatusSeeOther)
 }
 
 func (h *Handler) StackNewTempl(w http.ResponseWriter, r *http.Request) {
@@ -684,6 +692,19 @@ func (h *Handler) HostDetailTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch host resource metrics (disk, memory usage, etc.)
+	if metrics, err := h.services.Hosts().GetMetrics(ctx, idStr); err == nil && metrics != nil {
+		detail.MemUsed = metrics.MemoryUsed
+		detail.MemUsedStr = metrics.MemoryUsedStr
+		detail.MemPercent = metrics.MemoryPercent
+		detail.DiskUsed = metrics.DiskUsedStr
+		detail.DiskTotal = metrics.DiskTotalStr
+		detail.DiskPercent = metrics.DiskPercent
+		detail.CPUPercent = metrics.CPUPercent
+		detail.NetworkRxStr = metrics.NetworkRxStr
+		detail.NetworkTxStr = metrics.NetworkTxStr
+	}
+
 	hostData := hosts.HostDetailData{
 		PageData: pageData,
 		Host:     detail,
@@ -826,6 +847,11 @@ func (h *Handler) UserNewTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fallback: always ensure the built-in system roles are available
+	if len(data.Roles) == 0 {
+		data.Roles = builtinRoleOptions()
+	}
+
 	h.renderTempl(w, r, users.New(data))
 }
 
@@ -879,6 +905,11 @@ func (h *Handler) UserEditTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fallback: always ensure the built-in system roles are available
+	if len(data.Roles) == 0 {
+		data.Roles = builtinRoleOptions()
+	}
+
 	h.renderTempl(w, r, users.Edit(data))
 }
 
@@ -890,7 +921,7 @@ func (h *Handler) SettingsTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Settings", "settings")
 
-	// Load settings from config service variables (scope=settings)
+	// Load settings from config service variables (scope=global)
 	cfg := pages.SettingsConfig{
 		SiteName:         "usulnet",
 		BackupPath:       "/app/backups",
@@ -899,40 +930,50 @@ func (h *Handler) SettingsTempl(w http.ResponseWriter, r *http.Request) {
 		UpdateCheckHours: 6,
 	}
 
-	if vars, err := h.services.Config().ListVariables(ctx, "settings", "global"); err == nil {
+	// Use "global" scope for application-wide settings
+	if vars, err := h.services.Config().ListVariables(ctx, "global", ""); err == nil {
 		for _, v := range vars {
 			switch v.Name {
-			case "site_name":
+			// General
+			case "settings.app_name":
 				if v.Value != "" {
 					cfg.SiteName = v.Value
 				}
-			case "backup_path":
+
+			// Backups
+			case "backup.path":
 				if v.Value != "" {
 					cfg.BackupPath = v.Value
 				}
-			case "backup_retention":
+			case "backup.retention_days":
 				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
 					cfg.BackupRetention = n
 				}
-			case "scan_interval":
+
+			// Security / Maintenance
+			case "security.scan_interval_hours":
 				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
 					cfg.ScanInterval = n
 				}
-			case "update_check_hours":
+			case "system.update_check_hours":
 				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
 					cfg.UpdateCheckHours = n
 				}
-			case "s3_enabled":
+
+			// S3
+			case "backup.s3.enabled":
 				cfg.S3Enabled = v.Value == "true"
-			case "s3_bucket":
+			case "backup.s3.bucket":
 				cfg.S3Bucket = v.Value
-			case "s3_region":
+			case "backup.s3.region":
 				cfg.S3Region = v.Value
-			case "smtp_enabled":
+
+			// SMTP
+			case "notifications.smtp.enabled":
 				cfg.SMTPEnabled = v.Value == "true"
-			case "smtp_host":
+			case "notifications.smtp.host":
 				cfg.SMTPHost = v.Value
-			case "smtp_port":
+			case "notifications.smtp.port":
 				if n, err := strconv.Atoi(v.Value); err == nil && n > 0 {
 					cfg.SMTPPort = n
 				}
@@ -940,9 +981,17 @@ func (h *Handler) SettingsTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Build sidebar config from current user's prefs
+	sidebarPrefs := pageData.SidebarPrefs
+	if sidebarPrefs == nil {
+		sidebarPrefs = types.DefaultSidebarPreferences()
+	}
+	sidebarConfig := buildSidebarConfig(sidebarPrefs)
+
 	data := pages.SettingsData{
-		PageData: pageData,
-		Settings: cfg,
+		PageData:      pageData,
+		Settings:      cfg,
+		SidebarConfig: sidebarConfig,
 	}
 	h.renderTempl(w, r, pages.Settings(data))
 }
@@ -956,33 +1005,58 @@ func (h *Handler) SettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map form fields to config variable names
+	// Map form fields to config variable names (namespaced keys)
 	fields := map[string]string{
-		"site_name":          r.FormValue("site_name"),
-		"backup_path":        r.FormValue("backup_path"),
-		"backup_retention":   r.FormValue("backup_retention"),
-		"scan_interval":      r.FormValue("scan_interval"),
-		"update_check_hours": r.FormValue("update_check_hours"),
+		"settings.app_name":          r.FormValue("site_name"),
+		"backup.path":                r.FormValue("backup_path"),
+		"backup.retention_days":      r.FormValue("backup_retention"),
+		"security.scan_interval_hours": r.FormValue("scan_interval"),
+		"system.update_check_hours":  r.FormValue("update_check_hours"),
+		
+		// S3
+		"backup.s3.enabled":          formatCheckbox(r.FormValue("s3_enabled")),
+		"backup.s3.bucket":           r.FormValue("s3_bucket"),
+		"backup.s3.region":           r.FormValue("s3_region"),
+
+		// SMTP
+		"notifications.smtp.enabled": formatCheckbox(r.FormValue("smtp_enabled")),
+		"notifications.smtp.host":    r.FormValue("smtp_host"),
+		"notifications.smtp.port":    r.FormValue("smtp_port"),
 	}
 
+	var failedFields []string
 	for name, value := range fields {
-		if value == "" {
-			continue
-		}
+		// For checkboxes/booleans, we always want to save the state even if empty/false (handled by formatCheckbox)
+		// For strings, we might want to allow empty values to clear settings? 
+		// For now, we save everything present in the map.
+		
 		v := &ConfigVarView{
 			Name:    name,
 			Value:   value,
-			VarType: "string",
-			Scope:   "settings",
-			ScopeID: "global",
+			VarType: "string", // Everything is stored as string
+			Scope:   "global",
 		}
+		
 		if err := h.services.Config().CreateVariable(ctx, v); err != nil {
 			slog.Error("Failed to save setting", "name", name, "error", err)
+			failedFields = append(failedFields, name)
 		}
 	}
 
-	h.setFlash(w, r, "success", "Settings saved successfully")
+	if len(failedFields) > 0 {
+		h.setFlash(w, r, "error", fmt.Sprintf("Failed to save settings: %s", strings.Join(failedFields, ", ")))
+	} else {
+		h.setFlash(w, r, "success", "Settings saved successfully")
+	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// Helper for checkbox values
+func formatCheckbox(val string) string {
+	if val == "on" || val == "true" || val == "1" {
+		return "true"
+	}
+	return "false"
 }
 
 // ============================================================================
@@ -1046,10 +1120,21 @@ func (h *Handler) PortsTempl(w http.ResponseWriter, r *http.Request) {
 	var portMappings []pages.PortMapping
 	var conflicts []pages.PortConflict
 	var recommendations []pages.PortRecommendation
+	var portError string
 
 	// Derive port data from containers
-	portUsage := make(map[int][]string) // externalPort -> containerNames
-	if containerList, err := h.services.Containers().List(ctx, nil); err == nil {
+	type portBindKey struct {
+		port     int
+		protocol string
+		hostIP   string
+	}
+	portUsage := make(map[portBindKey][]string) // (port, protocol, hostIP) -> containerNames
+	containerList, err := h.services.Containers().List(ctx, nil)
+	if err != nil {
+		h.logger.Error("ports: failed to list containers", "error", err)
+		portError = "Could not retrieve container data: " + err.Error()
+	}
+	if err == nil {
 		for _, c := range containerList {
 			for _, p := range c.Ports {
 				if p.HostPort == 0 {
@@ -1058,6 +1143,10 @@ func (h *Handler) PortsTempl(w http.ResponseWriter, r *http.Request) {
 				hostIP := p.HostIP
 				if hostIP == "" {
 					hostIP = "0.0.0.0"
+				}
+				protocol := p.Protocol
+				if protocol == "" {
+					protocol = "tcp"
 				}
 				exposureLevel := "internal"
 				isRisky := false
@@ -1073,17 +1162,19 @@ func (h *Handler) PortsTempl(w http.ResponseWriter, r *http.Request) {
 					ContainerName: c.Name,
 					InternalPort:  p.ContainerPort,
 					ExternalPort:  p.HostPort,
-					Protocol:      p.Protocol,
+					Protocol:      protocol,
 					HostBind:      hostIP,
 					ExposureLevel: exposureLevel,
 					IsRisky:       isRisky,
 				})
 
-				portUsage[p.HostPort] = append(portUsage[p.HostPort], c.Name)
+				key := portBindKey{port: p.HostPort, protocol: protocol, hostIP: hostIP}
+				portUsage[key] = append(portUsage[key], c.Name)
 
 				// Security recommendations for exposed ports
 				if hostIP == "0.0.0.0" {
 					recommendations = append(recommendations, pages.PortRecommendation{
+						ContainerID:   c.ID,
 						ContainerName: c.Name,
 						Port:          p.HostPort,
 						Issue:         "Port exposed to all interfaces",
@@ -1094,12 +1185,12 @@ func (h *Handler) PortsTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Detect port conflicts
-	for port, names := range portUsage {
+	// Detect port conflicts (same port + protocol + host IP used by multiple containers)
+	for key, names := range portUsage {
 		if len(names) > 1 {
 			conflicts = append(conflicts, pages.PortConflict{
-				Port:       port,
-				Protocol:   "tcp",
+				Port:       key.port,
+				Protocol:   key.protocol,
 				Containers: names,
 			})
 		}
@@ -1110,6 +1201,7 @@ func (h *Handler) PortsTempl(w http.ResponseWriter, r *http.Request) {
 		Ports:           portMappings,
 		Conflicts:       conflicts,
 		Recommendations: recommendations,
+		Error:           portError,
 	}
 	h.renderTempl(w, r, pages.Ports(data))
 }
@@ -1625,6 +1717,23 @@ func (h *Handler) prepareTemplPageData(r *http.Request, title, active string) la
 		}
 	}
 
+	// Sidebar preferences (per-user collapse state and item visibility)
+	sidebarPrefs := types.DefaultSidebarPreferences()
+	if h.prefsRepo != nil && user != nil {
+		if prefsJSON, err := h.prefsRepo.GetSidebarPrefs(r.Context(), user.ID); err == nil && prefsJSON != "" {
+			var sp types.SidebarPreferences
+			if err := json.Unmarshal([]byte(prefsJSON), &sp); err == nil {
+				if sp.Collapsed == nil {
+					sp.Collapsed = types.DefaultSidebarPreferences().Collapsed
+				}
+				if sp.Hidden == nil {
+					sp.Hidden = map[string]bool{}
+				}
+				sidebarPrefs = &sp
+			}
+		}
+	}
+
 	return layouts.PageData{
 		Title:          title,
 		Active:         active,
@@ -1639,6 +1748,7 @@ func (h *Handler) prepareTemplPageData(r *http.Request, title, active string) la
 		ActiveHostName: activeHostName,
 		Edition:        edition,
 		EditionName:    editionName,
+		SidebarPrefs:   sidebarPrefs,
 	}
 }
 
@@ -1751,4 +1861,64 @@ func (h *Handler) TerminalPickerTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderTempl(w, r, pages.TerminalPicker(pickerContainers))
+}
+
+// buildSidebarConfig produces the sidebar settings UI data from current prefs.
+func buildSidebarConfig(prefs *types.SidebarPreferences) []pages.SidebarSectionConfig {
+	vis := func(key string) bool { return !prefs.IsHidden(key) }
+	return []pages.SidebarSectionConfig{
+		{Label: "Overview", Items: []pages.SidebarItemOption{
+			{Key: "swarm", Label: "Swarm", Icon: "fa-network-wired", Visible: vis("swarm")},
+		}},
+		{Label: "Resources", Items: []pages.SidebarItemOption{
+			{Key: "templates", Label: "Templates", Icon: "fa-clone", Visible: vis("templates")},
+			{Key: "ports", Label: "Ports", Icon: "fa-plug", Visible: vis("ports")},
+		}},
+		{Label: "Operations", Items: []pages.SidebarItemOption{
+			{Key: "compliance", Label: "Compliance", Icon: "fa-check-double", Visible: vis("compliance")},
+			{Key: "config", Label: "Config", Icon: "fa-cogs", Visible: vis("config")},
+			{Key: "secrets", Label: "Secrets", Icon: "fa-lock", Visible: vis("secrets")},
+			{Key: "lifecycle", Label: "Lifecycle", Icon: "fa-recycle", Visible: vis("lifecycle")},
+			{Key: "maintenance", Label: "Maintenance", Icon: "fa-wrench", Visible: vis("maintenance")},
+		}},
+		{Label: "Connections", Items: []pages.SidebarItemOption{
+			{Key: "databases", Label: "Databases", Icon: "fa-database", Visible: vis("databases")},
+			{Key: "ldap", Label: "LDAP", Icon: "fa-sitemap", Visible: vis("ldap")},
+			{Key: "rdp", Label: "RDP", Icon: "fa-desktop", Visible: vis("rdp")},
+		}},
+		{Label: "Tools", Items: []pages.SidebarItemOption{
+			{Key: "ansible", Label: "Ansible", Icon: "fa-cogs", Visible: vis("ansible")},
+			{Key: "capture", Label: "Packet Capture", Icon: "fa-satellite-dish", Visible: vis("capture")},
+		}},
+		{Label: "Integrations", Items: []pages.SidebarItemOption{
+			{Key: "proxy", Label: "Reverse Proxy", Icon: "fa-random", Visible: vis("proxy")},
+			{Key: "repositories", Label: "Repositories", Icon: "fa-code-branch", Visible: vis("repositories")},
+			{Key: "gitops", Label: "GitOps", Icon: "fa-code-branch", Visible: vis("gitops")},
+		}},
+		{Label: "Monitoring", Items: []pages.SidebarItemOption{
+			{Key: "metrics", Label: "Metrics", Icon: "fa-chart-line", Visible: vis("metrics")},
+			{Key: "health", Label: "Health", Icon: "fa-heartbeat", Visible: vis("health")},
+			{Key: "log-management", Label: "Log Analysis", Icon: "fa-search-plus", Visible: vis("log-management")},
+			{Key: "dependencies", Label: "Dependencies", Icon: "fa-sitemap", Visible: vis("dependencies")},
+		}},
+		{Label: "Admin", Items: []pages.SidebarItemOption{
+			{Key: "oauth", Label: "OAuth", Icon: "fa-sign-in-alt", Visible: vis("oauth")},
+			{Key: "ldap-providers", Label: "LDAP Providers", Icon: "fa-address-book", Visible: vis("ldap-providers")},
+			{Key: "channels", Label: "Channels", Icon: "fa-paper-plane", Visible: vis("channels")},
+			{Key: "quotas", Label: "Quotas", Icon: "fa-tachometer-alt", Visible: vis("quotas")},
+			{Key: "webhooks", Label: "Webhooks", Icon: "fa-plug", Visible: vis("webhooks")},
+			{Key: "runbooks", Label: "Runbooks", Icon: "fa-book-open", Visible: vis("runbooks")},
+			{Key: "registries", Label: "Registries", Icon: "fa-box", Visible: vis("registries")},
+		}},
+	}
+}
+
+// builtinRoleOptions returns the three built-in system roles for use in
+// user create/edit forms when no custom roles are configured.
+func builtinRoleOptions() []users.RoleOption {
+	return []users.RoleOption{
+		{Name: "admin", DisplayName: "Admin", Description: "Full system access", IsSystem: true},
+		{Name: "operator", DisplayName: "Operator", Description: "Operational access (create, start, stop)", IsSystem: true},
+		{Name: "viewer", DisplayName: "Viewer", Description: "Read-only access", IsSystem: true},
+	}
 }

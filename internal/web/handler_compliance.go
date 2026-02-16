@@ -105,7 +105,7 @@ func (h *Handler) ComplianceTempl(w http.ResponseWriter, r *http.Request) {
 		}
 		stats.ComplianceRate = fmt.Sprintf("%.0f%%", float64(compliant)/float64(stats.TotalPolicies)*100)
 	} else {
-		stats.ComplianceRate = "100%"
+		stats.ComplianceRate = "N/A"
 	}
 
 	data := comptmpl.ComplianceData{
@@ -277,34 +277,53 @@ func (h *Handler) ComplianceScan(w http.ResponseWriter, r *http.Request) {
 // ComplianceViolationAcknowledge acknowledges a violation.
 func (h *Handler) ComplianceViolationAcknowledge(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.updateComplianceViolationStatus(r, id, "acknowledged")
-	h.setFlash(w, r, "success", "Violation acknowledged")
+	if err := h.updateComplianceViolationStatus(r, id, "acknowledged"); err != nil {
+		h.setFlash(w, r, "error", "Failed to acknowledge violation: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Violation acknowledged")
+	}
 	redirectCompliance(w, r)
 }
 
 // ComplianceViolationResolve marks a violation as resolved.
 func (h *Handler) ComplianceViolationResolve(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.updateComplianceViolationStatus(r, id, "resolved")
-	h.setFlash(w, r, "success", "Violation resolved")
+	if err := h.updateComplianceViolationStatus(r, id, "resolved"); err != nil {
+		h.setFlash(w, r, "error", "Failed to resolve violation: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Violation resolved")
+	}
 	redirectCompliance(w, r)
 }
 
 // ComplianceViolationExempt marks a violation as exempted.
 func (h *Handler) ComplianceViolationExempt(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.updateComplianceViolationStatus(r, id, "exempted")
-	h.setFlash(w, r, "success", "Violation exempted")
+	if err := h.updateComplianceViolationStatus(r, id, "exempted"); err != nil {
+		h.setFlash(w, r, "error", "Failed to exempt violation: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Violation exempted")
+	}
 	redirectCompliance(w, r)
 }
 
-func (h *Handler) updateComplianceViolationStatus(r *http.Request, id, status string) {
-	if h.complianceRepo != nil {
-		uid, err := uuid.Parse(id)
-		if err == nil {
-			h.complianceRepo.UpdateViolationStatus(r.Context(), uid, status, nil)
+func (h *Handler) updateComplianceViolationStatus(r *http.Request, id, status string) error {
+	if h.complianceRepo == nil {
+		return fmt.Errorf("compliance service not configured")
+	}
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid violation ID")
+	}
+	var resolvedBy *uuid.UUID
+	if status == "resolved" || status == "exempted" {
+		if user := GetUserFromContext(r.Context()); user != nil {
+			if userID, parseErr := uuid.Parse(user.ID); parseErr == nil {
+				resolvedBy = &userID
+			}
 		}
 	}
+	return h.complianceRepo.UpdateViolationStatus(r.Context(), uid, status, resolvedBy)
 }
 
 func redirectCompliance(w http.ResponseWriter, r *http.Request) {

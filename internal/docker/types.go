@@ -5,6 +5,7 @@
 package docker
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -560,6 +561,30 @@ func ContainerFromInspect(c types.ContainerJSON) ContainerDetails {
 				MacAddress:  netSettings.MacAddress,
 				Aliases:     netSettings.Aliases,
 			})
+		}
+
+		// Convert port bindings from NetworkSettings (live bound ports).
+		// This mirrors ContainerFromSummary which gets ports pre-parsed from the list API.
+		for natPort, bindings := range c.NetworkSettings.Ports {
+			privatePort, _ := strconv.ParseUint(natPort.Port(), 10, 16)
+			proto := natPort.Proto()
+			if len(bindings) == 0 {
+				// Exposed but not published (no host binding)
+				details.Ports = append(details.Ports, Port{
+					PrivatePort: uint16(privatePort),
+					Type:        proto,
+				})
+				continue
+			}
+			for _, b := range bindings {
+				hostPort, _ := strconv.ParseUint(b.HostPort, 10, 16)
+				details.Ports = append(details.Ports, Port{
+					PrivatePort: uint16(privatePort),
+					PublicPort:  uint16(hostPort),
+					Type:        proto,
+					IP:          b.HostIP,
+				})
+			}
 		}
 	}
 

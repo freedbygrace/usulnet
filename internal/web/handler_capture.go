@@ -275,6 +275,7 @@ func toCaptureSession(c *models.PacketCapture) toolspages.CaptureSession {
 		Filter:      view.Filter,
 		Status:      view.Status,
 		PacketCount: view.PacketCount,
+		FileSize:    c.FileSize,
 		Size:        view.Size,
 		Duration:    view.Duration,
 		StartedAt:   view.StartedAt,

@@ -226,3 +226,22 @@ func NewCEInfo() *Info {
 		Limits:   limits,
 	}
 }
+
+// IsWithinLimit checks if a current count is within a resource limit.
+// Returns true if the resource can accept more items.
+// A limit of 0 means unlimited (always returns true).
+func IsWithinLimit(current, limit int) bool {
+	if limit <= 0 {
+		return true // Unlimited
+	}
+	return current < limit
+}
+
+// LimitUsagePercent returns the percentage of a limit that is used.
+// Returns 0 for unlimited resources (limit=0).
+func LimitUsagePercent(current, limit int) float64 {
+	if limit <= 0 {
+		return 0 // Unlimited
+	}
+	return float64(current) / float64(limit) * 100
+}

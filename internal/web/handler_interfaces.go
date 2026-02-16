@@ -40,6 +40,7 @@ type RunbookRepo interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	CreateExecution(ctx context.Context, exec *models.RunbookExecution) error
 	ListExecutions(ctx context.Context, runbookID uuid.UUID, limit int) ([]*models.RunbookExecution, error)
+	ListRecentExecutions(ctx context.Context, limit int) ([]*models.RunbookExecution, error)
 	GetCategories(ctx context.Context) ([]string, error)
 }
 

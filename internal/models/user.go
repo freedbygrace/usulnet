@@ -51,6 +51,8 @@ type User struct {
 	FailedLoginAttempts    int        `json:"failed_login_attempts" db:"failed_login_attempts"`
 	LockedUntil            *time.Time `json:"locked_until,omitempty" db:"locked_until"`
 	LastLoginAt            *time.Time `json:"last_login_at,omitempty" db:"last_login_at"`
+	PasswordChangedAt      *time.Time `json:"password_changed_at,omitempty" db:"password_changed_at"`
+	PasswordExpiresAt      *time.Time `json:"password_expires_at,omitempty" db:"password_expires_at"`
 	TOTPSecret             *string    `json:"-" db:"totp_secret"`                                    // Encrypted
 	TOTPEnabled            bool       `json:"totp_enabled" db:"totp_enabled"`
 	TOTPVerifiedAt         *time.Time `json:"totp_verified_at,omitempty" db:"totp_verified_at"`

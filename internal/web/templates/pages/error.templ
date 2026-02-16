@@ -19,10 +19,9 @@ templ Error(data ErrorData) {
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ data.Title } | usulnet</title>
+			<link rel="stylesheet" href="/static/vendor/fonts/fonts.css"/>
+			<link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css"/>
 			<link rel="stylesheet" href="/static/css/style.css"/>
-			<link rel="preconnect" href="https://fonts.googleapis.com"/>
-			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-			<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono&display=swap" rel="stylesheet"/>
 		</head>
 		<body class="bg-dark-900 min-h-screen flex items-center justify-center font-body text-gray-300">
 			<div class="text-center px-4">
@@ -90,9 +89,6 @@ templ Error(data ErrorData) {
 					usulnet { data.Version }
 				</div>
 			</div>
-			
-			<!-- Font Awesome -->
-			<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
 		</body>
 	</html>
 }

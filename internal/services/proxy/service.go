@@ -400,16 +400,13 @@ func (s *Service) DeleteDNSProvider(ctx context.Context, id uuid.UUID, userID *u
 // Caddy Sync
 // ============================================================================
 
-// SyncToCaddy generates the full Caddy configuration from DB and pushes it.
-// This is the core operation: DB → JSON config → POST /load.
-func (s *Service) SyncToCaddy(ctx context.Context) error {
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
-
+// buildConfig loads all proxy data from the database and builds the Caddy config.
+// This is an internal helper without locking—callers must handle synchronization.
+func (s *Service) buildConfig(ctx context.Context) (*caddy.CaddyConfig, []*models.ProxyHost, error) {
 	// 1. Load all enabled hosts
 	hosts, err := s.hosts.ListAll(ctx, true)
 	if err != nil {
-		return fmt.Errorf("list proxy hosts: %w", err)
+		return nil, nil, fmt.Errorf("list proxy hosts: %w", err)
 	}
 
 	// 2. Load custom headers for each host
@@ -429,7 +426,6 @@ func (s *Service) SyncToCaddy(ctx context.Context) error {
 		s.logger.Error("Failed to load DNS providers", "error", err)
 	} else {
 		for _, p := range allDNS {
-			// Decrypt API token for Caddy config
 			decrypted, err := s.enc.DecryptString(p.APIToken)
 			if err != nil {
 				s.logger.Error("Failed to decrypt DNS token", "provider_id", p.ID, "error", err)
@@ -447,7 +443,6 @@ func (s *Service) SyncToCaddy(ctx context.Context) error {
 		s.logger.Error("Failed to load certificates", "error", err)
 	} else {
 		for _, c := range allCerts {
-			// Decrypt private key for Caddy config
 			if c.KeyPEM != "" {
 				decrypted, err := s.enc.DecryptString(c.KeyPEM)
 				if err != nil {
@@ -462,15 +457,42 @@ func (s *Service) SyncToCaddy(ctx context.Context) error {
 
 	// 5. Build Caddy config
 	config := caddy.BuildConfig(hosts, dnsProviders, customCerts, s.cfg.ACMEEmail, s.cfg.ListenHTTP, s.cfg.ListenHTTPS)
+	return config, hosts, nil
+}
 
-	// 6. Push to Caddy
+// BuildCurrentConfig builds the current Caddy configuration from the database
+// without pushing it. This allows callers (e.g. the Caddy adapter) to extend
+// the config with additional routes (redirections, streams, etc.) before pushing.
+func (s *Service) BuildCurrentConfig(ctx context.Context) (*caddy.CaddyConfig, error) {
+	config, _, err := s.buildConfig(ctx)
+	return config, err
+}
+
+// LoadCaddyConfig atomically pushes a complete Caddy configuration via the admin API.
+// This is intended for callers that build extended configs with additional features.
+func (s *Service) LoadCaddyConfig(ctx context.Context, config *caddy.CaddyConfig) error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	return s.caddy.Load(ctx, config)
+}
+
+// SyncToCaddy generates the full Caddy configuration from DB and pushes it.
+// This is the core operation: DB → JSON config → POST /load.
+func (s *Service) SyncToCaddy(ctx context.Context) error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
+	config, hosts, err := s.buildConfig(ctx)
+	if err != nil {
+		return err
+	}
+
 	if err := s.caddy.Load(ctx, config); err != nil {
 		return fmt.Errorf("caddy load: %w", err)
 	}
 
 	s.logger.Info("Synced proxy configuration to Caddy", "host_count", len(hosts))
 
-	// 7. Update status for all synced hosts
 	for _, h := range hosts {
 		_ = s.hosts.UpdateStatus(ctx, h.ID, models.ProxyHostStatusActive, "")
 	}

@@ -174,40 +174,42 @@ templ updatesTab(data UpdatesData) {
 		}
 	</div>
 
-	<!-- Manual Update -->
-	<div class="card">
-		<div class="px-5 py-4 border-b border-dark-700">
-			<h2 class="font-medium text-white">Manual Update</h2>
+	<!-- Manual Update (only shown when containers exist) -->
+	if len(data.Containers) > 0 {
+		<div class="card">
+			<div class="px-5 py-4 border-b border-dark-700">
+				<h2 class="font-medium text-white">Manual Update</h2>
+			</div>
+			<div class="p-5">
+				<p class="text-sm text-gray-400 mb-4">Update a specific container to a target version</p>
+				<form method="POST" action="/updates/manual" class="flex items-end gap-4">
+					<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+					<div class="flex-1">
+						<label class="block text-sm font-medium text-gray-300 mb-2">Container</label>
+						<select name="container_id" required class="input">
+							<option value="">Select container...</option>
+							for _, c := range data.Containers {
+								<option value={ c.ID }>{ c.Name }</option>
+							}
+						</select>
+					</div>
+					<div class="w-48">
+						<label class="block text-sm font-medium text-gray-300 mb-2">Target Version</label>
+						<input type="text" name="target_version" required class="input" placeholder="e.g. 1.2.3 or latest"/>
+					</div>
+					<div class="flex items-center gap-3">
+						<label class="flex items-center gap-2 text-sm text-gray-300">
+							<input type="checkbox" name="backup" value="true" checked class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
+							Backup first
+						</label>
+						<button type="submit" onclick="return confirm('Update container to specified version?')" class="btn-primary">
+							<i class="fas fa-download mr-2"></i>Update
+						</button>
+					</div>
+				</form>
+			</div>
 		</div>
-		<div class="p-5">
-			<p class="text-sm text-gray-400 mb-4">Update a container to a specific version manually</p>
-			<form method="POST" action="/updates/manual" class="flex items-end gap-4">
-				<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
-				<div class="flex-1">
-					<label class="block text-sm font-medium text-gray-300 mb-2">Container</label>
-					<select name="container_id" required class="input">
-						<option value="">Select container...</option>
-						for _, c := range data.Containers {
-							<option value={ c.ID }>{ c.Name }</option>
-						}
-					</select>
-				</div>
-				<div class="w-48">
-					<label class="block text-sm font-medium text-gray-300 mb-2">Target Version</label>
-					<input type="text" name="target_version" required class="input" placeholder="e.g. 1.2.3 or latest"/>
-				</div>
-				<div class="flex items-center gap-3">
-					<label class="flex items-center gap-2 text-sm text-gray-300">
-						<input type="checkbox" name="backup" value="true" checked class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
-						Backup first
-					</label>
-					<button type="submit" onclick="return confirm('Update container to specified version?')" class="btn-primary">
-						<i class="fas fa-download mr-2"></i>Update
-					</button>
-				</div>
-			</form>
-		</div>
-	</div>
+	}
 }
 
 templ policiesTab(data UpdatesData) {

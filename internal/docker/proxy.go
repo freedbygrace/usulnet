@@ -523,6 +523,27 @@ func (p *AgentProxyClient) ImageSize(ctx context.Context, ref string) (int64, er
 }
 
 // ============================================================================
+// Build cache operations
+// ============================================================================
+
+func (p *AgentProxyClient) BuildCachePrune(ctx context.Context, all bool) (int64, error) {
+	result, err := p.sendCmd(ctx, protocol.CmdSystemPrune, protocol.CommandParams{
+		PruneAll: all,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if result.Data != nil {
+		if m, ok := result.Data.(map[string]interface{}); ok {
+			if freed, ok := m["space_freed"].(float64); ok {
+				return int64(freed), nil
+			}
+		}
+	}
+	return 0, nil
+}
+
+// ============================================================================
 // Volume operations
 // ============================================================================
 
@@ -913,6 +934,24 @@ func (p *AgentProxyClient) AllContainerStats(ctx context.Context) (map[string]*C
 
 // ============================================================================
 // Swarm operations (proxy stubs - Swarm is managed on the master node directly)
+// ============================================================================
+//
+// Architecture decision (DEPT-05-T05):
+// Swarm operations are inherently cluster-level management tasks that MUST
+// execute on the Swarm manager node. The AgentProxyClient operates on individual
+// Docker hosts (agents), not on the Swarm control plane. Proxying these operations
+// to remote agents would be architecturally incorrect because:
+//
+//   - SwarmInit/Join/Leave alter cluster membership (manager-only)
+//   - SwarmInspect reads cluster-wide state (available only on managers)
+//   - Service CRUD operates on the Swarm scheduler (manager-only)
+//   - Node operations manage cluster membership (manager-only)
+//
+// All Swarm operations are handled directly on the master node via the local
+// Docker client (LocalClient), which has direct access to the Swarm manager.
+// The proxy layer correctly returns errSwarmNotProxied for all Swarm methods,
+// guiding callers to use the master node directly.
+//
 // ============================================================================
 
 var errSwarmNotProxied = fmt.Errorf("Swarm operations are not proxied to agents; use the master node directly")

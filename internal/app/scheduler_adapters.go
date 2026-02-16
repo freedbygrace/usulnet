@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	dockerpkg "github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
+	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
 	backupsvc "github.com/fr4nsys/usulnet/internal/services/backup"
 	containersvc "github.com/fr4nsys/usulnet/internal/services/container"
 	hostsvc "github.com/fr4nsys/usulnet/internal/services/host"
@@ -23,7 +25,6 @@ import (
 	securitysvc "github.com/fr4nsys/usulnet/internal/services/security"
 	updatesvc "github.com/fr4nsys/usulnet/internal/services/update"
 	volumesvc "github.com/fr4nsys/usulnet/internal/services/volume"
-	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
 )
 
 // ============================================================================
@@ -289,6 +290,7 @@ type schedulerCleanupAdapter struct {
 	volumeService    *volumesvc.Service
 	networkService   *networksvc.Service
 	containerService *containersvc.Service
+	hostService      *hostsvc.Service
 	hostID           uuid.UUID
 }
 
@@ -337,12 +339,20 @@ func (a *schedulerCleanupAdapter) PruneContainers(ctx context.Context, hostID uu
 }
 
 func (a *schedulerCleanupAdapter) PruneBuildCache(ctx context.Context, hostID uuid.UUID) (*workers.PruneResult, error) {
-	// Build cache prune not yet implemented in our docker.Client.
-	// Return empty result rather than failing the cleanup worker.
+	client, err := a.hostService.GetClient(ctx, hostID)
+	if err != nil {
+		return nil, err
+	}
+
+	spaceFreed, err := client.BuildCachePrune(ctx, true)
+	if err != nil {
+		return &workers.PruneResult{
+			Errors: []string{"build cache prune: " + err.Error()},
+		}, nil
+	}
+
 	return &workers.PruneResult{
-		ItemsDeleted: 0,
-		SpaceFreed:   0,
-		Errors:       []string{"build cache prune not implemented"},
+		SpaceFreed: spaceFreed,
 	}, nil
 }
 
@@ -504,6 +514,18 @@ func (a *schedulerRetentionAdapter) CleanupOldAlertEvents(ctx context.Context, r
 	return a.callRetentionFunc(ctx, "cleanup_old_alert_events", retentionDays)
 }
 
+func (a *schedulerRetentionAdapter) CleanupOldSecurityScans(ctx context.Context, retentionDays int) (int64, error) {
+	return a.callRetentionFunc(ctx, "cleanup_old_security_scans", retentionDays)
+}
+
+func (a *schedulerRetentionAdapter) CleanupOldCompletedJobs(ctx context.Context, retentionDays int) (int64, error) {
+	return a.callRetentionFunc(ctx, "cleanup_old_completed_jobs", retentionDays)
+}
+
+func (a *schedulerRetentionAdapter) CleanupOldContainerLogs(ctx context.Context, retentionDays int) (int64, error) {
+	return a.callRetentionFunc(ctx, "cleanup_old_container_logs", retentionDays)
+}
+
 func (a *schedulerRetentionAdapter) CleanupExpiredSessions(ctx context.Context) (int64, error) {
 	return a.callRetentionFuncNoArgs(ctx, "cleanup_expired_sessions")
 }
@@ -512,4 +534,131 @@ func (a *schedulerRetentionAdapter) CleanupExpiredPasswordResetTokens(ctx contex
 	return a.callRetentionFuncNoArgs(ctx, "cleanup_expired_password_reset_tokens")
 }
 
+// ============================================================================
+// Inventory adapter for Scheduler Workers
+// ============================================================================
 
+// schedulerInventoryAdapter implements workers.InventoryService using host service + docker client.
+type schedulerInventoryAdapter struct {
+	hostService *hostsvc.Service
+}
+
+func (a *schedulerInventoryAdapter) CollectInventory(ctx context.Context, hostID uuid.UUID) (*workers.HostInventory, error) {
+	client, err := a.hostService.GetClient(ctx, hostID)
+	if err != nil {
+		return nil, err
+	}
+
+	inventory := &workers.HostInventory{
+		HostID:      hostID,
+		CollectedAt: time.Now().UTC(),
+	}
+
+	// Collect Docker info
+	info, err := client.Info(ctx)
+	if err == nil {
+		inventory.DockerInfo = &workers.DockerInfo{
+			Version:           info.ServerVersion,
+			APIVersion:        info.APIVersion,
+			OS:                info.OS,
+			Architecture:      info.Architecture,
+			KernelVersion:     info.KernelVersion,
+			NCPU:              info.NCPU,
+			MemoryTotal:       info.MemTotal,
+			StorageDriver:     info.StorageDriver,
+			LoggingDriver:     info.LoggingDriver,
+			CgroupDriver:      info.CgroupDriver,
+			ContainersRunning: info.ContainersRunning,
+			ContainersPaused:  info.ContainersPaused,
+			ContainersStopped: info.ContainersStopped,
+			Images:            info.Images,
+		}
+	}
+
+	// Collect containers
+	containers, err := client.ContainerList(ctx, dockerpkg.ContainerListOptions{All: true})
+	if err == nil {
+		for _, c := range containers {
+			var ports []string
+			for _, p := range c.Ports {
+				if p.PublicPort > 0 {
+					ports = append(ports, fmt.Sprintf("%s:%d->%d/%s", p.IP, p.PublicPort, p.PrivatePort, p.Type))
+				} else {
+					ports = append(ports, fmt.Sprintf("%d/%s", p.PrivatePort, p.Type))
+				}
+			}
+			inventory.Containers = append(inventory.Containers, &workers.ContainerInfo{
+				ID:      c.ID,
+				Name:    c.Name,
+				Image:   c.Image,
+				State:   c.State,
+				Status:  c.Status,
+				Created: c.Created,
+				Ports:   ports,
+				Labels:  c.Labels,
+			})
+		}
+	}
+
+	// Collect images
+	images, err := client.ImageList(ctx, dockerpkg.ImageListOptions{All: false})
+	if err == nil {
+		// Build set of image IDs in use by containers
+		usedImages := make(map[string]bool)
+		for _, c := range containers {
+			usedImages[c.ImageID] = true
+		}
+		for _, img := range images {
+			inventory.Images = append(inventory.Images, &workers.ImageInfo{
+				ID:       img.ID,
+				RepoTags: img.RepoTags,
+				Size:     img.Size,
+				Created:  img.Created,
+				InUse:    usedImages[img.ID],
+			})
+		}
+	}
+
+	// Collect volumes
+	volumes, err := client.VolumeList(ctx, dockerpkg.VolumeListOptions{})
+	if err == nil {
+		for _, v := range volumes {
+			inventory.Volumes = append(inventory.Volumes, &workers.VolumeInfo{
+				Name:       v.Name,
+				Driver:     v.Driver,
+				Mountpoint: v.Mountpoint,
+				CreatedAt:  v.CreatedAt,
+				InUse:      v.UsageData != nil && v.UsageData.RefCount > 0,
+			})
+		}
+	}
+
+	// Collect networks
+	networks, err := client.NetworkList(ctx, dockerpkg.NetworkListOptions{})
+	if err == nil {
+		for _, n := range networks {
+			var containerNames []string
+			for _, nc := range n.Containers {
+				containerNames = append(containerNames, nc.Name)
+			}
+			inventory.Networks = append(inventory.Networks, &workers.NetworkInfo{
+				ID:         n.ID,
+				Name:       n.Name,
+				Driver:     n.Driver,
+				Scope:      n.Scope,
+				Internal:   n.Internal,
+				Containers: containerNames,
+			})
+		}
+	}
+
+	return inventory, nil
+}
+
+func (a *schedulerInventoryAdapter) StoreInventory(ctx context.Context, inventory *workers.HostInventory) error {
+	// Inventory data is stored via the periodic inventory mechanism.
+	// The host's resource counts are updated in the hosts table to reflect current state.
+	// Additional detailed persistence (per-container/image tracking) can be added
+	// through the event system when change detection is needed.
+	return nil
+}

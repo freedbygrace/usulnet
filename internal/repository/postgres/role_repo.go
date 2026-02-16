@@ -291,10 +291,14 @@ func (r *RoleRepository) CountCustomRoles(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// CountUsersWithRole counts users assigned to a role
+// CountUsersWithRole counts users assigned to a role by matching on the role
+// name column, since user creation sets users.role (not users.role_id).
 func (r *RoleRepository) CountUsersWithRole(ctx context.Context, roleID uuid.UUID) (int, error) {
 	var count int
-	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE role_id = $1", roleID).Scan(&count)
+	err := r.db.QueryRow(ctx,
+		"SELECT COUNT(*) FROM users u JOIN roles r ON r.id = $1 WHERE u.role = r.name",
+		roleID,
+	).Scan(&count)
 	if err != nil {
 		return 0, errors.Wrap(err, errors.CodeDatabaseError, "failed to count users with role")
 	}

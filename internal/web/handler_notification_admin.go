@@ -195,6 +195,59 @@ func (h *Handler) NotificationChannelCreate(w http.ResponseWriter, r *http.Reque
 	http.Redirect(w, r, "/admin/notifications/channels", http.StatusSeeOther)
 }
 
+// NotificationChannelEditTempl renders the notification channel edit page.
+// For now, redirects to the channels page with the channel pre-selected.
+func (h *Handler) NotificationChannelEditTempl(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		http.Redirect(w, r, "/admin/notifications/channels", http.StatusSeeOther)
+		return
+	}
+
+	pageData := h.prepareTemplPageData(r, "Edit Channel: "+name, "notification-channels")
+
+	var channelViews []admin.ChannelView
+	var editChannel *admin.ChannelView
+
+	if h.notificationConfigRepo != nil {
+		configs, err := h.notificationConfigRepo.GetChannelConfigs(r.Context())
+		if err == nil {
+			for _, cfg := range configs {
+				var types []string
+				for _, t := range cfg.NotificationTypes {
+					types = append(types, string(t))
+				}
+				cv := admin.ChannelView{
+					Name:              cfg.Name,
+					Type:              cfg.Type,
+					Enabled:           cfg.Enabled,
+					Settings:          cfg.Settings,
+					NotificationTypes: types,
+					MinPriority:       cfg.MinPriority.String(),
+				}
+				channelViews = append(channelViews, cv)
+				if cfg.Name == name {
+					editChannel = &cv
+				}
+			}
+		}
+	}
+
+	if editChannel == nil {
+		h.setFlash(w, r, "error", "Channel not found: "+name)
+		http.Redirect(w, r, "/admin/notifications/channels", http.StatusSeeOther)
+		return
+	}
+
+	data := admin.NotificationChannelsData{
+		PageData:    pageData,
+		Channels:    channelViews,
+		EditChannel: editChannel,
+	}
+
+	h.renderTempl(w, r, admin.NotificationChannels(data))
+}
+
 // NotificationChannelDelete deletes a notification channel.
 func (h *Handler) NotificationChannelDelete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")

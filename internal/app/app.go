@@ -139,6 +139,12 @@ type Application struct {
 
 	// PKI
 	pkiManager *crypto.PKIManager
+
+	// Packet capture (requires cleanup on shutdown)
+	captureService *capturesvc.Service
+
+	// Container service
+	containerService *containersvc.Service
 }
 
 // Run starts the application with the given configuration
@@ -568,6 +574,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	// Container service (syncs container state from Docker to DB)
 	containerRepo := postgres.NewContainerRepository(app.DB)
 	containerService := containersvc.NewService(containerRepo, hostService, containersvc.DefaultConfig(), app.Logger)
+	app.containerService = containerService
 	if err := containerService.Start(ctx); err != nil {
 		app.Logger.Error("Failed to start container service", "error", err)
 	}
@@ -773,6 +780,9 @@ func (app *Application) startStandalone(ctx context.Context) error {
 				backupCfg.CompressionLevel = app.Config.Storage.Backup.CompressionLevel
 			}
 
+			// Stack provider bridges backup service to stack operations
+			stackProvider := backupsvc.NewDockerStackProvider(stackService, containerService)
+
 			var bkErr error
 			backupService, bkErr = backupsvc.NewService(
 				localStorage,
@@ -781,6 +791,7 @@ func (app *Application) startStandalone(ctx context.Context) error {
 				containerProvider,
 				backupCfg,
 				app.Logger,
+				backupsvc.WithStackProviderOption(stackProvider),
 			)
 			if bkErr != nil {
 				app.Logger.Error("Failed to create backup service", "error", bkErr)
@@ -924,13 +935,14 @@ func (app *Application) startStandalone(ctx context.Context) error {
 			volumeService:    volumeService,
 			networkService:   networkService,
 			containerService: containerService,
+			hostService:      hostService,
 			hostID:           defaultHostID,
 		},
 		JobCleanupService:   &schedulerJobCleanupAdapter{db: app.DB},
 		RetentionService:    &schedulerRetentionAdapter{db: app.DB},
 		NotificationService: &schedulerNotificationAdapter{svc: notificationService},
 		MetricsService:      nil, // Assigned later after metrics init
-		InventoryService:    nil, // Not implemented yet
+		InventoryService:    &schedulerInventoryAdapter{hostService: hostService},
 		Logger:              app.Logger,
 	}
 
@@ -956,6 +968,11 @@ func (app *Application) startStandalone(ctx context.Context) error {
 
 		// Register default retention scheduled job (daily at 03:00 UTC)
 		app.ensureRetentionScheduledJob(ctx, sched)
+
+		// Register automatic database backup job (daily at 02:00 UTC)
+		if backupService != nil {
+			app.ensureDatabaseBackupScheduledJob(ctx, sched, defaultHostID)
+		}
 	}
 
 	// =========================================================================
@@ -1031,11 +1048,61 @@ func (app *Application) startStandalone(ctx context.Context) error {
 		apiHandlers.Job = handlers.NewJobsHandler(app.schedulerService, app.Logger)
 	}
 
+	// Settings handler (uses config variable repo for app settings + LDAP config repo)
+	{
+		settingsConfigRepo := postgres.NewConfigVariableRepository(app.DB, app.Logger)
+		settingsLDAPRepo := postgres.NewLDAPConfigRepository(app.DB, app.Logger)
+		apiHandlers.Settings = handlers.NewSettingsHandler(settingsConfigRepo, settingsLDAPRepo, nil, app.Logger)
+	}
+
+	// License handler
+	if licenseProvider != nil {
+		apiHandlers.License = handlers.NewLicenseHandler(licenseProvider, nil, app.Logger)
+	}
+
 	// OpenAPI documentation endpoint
 	apiHandlers.OpenAPI = handlers.NewOpenAPIHandler(Version)
 
 	// Now build the router with all handlers populated
 	app.Server.Setup()
+
+	// =========================================================================
+	// HEALTH CHECKER REGISTRATION
+	// =========================================================================
+	// Register health checkers for all infrastructure dependencies so that
+	// /health, /healthz, and /ready endpoints report component-level status.
+
+	// PostgreSQL health checker
+	if app.DB != nil {
+		app.Server.RegisterDatabaseHealth(func(ctx context.Context) error {
+			return app.DB.Pool().Ping(ctx)
+		})
+		app.Logger.Info("Health checker registered: postgresql")
+	}
+
+	// Redis health checker
+	if app.Redis != nil {
+		app.Server.RegisterRedisHealth(func(ctx context.Context) error {
+			return app.Redis.Ping(ctx)
+		})
+		app.Logger.Info("Health checker registered: redis")
+	}
+
+	// Docker Engine health checker
+	if dockerClient != nil {
+		app.Server.RegisterDockerHealth(func(ctx context.Context) error {
+			return dockerClient.Ping(ctx)
+		})
+		app.Logger.Info("Health checker registered: docker")
+	}
+
+	// NATS health checker
+	if app.NATS != nil {
+		app.Server.RegisterNATSHealth(func() bool {
+			return app.NATS.IsConnected()
+		})
+		app.Logger.Info("Health checker registered: nats")
+	}
 
 	app.Logger.Info("API handlers initialized",
 		"handlers_active", countActiveHandlers(apiHandlers),
@@ -1291,8 +1358,8 @@ func (app *Application) startStandalone(ctx context.Context) error {
 	// Setup Packet Capture Service
 	{
 		captureRepo := postgres.NewCaptureRepository(app.DB, app.Logger)
-		captureService := capturesvc.NewService(captureRepo, app.Logger)
-		hdlDeps.CaptureService = captureService
+		app.captureService = capturesvc.NewService(captureRepo, app.Logger)
+		hdlDeps.CaptureService = app.captureService
 		app.Logger.Info("Packet capture service enabled")
 	}
 
@@ -1580,7 +1647,7 @@ func (app *Application) startMaster(ctx context.Context) error {
 
 	// Create gateway server
 	gatewayCfg := gateway.DefaultServerConfig()
-	gw, err := gateway.NewServer(app.NATS, hostRepo, gatewayCfg, app.Logger)
+	gw, err := gateway.NewServer(app.NATS, hostRepo, app.containerService, gatewayCfg, app.Logger)
 	if err != nil {
 		return fmt.Errorf("failed to create gateway server: %w", err)
 	}
@@ -1700,6 +1767,12 @@ func (app *Application) shutdown(ctx context.Context) error {
 		app.Logger.Info("Notification service stopped")
 	}
 
+	// Stop active packet captures
+	if app.captureService != nil {
+		app.captureService.Cleanup()
+		app.Logger.Info("Packet capture service stopped")
+	}
+
 	// Stop backup service
 	if app.backupService != nil {
 		if err := app.backupService.Stop(); err != nil {
@@ -1775,6 +1848,54 @@ func (app *Application) ensureRetentionScheduledJob(ctx context.Context, sched *
 	app.Logger.Info("Retention scheduled job created (daily at 03:00 UTC)")
 }
 
+// ensureDatabaseBackupScheduledJob creates the default automatic database backup
+// job if it doesn't already exist. Runs daily at 02:00 UTC with gzip compression,
+// encryption enabled, and 7-day retention.
+func (app *Application) ensureDatabaseBackupScheduledJob(ctx context.Context, sched *scheduler.Scheduler, hostID uuid.UUID) {
+	existing, err := sched.ListScheduledJobs(ctx, false)
+	if err != nil {
+		app.Logger.Warn("Failed to list scheduled jobs for backup check", "error", err)
+		return
+	}
+
+	// Check if a database backup job already exists
+	for _, job := range existing {
+		if job.Type == models.JobTypeBackupCreate && job.Name == "Automatic Database Backup" {
+			app.Logger.Debug("Database backup scheduled job already exists", "job_id", job.ID, "schedule", job.Schedule)
+			return
+		}
+	}
+
+	// Create default database backup job: daily at 02:00 UTC
+	targetID := "postgresql"
+	targetName := "PostgreSQL Database"
+	retentionDays := 7
+	_, err = sched.CreateScheduledJob(ctx, models.CreateScheduledJobInput{
+		Name:        "Automatic Database Backup",
+		Type:        models.JobTypeBackupCreate,
+		Schedule:    "0 2 * * *",
+		HostID:      &hostID,
+		TargetID:    &targetID,
+		TargetName:  &targetName,
+		IsEnabled:   true,
+		MaxAttempts: 3,
+		Priority:    models.JobPriorityNormal,
+		Payload: models.BackupPayload{
+			Type:          string(models.BackupTypeSystem),
+			TargetID:      targetID,
+			Compression:   "gzip",
+			Encrypted:     true,
+			RetentionDays: retentionDays,
+		},
+	})
+	if err != nil {
+		app.Logger.Error("Failed to create database backup scheduled job", "error", err)
+		return
+	}
+
+	app.Logger.Info("Automatic database backup scheduled job created (daily at 02:00 UTC, 7-day retention)")
+}
+
 // bootstrapLocalHost ensures a local Docker host row exists in the hosts table.
 // This is required for foreign key constraints when syncing containers.
 func (app *Application) bootstrapLocalHost(ctx context.Context, hostID uuid.UUID) error {
@@ -1837,10 +1958,8 @@ func (app *Application) bootstrapAdminUser(ctx context.Context, userRepo *postgr
 		return fmt.Errorf("create admin user: %w", err)
 	}
 
-	app.Logger.Info("Default admin user created",
+	app.Logger.Warn("Default admin user created — CHANGE PASSWORD IMMEDIATELY after first login",
 		"username", "admin",
-		"password", defaultPassword,
-		"warning", "CHANGE PASSWORD AFTER FIRST LOGIN",
 	)
 
 	return nil
@@ -1927,10 +2046,13 @@ func ResetAdminPassword(cfgFile, newPassword string) error {
 	// Update existing admin
 	admin.PasswordHash = hash
 	admin.IsActive = true
-	admin.FailedLoginAttempts = 0
-	admin.LockedUntil = nil
 	if err := userRepo.Update(ctx, admin); err != nil {
 		return fmt.Errorf("failed to update admin password: %w", err)
+	}
+
+	// Actually unlock the account (Update doesn't touch failed_login_attempts/locked_until)
+	if err := userRepo.Unlock(ctx, admin.ID); err != nil {
+		return fmt.Errorf("failed to unlock admin account: %w", err)
 	}
 
 	fmt.Println("Admin password reset successfully. Account unlocked.")

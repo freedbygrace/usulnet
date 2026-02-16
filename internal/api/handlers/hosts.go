@@ -43,35 +43,47 @@ func (h *HostHandler) SetLicenseProvider(provider middleware.LicenseProvider) {
 func (h *HostHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
+	// Read-only routes (viewer+)
 	r.Get("/", h.ListHosts)
 	r.Get("/summaries", h.ListSummaries)
 	r.Get("/stats", h.GetStats)
-	r.Post("/test", h.TestConnection)
 
-	// Node creation enforces MaxNodes limit
+	// Operator+ for mutations
 	r.Group(func(r chi.Router) {
-		if h.licenseProvider != nil {
-			r.Use(middleware.RequireLimit(
-				h.licenseProvider,
-				"nodes",
-				func(r *http.Request) int {
-					stats, err := h.hostService.GetStats(r.Context())
-					if err != nil {
-						return 0
-					}
-					return stats.Total
-				},
-				func(l license.Limits) int { return l.MaxNodes },
-			))
-		}
-		r.Post("/", h.CreateHost)
+		r.Use(middleware.RequireOperator)
+		r.Post("/test", h.TestConnection)
+
+		// Node creation enforces MaxNodes limit
+		r.Group(func(r chi.Router) {
+			if h.licenseProvider != nil {
+				r.Use(middleware.RequireLimit(
+					h.licenseProvider,
+					"nodes",
+					func(r *http.Request) int {
+						stats, err := h.hostService.GetStats(r.Context())
+						if err != nil {
+							return 0
+						}
+						return stats.Total
+					},
+					func(l license.Limits) int { return l.MaxNodes },
+				))
+			}
+			r.Post("/", h.CreateHost)
+		})
 	})
 
 	r.Route("/{hostID}", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.GetHost)
-		r.Put("/", h.UpdateHost)
-		r.Delete("/", h.DeleteHost)
-		r.Post("/reconnect", h.Reconnect)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Put("/", h.UpdateHost)
+			r.Delete("/", h.DeleteHost)
+			r.Post("/reconnect", h.Reconnect)
+		})
 	})
 
 	return r

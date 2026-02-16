@@ -39,7 +39,7 @@ func TestEditionConstants(t *testing.T) {
 // ============================================================================
 
 func TestFeatureConstants(t *testing.T) {
-	// Verify all 13 feature constants have expected string values
+	// Verify all 22 feature constants have expected string values
 	features := map[Feature]string{
 		FeatureCustomRoles:       "custom_roles",
 		FeatureOAuth:             "oauth",
@@ -54,6 +54,15 @@ func TestFeatureConstants(t *testing.T) {
 		FeatureSharedTerminals:   "shared_terminals",
 		FeatureWhiteLabel:        "white_label",
 		FeatureSwarm:             "swarm",
+		FeatureCompliance:        "compliance",
+		FeatureOPAPolicies:       "opa_policies",
+		FeatureImageSigning:      "image_signing",
+		FeatureRuntimeSecurity:   "runtime_security",
+		FeatureLogAggregation:    "log_aggregation",
+		FeatureCustomDashboards:  "custom_dashboards",
+		FeatureGitSync:           "git_sync",
+		FeatureEphemeralEnvs:     "ephemeral_envs",
+		FeatureManifestBuilder:   "manifest_builder",
 	}
 
 	for feat, want := range features {
@@ -70,9 +79,9 @@ func TestFeatureConstants(t *testing.T) {
 func TestAllBusinessFeatures(t *testing.T) {
 	features := AllBusinessFeatures()
 
-	// Business edition has exactly 9 features
-	if len(features) != 9 {
-		t.Fatalf("AllBusinessFeatures() returned %d features, want 9", len(features))
+	// Business edition has exactly 10 features
+	if len(features) != 10 {
+		t.Fatalf("AllBusinessFeatures() returned %d features, want 10", len(features))
 	}
 
 	// Business must include these features
@@ -86,6 +95,7 @@ func TestAllBusinessFeatures(t *testing.T) {
 		FeatureAPIKeys,
 		FeaturePrioritySupport,
 		FeatureSwarm,
+		FeatureGitSync,
 	}
 
 	featureSet := make(map[Feature]bool)
@@ -116,9 +126,9 @@ func TestAllBusinessFeatures(t *testing.T) {
 func TestAllEnterpriseFeatures(t *testing.T) {
 	features := AllEnterpriseFeatures()
 
-	// Enterprise has all 13 features
-	if len(features) != 13 {
-		t.Fatalf("AllEnterpriseFeatures() returned %d features, want 13", len(features))
+	// Enterprise has all 22 features (10 business + 12 enterprise-only)
+	if len(features) != 22 {
+		t.Fatalf("AllEnterpriseFeatures() returned %d features, want 22", len(features))
 	}
 
 	// Enterprise must include all business features
@@ -135,12 +145,20 @@ func TestAllEnterpriseFeatures(t *testing.T) {
 		}
 	}
 
-	// Plus the 4 enterprise-only features
+	// Plus the 12 enterprise-only features
 	enterpriseOnly := []Feature{
 		FeatureSSOSAML,
 		FeatureHAMode,
 		FeatureSharedTerminals,
 		FeatureWhiteLabel,
+		FeatureCompliance,
+		FeatureOPAPolicies,
+		FeatureImageSigning,
+		FeatureRuntimeSecurity,
+		FeatureLogAggregation,
+		FeatureCustomDashboards,
+		FeatureEphemeralEnvs,
+		FeatureManifestBuilder,
 	}
 	featureSet := make(map[Feature]bool)
 	for _, f := range features {
@@ -169,7 +187,7 @@ func TestCELimits(t *testing.T) {
 		{"MaxUsers", limits.MaxUsers, 3},
 		{"MaxTeams", limits.MaxTeams, 1},
 		{"MaxCustomRoles", limits.MaxCustomRoles, 1},
-		{"MaxLDAPServers", limits.MaxLDAPServers, 0}, // disabled
+		{"MaxLDAPServers", limits.MaxLDAPServers, 1}, // 1 LDAP server in CE
 		{"MaxOAuthProviders", limits.MaxOAuthProviders, 0}, // disabled
 		{"MaxAPIKeys", limits.MaxAPIKeys, 3},
 		{"MaxGitConnections", limits.MaxGitConnections, 1},
@@ -633,17 +651,16 @@ func TestLimits_ZeroMeansUnlimited(t *testing.T) {
 }
 
 // ============================================================================
-// CE has no LDAP and no OAuth (disabled = 0)
+// CE feature gating: LDAP capped at 1, OAuth disabled
 // ============================================================================
 
 func TestCE_DisabledFeatures(t *testing.T) {
 	limits := CELimits()
 
-	// In CE, LDAP and OAuth are disabled entirely (0 = disabled, not unlimited)
-	// These are special cases where 0 means disabled because the feature flags
-	// (FeatureLDAP, FeatureOAuth) gate access before limits are checked
-	if limits.MaxLDAPServers != 0 {
-		t.Errorf("CE MaxLDAPServers = %d, want 0 (disabled)", limits.MaxLDAPServers)
+	// In CE, LDAP is capped at 1 server and OAuth is disabled entirely (0 = disabled).
+	// The feature flags (FeatureLDAP, FeatureOAuth) gate access before limits are checked.
+	if limits.MaxLDAPServers != 1 {
+		t.Errorf("CE MaxLDAPServers = %d, want 1 (capped)", limits.MaxLDAPServers)
 	}
 	if limits.MaxOAuthProviders != 0 {
 		t.Errorf("CE MaxOAuthProviders = %d, want 0 (disabled)", limits.MaxOAuthProviders)

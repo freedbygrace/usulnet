@@ -148,6 +148,8 @@ func (s *WebSessionStore) Delete(r *http.Request, w http.ResponseWriter, name st
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 

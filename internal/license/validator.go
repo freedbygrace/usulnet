@@ -121,7 +121,7 @@ func ClaimsToInfo(claims *Claims, instanceID string) *Info {
 	case Business:
 		info.Limits = BusinessDefaultLimits()
 		// Purchased nodes (from JWT "nod") are added on top of the CE base
-		// so a customer who buys 3 nodes gets 3 + 2 (CE) = 5 total.
+		// so a customer who buys 3 nodes gets 3 + 1 (CE) = 4 total.
 		if claims.MaxNodes > 0 {
 			info.Limits.MaxNodes = claims.MaxNodes + CEBaseNodes
 		}

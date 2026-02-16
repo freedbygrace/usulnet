@@ -42,34 +42,40 @@ func (h *NotificationHandler) SetLicenseProvider(provider middleware.LicenseProv
 func (h *NotificationHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Channels
+	// Read-only routes (viewer+)
 	r.Get("/channels", h.ListChannels)
-	r.Delete("/channels/{channelName}", h.RemoveChannel)
-	r.Post("/channels/{channelName}/test", h.TestChannel)
-
-	// Channel registration enforces MaxNotificationChannels limit
-	r.Group(func(r chi.Router) {
-		if h.licenseProvider != nil {
-			r.Use(middleware.RequireLimit(
-				h.licenseProvider,
-				"notification channels",
-				func(r *http.Request) int {
-					return len(h.notificationService.ListChannels())
-				},
-				func(l license.Limits) int { return l.MaxNotificationChannels },
-			))
-		}
-		r.Post("/channels", h.RegisterChannel)
-	})
-
-	// Send notification
-	r.Post("/send", h.SendNotification)
-
-	// Stats and logs
 	r.Get("/stats", h.GetStats)
 	r.Get("/logs", h.GetLogs)
 	r.Get("/throttle-stats", h.GetThrottleStats)
-	r.Post("/throttle/reset", h.ResetThrottle)
+
+	// Operator+ for mutations
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireOperator)
+		r.Post("/channels/{channelName}/test", h.TestChannel)
+		r.Post("/send", h.SendNotification)
+		r.Post("/throttle/reset", h.ResetThrottle)
+	})
+
+	// Admin-only: channel management
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAdmin)
+		r.Delete("/channels/{channelName}", h.RemoveChannel)
+
+		// Channel registration enforces MaxNotificationChannels limit
+		r.Group(func(r chi.Router) {
+			if h.licenseProvider != nil {
+				r.Use(middleware.RequireLimit(
+					h.licenseProvider,
+					"notification channels",
+					func(r *http.Request) int {
+						return len(h.notificationService.ListChannels())
+					},
+					func(l license.Limits) int { return l.MaxNotificationChannels },
+				))
+			}
+			r.Post("/channels", h.RegisterChannel)
+		})
+	})
 
 	return r
 }

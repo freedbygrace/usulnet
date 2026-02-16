@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/services/image"
@@ -36,24 +37,32 @@ func (h *ImageHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Route("/{hostID}", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.ListImages)
 		r.Get("/dangling", h.ListDangling)
+		r.Get("/search", h.SearchImages)
 
 		r.Route("/{imageID}", func(r chi.Router) {
 			r.Get("/", h.GetImage)
-			r.Delete("/", h.RemoveImage)
 			r.Get("/history", h.GetHistory)
 			r.Get("/update-check", h.CheckUpdate)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Delete("/", h.RemoveImage)
+			})
 		})
 
-		r.Post("/pull", h.PullImage)
-		r.Post("/push", h.PushImage)
-		r.Post("/tag", h.TagImage)
-		r.Post("/prune", h.PruneImages)
-		r.Get("/search", h.SearchImages)
-
-		// Build image from Dockerfile
-		r.Post("/build", h.BuildImage)
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/pull", h.PullImage)
+			r.Post("/push", h.PushImage)
+			r.Post("/tag", h.TagImage)
+			r.Post("/prune", h.PruneImages)
+			r.Post("/build", h.BuildImage)
+		})
 	})
 
 	return r

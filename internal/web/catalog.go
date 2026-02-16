@@ -60,6 +60,60 @@ func (app *CatalogApp) RenderCompose(values map[string]string) string {
 		}
 		result = strings.ReplaceAll(result, "{{"+field.Key+"}}", val)
 	}
+
+	// Gitea: append PostgreSQL service and DB environment when DB_TYPE=postgres
+	if app.Slug == "gitea" && values["DB_TYPE"] == "postgres" {
+		stackName := values["STACK_NAME"]
+		if stackName == "" {
+			stackName = "gitea"
+		}
+		dbPasswd := values["DB_PASSWD"]
+
+		// Inject DB connection environment into the gitea service
+		dbEnvBlock := fmt.Sprintf(`      - GITEA__database__HOST=%s-db:5432
+      - GITEA__database__NAME=gitea
+      - GITEA__database__USER=gitea
+      - GITEA__database__PASSWD=%s`, stackName, dbPasswd)
+
+		// Add depends_on and DB env vars to the gitea service
+		result = strings.Replace(result,
+			"      - GITEA__server__SSH_LISTEN_PORT=22",
+			"      - GITEA__server__SSH_LISTEN_PORT=22\n"+dbEnvBlock,
+			1)
+
+		// Add depends_on before volumes section
+		dependsOnBlock := fmt.Sprintf(`    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: %s-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gitea
+      POSTGRES_PASSWORD: "%s"
+      POSTGRES_DB: gitea
+    volumes:
+      - gitea_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gitea -d gitea"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+`, stackName, dbPasswd)
+
+		result = strings.Replace(result, "\nvolumes:\n", "\n"+dependsOnBlock+"volumes:\n", 1)
+
+		// Add gitea_db volume
+		result = strings.Replace(result,
+			"  gitea_data:\n    driver: local\n",
+			"  gitea_data:\n    driver: local\n  gitea_db:\n    driver: local\n",
+			1)
+	}
+
 	return result
 }
 
@@ -74,6 +128,12 @@ func (app *CatalogApp) Validate(values map[string]string) []string {
 			}
 		}
 	}
+
+	// Gitea: DB_PASSWD is required when using PostgreSQL
+	if app.Slug == "gitea" && values["DB_TYPE"] == "postgres" && values["DB_PASSWD"] == "" {
+		errors = append(errors, "'DB Password' is required when using PostgreSQL")
+	}
+
 	return errors
 }
 
@@ -188,14 +248,6 @@ func catalogMinIO() CatalogApp {
 				Default:     "9001",
 				Required:    true,
 			},
-			{
-				Key:         "DATA_PATH",
-				Label:       "Data Path",
-				Description: "Host directory for data storage",
-				Type:        FieldText,
-				Default:     "./minio-data",
-				Required:    true,
-			},
 		},
 		ComposeTPL: `services:
   minio:
@@ -209,8 +261,8 @@ func catalogMinIO() CatalogApp {
       MINIO_ROOT_USER: "{{MINIO_ROOT_USER}}"
       MINIO_ROOT_PASSWORD: "{{MINIO_ROOT_PASSWORD}}"
     volumes:
-      - minio_data:{{DATA_PATH}}
-    command: server {{DATA_PATH}} --console-address ":9001"
+      - minio_data:/data
+    command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 30s
@@ -301,34 +353,15 @@ func catalogGitea() CatalogApp {
       - USER_UID=1000
       - USER_GID=1000
       - GITEA__database__DB_TYPE={{DB_TYPE}}
-      - GITEA__database__HOST={{STACK_NAME}}-db:5432
-      - GITEA__database__NAME=gitea
-      - GITEA__database__USER=gitea
-      - GITEA__database__PASSWD={{DB_PASSWD}}
       - GITEA__server__SSH_PORT={{SSH_PORT}}
       - GITEA__server__SSH_LISTEN_PORT=22
     volumes:
       - gitea_data:/data
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
-    depends_on:
-      - db
-
-  db:
-    image: postgres:16-alpine
-    container_name: {{STACK_NAME}}-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: gitea
-      POSTGRES_PASSWORD: "{{DB_PASSWD}}"
-      POSTGRES_DB: gitea
-    volumes:
-      - gitea_db:/var/lib/postgresql/data
 
 volumes:
   gitea_data:
-    driver: local
-  gitea_db:
     driver: local
 `,
 	}

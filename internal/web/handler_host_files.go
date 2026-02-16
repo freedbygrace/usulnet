@@ -29,7 +29,8 @@ func (h *Handler) HostFilesTempl(w http.ResponseWriter, r *http.Request) {
 		id = getIDParam(r)
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
+	cfg.User = "root" // File browser always runs as root to view all files
 
 	if !cfg.Enabled {
 		h.RenderErrorTempl(w, r, http.StatusForbidden,
@@ -104,7 +105,8 @@ func (h *Handler) APIHostBrowse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
+	cfg.User = "root" // File browser always runs as root to view all files
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -132,7 +134,7 @@ func (h *Handler) APIHostBrowse(w http.ResponseWriter, r *http.Request) {
 	// Run ls -la on host via nsenter
 	output, err := runNsenterCommand(selfID, []string{
 		"ls", "-la", "--time-style=+%Y-%m-%dT%H:%M:%S", path,
-	})
+	}, cfg)
 	if err != nil {
 		h.jsonError(w, "Failed to list directory: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -155,7 +157,8 @@ func (h *Handler) APIHostReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
+	cfg.User = "root" // File browser always runs as root to view all files
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -189,7 +192,7 @@ func (h *Handler) APIHostReadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get file size first
-	statOutput, _ := runNsenterCommand(selfID, []string{"stat", "-c", "%s", path})
+	statOutput, _ := runNsenterCommand(selfID, []string{"stat", "-c", "%s", path}, cfg)
 	var fileSize int64
 	fmt.Sscanf(strings.TrimSpace(statOutput), "%d", &fileSize)
 
@@ -203,7 +206,7 @@ func (h *Handler) APIHostReadFile(w http.ResponseWriter, r *http.Request) {
 		cmd = []string{"cat", path}
 	}
 
-	content, err := runNsenterCommand(selfID, cmd)
+	content, err := runNsenterCommand(selfID, cmd, cfg)
 	if err != nil {
 		h.jsonError(w, "Failed to read file: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -230,7 +233,8 @@ func (h *Handler) APIHostDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
+	cfg.User = "root" // File browser always runs as root to view all files
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -257,7 +261,7 @@ func (h *Handler) APIHostDownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get file content via nsenter
-	content, err := runNsenterCommand(selfID, []string{"cat", path})
+	content, err := runNsenterCommand(selfID, []string{"cat", path}, cfg)
 	if err != nil {
 		h.jsonError(w, "Failed to read file: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -285,7 +289,8 @@ func (h *Handler) APIHostMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
+	cfg.User = "root" // File browser always runs as root to view all files
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -312,7 +317,7 @@ func (h *Handler) APIHostMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create directory via nsenter (as configured user)
-	_, err := runNsenterCommand(selfID, []string{"mkdir", "-p", path})
+	_, err := runNsenterCommand(selfID, []string{"mkdir", "-p", path}, cfg)
 	if err != nil {
 		h.jsonError(w, "Failed to create directory: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -330,7 +335,8 @@ func (h *Handler) APIHostDeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := loadHostTerminalConfig()
+	cfg := h.hostTerminalConfig
+	cfg.User = "root" // File browser always runs as root to view all files
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -366,7 +372,7 @@ func (h *Handler) APIHostDeleteFile(w http.ResponseWriter, r *http.Request) {
 		cmd = []string{"rm", path}
 	}
 
-	_, err := runNsenterCommand(selfID, cmd)
+	_, err := runNsenterCommand(selfID, cmd, cfg)
 	if err != nil {
 		h.jsonError(w, "Failed to delete: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -380,9 +386,9 @@ func (h *Handler) APIHostDeleteFile(w http.ResponseWriter, r *http.Request) {
 // =============================================================================
 
 // runNsenterCommand executes a command on the host via nsenter.
-// It uses docker exec -u 0 to run nsenter with root privileges.
-func runNsenterCommand(selfContainerID string, cmd []string) (string, error) {
-	cfg := loadHostTerminalConfig()
+// It uses docker exec -u 0 to run nsenter with root privileges,
+// then runs the command as cfg.User.
+func runNsenterCommand(selfContainerID string, cmd []string, cfg HostTerminalConfig) (string, error) {
 
 	// Build nsenter command
 	// We use su to drop to the configured unprivileged user

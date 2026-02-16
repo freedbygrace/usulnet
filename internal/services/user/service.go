@@ -24,17 +24,29 @@ import (
 
 // ServiceConfig contains configuration for the user service.
 type ServiceConfig struct {
-	// PasswordMinLength minimum password length
+	// PasswordMinLength minimum password length (range: 8-128)
 	PasswordMinLength int
 
 	// PasswordRequireUpper requires at least one uppercase letter
 	PasswordRequireUpper bool
+
+	// PasswordRequireLower requires at least one lowercase letter
+	PasswordRequireLower bool
 
 	// PasswordRequireNumber requires at least one digit
 	PasswordRequireNumber bool
 
 	// PasswordRequireSymbol requires at least one special character
 	PasswordRequireSymbol bool
+
+	// PasswordHistoryCount prevents reuse of N previous passwords (0 = disabled, default: 5)
+	PasswordHistoryCount int
+
+	// PasswordExpiryDays forces password change after N days (0 = never, default: 0)
+	PasswordExpiryDays int
+
+	// PasswordExpiryWarningDays notifies user N days before password expires (default: 7)
+	PasswordExpiryWarningDays int
 
 	// MaxFailedLogins before account lockout (0 = disabled)
 	MaxFailedLogins int
@@ -61,17 +73,21 @@ type ServiceConfig struct {
 // DefaultServiceConfig returns default service configuration.
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		PasswordMinLength:        8,
-		PasswordRequireUpper:     true,
-		PasswordRequireNumber:    true,
-		PasswordRequireSymbol:    false,
-		MaxFailedLogins:          5,
-		LockoutDuration:          15 * time.Minute,
-		DefaultRole:              models.RoleViewer,
-		AllowSelfRegistration:    false,
-		RequireEmailVerification: false,
-		MaxAPIKeysPerUser:        10,
-		APIKeyLength:             32,
+		PasswordMinLength:         8,
+		PasswordRequireUpper:      true,
+		PasswordRequireLower:      false,
+		PasswordRequireNumber:     true,
+		PasswordRequireSymbol:     false,
+		PasswordHistoryCount:      5,
+		PasswordExpiryDays:        0, // disabled by default
+		PasswordExpiryWarningDays: 7,
+		MaxFailedLogins:           5,
+		LockoutDuration:           15 * time.Minute,
+		DefaultRole:               models.RoleViewer,
+		AllowSelfRegistration:     false,
+		RequireEmailVerification:  false,
+		MaxAPIKeysPerUser:         10,
+		APIKeyLength:              32,
 	}
 }
 
@@ -246,6 +262,11 @@ func (s *Service) validateCreateInput(input CreateInput) error {
 
 // validatePasswordPolicy enforces configured password complexity requirements.
 func (s *Service) validatePasswordPolicy(password string) error {
+	// Enforce maximum length
+	if len(password) > 128 {
+		return apperrors.InvalidInput("password must not exceed 128 characters")
+	}
+
 	if s.config.PasswordRequireUpper {
 		hasUpper := false
 		for _, r := range password {
@@ -256,6 +277,19 @@ func (s *Service) validatePasswordPolicy(password string) error {
 		}
 		if !hasUpper {
 			return apperrors.InvalidInput("password must contain at least one uppercase letter")
+		}
+	}
+
+	if s.config.PasswordRequireLower {
+		hasLower := false
+		for _, r := range password {
+			if r >= 'a' && r <= 'z' {
+				hasLower = true
+				break
+			}
+		}
+		if !hasLower {
+			return apperrors.InvalidInput("password must contain at least one lowercase letter")
 		}
 	}
 
@@ -286,6 +320,89 @@ func (s *Service) validatePasswordPolicy(password string) error {
 	}
 
 	return nil
+}
+
+// CheckPasswordHistory checks if a password has been used recently by the user.
+// Returns an error if the password matches any of the N most recent passwords.
+func (s *Service) CheckPasswordHistory(ctx context.Context, userID uuid.UUID, newPassword string) error {
+	if s.config.PasswordHistoryCount <= 0 {
+		return nil
+	}
+
+	// Get recent password hashes from the password_history table
+	hashes, err := s.userRepo.GetPasswordHistory(ctx, userID, s.config.PasswordHistoryCount)
+	if err != nil {
+		s.logger.Warn("Failed to check password history", "user_id", userID, "error", err)
+		return nil // Don't block password change if history check fails
+	}
+
+	for _, hash := range hashes {
+		if crypto.CheckPassword(newPassword, hash) {
+			return apperrors.InvalidInput(
+				fmt.Sprintf("password was used recently; cannot reuse any of the last %d passwords",
+					s.config.PasswordHistoryCount))
+		}
+	}
+
+	return nil
+}
+
+// SavePasswordHistory stores the current password hash in the history table.
+func (s *Service) SavePasswordHistory(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	if s.config.PasswordHistoryCount <= 0 {
+		return nil
+	}
+	return s.userRepo.SavePasswordHistory(ctx, userID, passwordHash)
+}
+
+// IsPasswordExpired checks if a user's password has expired based on the configured policy.
+func (s *Service) IsPasswordExpired(user *models.User) bool {
+	if s.config.PasswordExpiryDays <= 0 {
+		return false
+	}
+	if user.PasswordChangedAt == nil {
+		return false
+	}
+	expiryTime := user.PasswordChangedAt.Add(time.Duration(s.config.PasswordExpiryDays) * 24 * time.Hour)
+	return time.Now().After(expiryTime)
+}
+
+// PasswordExpiresIn returns how many days until the password expires.
+// Returns -1 if expiry is disabled or no password change date is set.
+func (s *Service) PasswordExpiresIn(user *models.User) int {
+	if s.config.PasswordExpiryDays <= 0 || user.PasswordChangedAt == nil {
+		return -1
+	}
+	expiryTime := user.PasswordChangedAt.Add(time.Duration(s.config.PasswordExpiryDays) * 24 * time.Hour)
+	days := int(time.Until(expiryTime).Hours() / 24)
+	if days < 0 {
+		return 0
+	}
+	return days
+}
+
+// ShouldWarnPasswordExpiry checks if the user should be warned about upcoming password expiry.
+func (s *Service) ShouldWarnPasswordExpiry(user *models.User) bool {
+	days := s.PasswordExpiresIn(user)
+	if days < 0 {
+		return false
+	}
+	return days <= s.config.PasswordExpiryWarningDays
+}
+
+// GetPasswordPolicyInfo returns the current password policy for display to users.
+func (s *Service) GetPasswordPolicyInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"min_length":        s.config.PasswordMinLength,
+		"max_length":        128,
+		"require_uppercase": s.config.PasswordRequireUpper,
+		"require_lowercase": s.config.PasswordRequireLower,
+		"require_number":    s.config.PasswordRequireNumber,
+		"require_special":   s.config.PasswordRequireSymbol,
+		"history_count":     s.config.PasswordHistoryCount,
+		"expiry_days":       s.config.PasswordExpiryDays,
+		"warning_days":      s.config.PasswordExpiryWarningDays,
+	}
 }
 
 // isAlphaNumeric checks if a rune is a letter or digit.

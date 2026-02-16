@@ -273,38 +273,51 @@ func List(data ConfigData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</td><td><div class=\"flex items-center gap-2\"><button class=\"text-primary-400 hover:text-primary-300 text-sm\">Edit</button> <button hx-delete=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</td><td><div class=\"flex items-center gap-2\"><a href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var15 string
-				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs("/config/variables/" + v.ID)
+				var templ_7745c5c3_Var15 templ.SafeURL
+				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/config/variables/" + v.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/config/list.templ`, Line: 127, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/config/list.templ`, Line: 125, Col: 63}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-confirm=\"Delete this variable?\" class=\"text-red-400 hover:text-red-300 text-sm\">Delete</button></div></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" class=\"text-primary-400 hover:text-primary-300 text-sm\">Edit</a> <button hx-delete=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var16 string
+				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs("/config/variables/" + v.ID)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/config/list.templ`, Line: 127, Col: 51}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-confirm=\"Delete this variable?\" class=\"text-red-400 hover:text-red-300 text-sm\">Delete</button></div></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</tbody></table></div></div></div><!-- New Variable Modal --> <dialog id=\"new-var-modal\" class=\"bg-dark-800 rounded-xl p-0 backdrop:bg-black/50\"><form action=\"/config/variables\" method=\"POST\" class=\"w-96\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</tbody></table></div></div></div><!-- New Variable Modal --> <dialog id=\"new-var-modal\" class=\"bg-dark-800 rounded-xl p-0 backdrop:bg-black/50\"><form action=\"/config/variables\" method=\"POST\" class=\"w-96\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var16 string
-			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(data.PageData.CSRFToken)
+			var templ_7745c5c3_Var17 string
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(data.PageData.CSRFToken)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/config/list.templ`, Line: 145, Col: 74}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"><div class=\"px-6 py-4 border-b border-dark-700\"><h3 class=\"text-lg font-medium text-white\">New Variable</h3></div><div class=\"p-6 space-y-4\"><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Name</label> <input type=\"text\" name=\"name\" required class=\"input\" placeholder=\"MY_VARIABLE\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Value</label> <input type=\"text\" name=\"value\" required class=\"input\"></div><div class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"is_secret\" name=\"is_secret\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500\"> <label for=\"is_secret\" class=\"text-sm text-gray-300\">This is a secret</label></div></div><div class=\"px-6 py-4 border-t border-dark-700 flex justify-end gap-3\"><button type=\"button\" onclick=\"this.closest('dialog').close()\" class=\"btn-secondary\">Cancel</button> <button type=\"submit\" class=\"btn-primary\">Create</button></div></form></dialog>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\"><div class=\"px-6 py-4 border-b border-dark-700\"><h3 class=\"text-lg font-medium text-white\">New Variable</h3></div><div class=\"p-6 space-y-4\"><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Name</label> <input type=\"text\" name=\"name\" required class=\"input\" placeholder=\"MY_VARIABLE\"></div><div><label class=\"block text-sm font-medium text-gray-300 mb-2\">Value</label> <input type=\"text\" name=\"value\" required class=\"input\"></div><div class=\"flex items-center gap-2\"><input type=\"checkbox\" id=\"is_secret\" name=\"is_secret\" class=\"rounded border-dark-600 bg-dark-700 text-primary-500\"> <label for=\"is_secret\" class=\"text-sm text-gray-300\">This is a secret</label></div></div><div class=\"px-6 py-4 border-t border-dark-700 flex justify-end gap-3\"><button type=\"button\" onclick=\"this.closest('dialog').close()\" class=\"btn-secondary\">Cancel</button> <button type=\"submit\" class=\"btn-primary\">Create</button></div></form></dialog>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -51,6 +51,8 @@ func (h *Handler) VulnMgmtTempl(w http.ResponseWriter, r *http.Request) {
 	var vulns []vulntmpl.VulnerabilityView
 	stats := vulntmpl.VulnStats{}
 	now := time.Now()
+	var totalFixTime time.Duration
+	var resolvedCount int
 
 	if h.trackedVulnRepo != nil {
 		dbVulns, err := h.trackedVulnRepo.List(ctx)
@@ -86,6 +88,14 @@ func (h *Handler) VulnMgmtTempl(w http.ResponseWriter, r *http.Request) {
 					if now.Sub(*v.ResolvedAt) < 7*24*time.Hour {
 						stats.ResolvedThisWeek++
 					}
+					// Accumulate fix time for MTTF calculation
+					if v.Status == "resolved" {
+						fixTime := v.ResolvedAt.Sub(v.DetectedAt)
+						if fixTime > 0 {
+							totalFixTime += fixTime
+							resolvedCount++
+						}
+					}
 				}
 				vulns = append(vulns, vv)
 				stats.TotalVulns++
@@ -103,10 +113,21 @@ func (h *Handler) VulnMgmtTempl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if stats.ResolvedThisWeek > 0 {
-		stats.MeanTimeToFix = "< 7d"
-	} else {
-		stats.MeanTimeToFix = "N/A"
+	// Calculate Mean Time To Fix from resolved vulnerabilities
+	stats.MeanTimeToFix = "N/A"
+	if resolvedCount > 0 {
+		avgFix := totalFixTime / time.Duration(resolvedCount)
+		days := int(avgFix.Hours() / 24)
+		if days > 0 {
+			stats.MeanTimeToFix = fmt.Sprintf("%dd", days)
+		} else {
+			hours := int(avgFix.Hours())
+			if hours > 0 {
+				stats.MeanTimeToFix = fmt.Sprintf("%dh", hours)
+			} else {
+				stats.MeanTimeToFix = fmt.Sprintf("%dm", int(avgFix.Minutes()))
+			}
+		}
 	}
 
 	// Populate vulnerability counts on containers from tracked vulns
@@ -162,32 +183,77 @@ func (h *Handler) VulnScan(w http.ResponseWriter, r *http.Request) {
 	// Get issues from the security service and import as tracked vulns
 	issues, err := secSvc.ListIssues(ctx)
 	if err == nil && h.trackedVulnRepo != nil {
-		imported := 0
+		// Build container ID → image mapping for affected images tracking
+		containerImages := make(map[string]string)
+		if containerSvc := h.services.Containers(); containerSvc != nil {
+			if containers, cerr := containerSvc.List(ctx, nil); cerr == nil {
+				for _, c := range containers {
+					containerImages[c.ID] = c.Image
+				}
+			}
+		}
+
+		// Aggregate per-CVE: collect affected container IDs
+		type cveInfo struct {
+			issue        IssueView
+			containerIDs []string
+		}
+		cveMap := make(map[string]*cveInfo)
 		for _, issue := range issues {
 			if issue.CVEID == "" {
 				continue
 			}
-			// Check if this CVE is already tracked
-			exists, _ := h.trackedVulnRepo.ExistsByCVE(ctx, issue.CVEID)
-			if !exists {
-				sla := vulnSLADays(issue.Severity)
-				deadline := time.Now().Add(time.Duration(sla) * 24 * time.Hour)
-				priority := vulnPriorityFromSeverity(issue.Severity)
-				v := &TrackedVulnRecord{
-					ID:          uuid.New(),
-					CVEID:       issue.CVEID,
-					Title:       issue.Title,
-					Description: issue.Message,
-					Severity:    issue.Severity,
-					CVSSScore:   fmt.Sprintf("%.1f", issue.CVSSScore),
-					Status:      "open",
-					Priority:    priority,
-					SLADeadline: &deadline,
-					DetectedAt:  time.Now(),
+			if ci, ok := cveMap[issue.CVEID]; ok {
+				if issue.ContainerID != "" {
+					ci.containerIDs = append(ci.containerIDs, issue.ContainerID)
 				}
-				if err := h.trackedVulnRepo.Create(ctx, v); err == nil {
-					imported++
+			} else {
+				var cids []string
+				if issue.ContainerID != "" {
+					cids = []string{issue.ContainerID}
 				}
+				cveMap[issue.CVEID] = &cveInfo{issue: issue, containerIDs: cids}
+			}
+		}
+
+		imported := 0
+		for cveID, ci := range cveMap {
+			exists, _ := h.trackedVulnRepo.ExistsByCVE(ctx, cveID)
+			if exists {
+				continue
+			}
+
+			// Build unique affected images list
+			imageSet := make(map[string]struct{})
+			for _, cid := range ci.containerIDs {
+				if img, ok := containerImages[cid]; ok {
+					imageSet[img] = struct{}{}
+				}
+			}
+			var affectedImages []string
+			for img := range imageSet {
+				affectedImages = append(affectedImages, img)
+			}
+
+			sla := vulnSLADays(ci.issue.Severity)
+			deadline := time.Now().Add(time.Duration(sla) * 24 * time.Hour)
+			priority := vulnPriorityFromSeverity(ci.issue.Severity)
+			v := &TrackedVulnRecord{
+				ID:             uuid.New(),
+				CVEID:          ci.issue.CVEID,
+				Title:          ci.issue.Title,
+				Description:    ci.issue.Message,
+				Severity:       ci.issue.Severity,
+				CVSSScore:      fmt.Sprintf("%.1f", ci.issue.CVSSScore),
+				AffectedImages: affectedImages,
+				ContainerCount: len(ci.containerIDs),
+				Status:         "open",
+				Priority:       priority,
+				SLADeadline:    &deadline,
+				DetectedAt:     time.Now(),
+			}
+			if err := h.trackedVulnRepo.Create(ctx, v); err == nil {
+				imported++
 			}
 		}
 
@@ -207,34 +273,45 @@ func (h *Handler) VulnScan(w http.ResponseWriter, r *http.Request) {
 // VulnAcknowledge starts working on a vulnerability.
 func (h *Handler) VulnAcknowledge(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.updateTrackedVulnStatus(r, id, "in_progress")
-	h.setFlash(w, r, "success", "Vulnerability marked as in progress")
+	if err := h.updateTrackedVulnStatus(r, id, "in_progress"); err != nil {
+		h.setFlash(w, r, "error", "Failed to update vulnerability: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Vulnerability marked as in progress")
+	}
 	redirectVulns(w, r)
 }
 
 // VulnResolve marks a vulnerability as resolved.
 func (h *Handler) VulnResolve(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.updateTrackedVulnStatus(r, id, "resolved")
-	h.setFlash(w, r, "success", "Vulnerability marked as resolved")
+	if err := h.updateTrackedVulnStatus(r, id, "resolved"); err != nil {
+		h.setFlash(w, r, "error", "Failed to resolve vulnerability: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Vulnerability marked as resolved")
+	}
 	redirectVulns(w, r)
 }
 
 // VulnAcceptRisk marks a vulnerability as accepted risk.
 func (h *Handler) VulnAcceptRisk(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	h.updateTrackedVulnStatus(r, id, "accepted_risk")
-	h.setFlash(w, r, "success", "Risk accepted for vulnerability")
+	if err := h.updateTrackedVulnStatus(r, id, "accepted_risk"); err != nil {
+		h.setFlash(w, r, "error", "Failed to accept risk: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Risk accepted for vulnerability")
+	}
 	redirectVulns(w, r)
 }
 
-func (h *Handler) updateTrackedVulnStatus(r *http.Request, id, status string) {
-	if h.trackedVulnRepo != nil {
-		uid, err := uuid.Parse(id)
-		if err == nil {
-			h.trackedVulnRepo.UpdateStatus(r.Context(), uid, status)
-		}
+func (h *Handler) updateTrackedVulnStatus(r *http.Request, id, status string) error {
+	if h.trackedVulnRepo == nil {
+		return fmt.Errorf("vulnerability tracking not configured")
 	}
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return fmt.Errorf("invalid vulnerability ID")
+	}
+	return h.trackedVulnRepo.UpdateStatus(r.Context(), uid, status)
 }
 
 func redirectVulns(w http.ResponseWriter, r *http.Request) {

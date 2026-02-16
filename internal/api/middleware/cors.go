@@ -45,7 +45,7 @@ type CORSConfig struct {
 // WARNING: This allows all origins. Use a more restrictive config in production.
 func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
-		AllowedOrigins: []string{"*"},
+		AllowedOrigins: []string{},
 		AllowedMethods: []string{
 			http.MethodGet,
 			http.MethodPost,
@@ -67,7 +67,7 @@ func DefaultCORSConfig() CORSConfig {
 			"X-RateLimit-Remaining",
 			"X-RateLimit-Reset",
 		},
-		AllowCredentials: true,
+		AllowCredentials: false,
 		MaxAge:           300,
 	}
 }

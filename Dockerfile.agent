@@ -1,6 +1,7 @@
 # =============================================================================
 # usulnet Agent - Lightweight Docker management agent
 # Connects to master via NATS, executes Docker commands on remote hosts
+# Optimized multi-stage production build
 # =============================================================================
 
 # Default BUILDPLATFORM for non-buildx environments (legacy Docker build)
@@ -33,12 +34,13 @@ RUN templ generate
 # Tidy modules
 RUN go mod tidy
 
-# Build the agent binary
+# Build the agent binary with optimizations
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -trimpath \
     -ldflags="-w -s \
         -X main.Version=${VERSION} \
         -X main.Commit=${COMMIT} \
@@ -51,8 +53,18 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
 # =============================================================================
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata curl su-exec
+# OCI image metadata labels
+LABEL org.opencontainers.image.title="usulnet-agent" \
+      org.opencontainers.image.description="usulnet Docker Management Agent" \
+      org.opencontainers.image.url="https://github.com/fr4nsys/usulnet" \
+      org.opencontainers.image.source="https://github.com/fr4nsys/usulnet" \
+      org.opencontainers.image.vendor="usulnet" \
+      org.opencontainers.image.licenses="AGPL-3.0"
 
+RUN apk add --no-cache ca-certificates tzdata curl su-exec && \
+    rm -rf /var/cache/apk/*
+
+# Create non-root user
 RUN addgroup -g 1000 usulnet && \
     adduser -u 1000 -G usulnet -s /bin/sh -D usulnet
 
@@ -61,8 +73,8 @@ RUN mkdir -p /app/data /app/config /app/certs && \
 
 WORKDIR /app
 
-# Copy agent binary
-COPY --from=builder /build/usulnet-agent /app/usulnet-agent
+# Copy agent binary with proper ownership
+COPY --from=builder --chown=usulnet:usulnet /build/usulnet-agent /app/usulnet-agent
 
 # Agent entrypoint
 COPY docker-entrypoint.agent.sh /app/docker-entrypoint.agent.sh
@@ -70,7 +82,7 @@ RUN chmod +x /app/docker-entrypoint.agent.sh
 
 EXPOSE 0
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD test -f /app/data/agent.pid || exit 1
 
 ENTRYPOINT ["/app/docker-entrypoint.agent.sh"]

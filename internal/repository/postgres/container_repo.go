@@ -397,6 +397,11 @@ type ContainerListOptions struct {
 	SortBy   string                  // Field to sort by
 	SortDesc bool                    // Sort descending
 
+	// Cursor-based pagination (preferred for large datasets)
+	// When Cursor is set, Page/PerPage offset-based pagination is ignored.
+	Cursor string // Opaque cursor: "name:containerName" for keyset pagination
+	Limit  int    // Max items to return when using cursor pagination
+
 	// Scoping fields (opt-in model)
 	// Containers are scoped via stack inheritance + Docker label usulnet.team.group.
 	ScopeEnabled           bool
@@ -404,6 +409,14 @@ type ContainerListOptions struct {
 	AssignedStackIDs       []uuid.UUID // stack IDs claimed by ANY team
 	AllowedContainerGroups []string    // container group labels the user has access to
 	AssignedContainerGroups []string   // container group labels claimed by ANY team
+}
+
+// ContainerCursorPage represents a page of containers with cursor info.
+type ContainerCursorPage struct {
+	Containers []*models.Container `json:"containers"`
+	NextCursor string              `json:"next_cursor,omitempty"`
+	HasMore    bool                `json:"has_more"`
+	Total      int64               `json:"total"`
 }
 
 // List retrieves containers with pagination and filtering.
@@ -1201,4 +1214,215 @@ func (r *ContainerRepository) DeleteOldLogs(ctx context.Context, olderThan time.
 	}
 
 	return result.RowsAffected(), nil
+}
+
+// ============================================================================
+// Cursor-based Pagination
+// ============================================================================
+
+// ListCursor retrieves containers using keyset (cursor-based) pagination.
+// This is more efficient than OFFSET pagination for large datasets because
+// it avoids scanning skipped rows.
+func (r *ContainerRepository) ListCursor(ctx context.Context, opts ContainerListOptions) (*ContainerCursorPage, error) {
+	limit := opts.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+
+	var conditions []string
+	var args []interface{}
+	argNum := 1
+
+	if opts.HostID != nil {
+		conditions = append(conditions, fmt.Sprintf("host_id = $%d", argNum))
+		args = append(args, *opts.HostID)
+		argNum++
+	}
+
+	if opts.State != nil {
+		conditions = append(conditions, fmt.Sprintf("state = $%d", argNum))
+		args = append(args, *opts.State)
+		argNum++
+	}
+
+	if opts.Search != "" {
+		conditions = append(conditions, fmt.Sprintf(
+			"(LOWER(name) LIKE LOWER($%d) OR LOWER(image) LIKE LOWER($%d))",
+			argNum, argNum,
+		))
+		args = append(args, "%"+opts.Search+"%")
+		argNum++
+	}
+
+	if opts.Image != "" {
+		conditions = append(conditions, fmt.Sprintf("LOWER(image) LIKE LOWER($%d)", argNum))
+		args = append(args, "%"+opts.Image+"%")
+		argNum++
+	}
+
+	// Cursor condition: use name as the keyset since it's unique per host
+	if opts.Cursor != "" {
+		conditions = append(conditions, fmt.Sprintf("name > $%d", argNum))
+		args = append(args, opts.Cursor)
+		argNum++
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Count total (only on first page, when no cursor is provided)
+	var total int64
+	if opts.Cursor == "" {
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM containers %s", whereClause)
+		if err := r.db.QueryRow(ctx, countQuery, args[:len(args)]...).Scan(&total); err != nil {
+			return nil, fmt.Errorf("count containers: %w", err)
+		}
+	}
+
+	// Fetch limit+1 to detect if there are more results
+	query := fmt.Sprintf(`
+		SELECT id, host_id, name, image, image_id, status, state,
+			   created_at_docker, started_at, finished_at, ports, labels,
+			   env_vars, mounts, networks, restart_policy, current_version,
+			   latest_version, update_available, security_score, security_grade,
+			   last_scanned_at, synced_at, created_at, updated_at
+		FROM containers
+		%s
+		ORDER BY name ASC
+		LIMIT $%d`,
+		whereClause, argNum,
+	)
+	args = append(args, limit+1)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list containers cursor: %w", err)
+	}
+	defer rows.Close()
+
+	containers, err := r.scanContainers(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	page := &ContainerCursorPage{
+		Total: total,
+	}
+
+	if len(containers) > limit {
+		page.HasMore = true
+		page.Containers = containers[:limit]
+		page.NextCursor = containers[limit-1].Name
+	} else {
+		page.Containers = containers
+		page.HasMore = false
+	}
+
+	return page, nil
+}
+
+// ============================================================================
+// Dashboard Summary (uses materialized view when available)
+// ============================================================================
+
+// HostInventorySummary represents aggregated inventory for a single host.
+type HostInventorySummary struct {
+	HostID               uuid.UUID `json:"host_id"`
+	HostName             string    `json:"host_name"`
+	HostStatus           string    `json:"host_status"`
+	TotalContainers      int64     `json:"total_containers"`
+	RunningContainers    int64     `json:"running_containers"`
+	StoppedContainers    int64     `json:"stopped_containers"`
+	PausedContainers     int64     `json:"paused_containers"`
+	UpdateAvailableCount int64     `json:"update_available_count"`
+	AvgSecurityScore     float64   `json:"avg_security_score"`
+	TotalImages          int64     `json:"total_images"`
+	TotalVolumes         int64     `json:"total_volumes"`
+	TotalNetworks        int64     `json:"total_networks"`
+}
+
+// GetInventorySummary retrieves the host inventory summary. It tries the
+// materialized view first (fast path), falling back to a live aggregation
+// query if the view does not exist yet.
+func (r *ContainerRepository) GetInventorySummary(ctx context.Context) ([]*HostInventorySummary, error) {
+	// Try materialized view first (sub-millisecond on any dataset size)
+	summaries, err := r.getInventoryFromView(ctx)
+	if err == nil {
+		return summaries, nil
+	}
+	// Fall back to live query
+	return r.getInventoryLive(ctx)
+}
+
+func (r *ContainerRepository) getInventoryFromView(ctx context.Context) ([]*HostInventorySummary, error) {
+	query := `
+		SELECT host_id, host_name, host_status,
+		       total_containers, running_containers, stopped_containers,
+		       paused_containers, update_available_count, avg_security_score,
+		       total_images, total_volumes, total_networks
+		FROM mv_host_inventory_summary
+		ORDER BY host_name`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanInventorySummaries(rows)
+}
+
+func (r *ContainerRepository) getInventoryLive(ctx context.Context) ([]*HostInventorySummary, error) {
+	query := `
+		SELECT
+			h.id, h.name, h.status,
+			COUNT(c.id) FILTER (WHERE c.id IS NOT NULL),
+			COUNT(c.id) FILTER (WHERE c.state = 'running'),
+			COUNT(c.id) FILTER (WHERE c.state = 'exited'),
+			COUNT(c.id) FILTER (WHERE c.state = 'paused'),
+			COUNT(c.id) FILTER (WHERE c.update_available),
+			COALESCE(AVG(c.security_score) FILTER (WHERE c.security_score > 0), 0),
+			(SELECT COUNT(*) FROM images i WHERE i.host_id = h.id),
+			(SELECT COUNT(*) FROM volumes v WHERE v.host_id = h.id),
+			(SELECT COUNT(*) FROM networks n WHERE n.host_id = h.id)
+		FROM hosts h
+		LEFT JOIN containers c ON c.host_id = h.id
+		GROUP BY h.id, h.name, h.status
+		ORDER BY h.name`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("get inventory summary: %w", err)
+	}
+	defer rows.Close()
+
+	return scanInventorySummaries(rows)
+}
+
+func scanInventorySummaries(rows pgx.Rows) ([]*HostInventorySummary, error) {
+	var summaries []*HostInventorySummary
+	for rows.Next() {
+		s := &HostInventorySummary{}
+		if err := rows.Scan(
+			&s.HostID, &s.HostName, &s.HostStatus,
+			&s.TotalContainers, &s.RunningContainers, &s.StoppedContainers,
+			&s.PausedContainers, &s.UpdateAvailableCount, &s.AvgSecurityScore,
+			&s.TotalImages, &s.TotalVolumes, &s.TotalNetworks,
+		); err != nil {
+			return nil, fmt.Errorf("scan inventory summary: %w", err)
+		}
+		summaries = append(summaries, s)
+	}
+	return summaries, rows.Err()
+}
+
+// RefreshInventorySummary refreshes the materialized view.
+func (r *ContainerRepository) RefreshInventorySummary(ctx context.Context) error {
+	_, err := r.db.Exec(ctx, "SELECT refresh_host_inventory_summary()")
+	if err != nil {
+		return fmt.Errorf("refresh inventory summary: %w", err)
+	}
+	return nil
 }

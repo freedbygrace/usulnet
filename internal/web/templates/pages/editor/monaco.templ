@@ -141,7 +141,7 @@ templ Monaco(data MonacoData) {
 		</div>
 
 		<!-- Monaco Editor CDN -->
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
+		<script src="/static/vendor/monaco-editor/min/vs/loader.js"></script>
 		<script>
 		// ====================================================================
 		// usulnet Monaco Theme + Init
@@ -160,7 +160,7 @@ templ Monaco(data MonacoData) {
 		console.log('[Monaco] Init mode:', repoID ? 'git' : (snippetID ? 'snippet' : 'scratch'), 'readOnly:', readOnly, 'lang:', lang, 'file:', filePath);
 
 		require.config({
-			paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs' }
+			paths: { vs: '/static/vendor/monaco-editor/min/vs' }
 		});
 
 		require(['vs/editor/editor.main'], function() {

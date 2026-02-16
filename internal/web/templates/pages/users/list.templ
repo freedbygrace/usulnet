@@ -258,9 +258,9 @@ templ New(data UserNewData) {
 				</div>
 				<div>
 					<label class="block text-sm font-medium text-gray-300 mb-2">Role</label>
-					<select name="role_id" class="input">
+					<select name="role" class="input">
 						for _, role := range data.Roles {
-							<option value={ role.ID }>
+							<option value={ role.Name }>
 								{ role.DisplayName }
 								if role.Description != "" {
 									— { role.Description }
@@ -317,9 +317,9 @@ templ Edit(data UserEditData) {
 				</div>
 				<div>
 					<label class="block text-sm font-medium text-gray-300 mb-2">Role</label>
-					<select name="role_id" class="input">
+					<select name="role" class="input">
 						for _, role := range data.Roles {
-							<option value={ role.ID } selected?={ data.User.RoleID == role.ID }>
+							<option value={ role.Name } selected?={ data.User.RoleName == role.Name }>
 								{ role.DisplayName }
 							</option>
 						}

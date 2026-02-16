@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# =============================================================================
+# usulnet - Pre-commit Hook
+# =============================================================================
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Or: ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+# =============================================================================
+
+set -euo pipefail
+
+echo "=== usulnet pre-commit checks ==="
+
+# Colors (if terminal supports them)
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+PASS=0
+FAIL=0
+
+run_check() {
+    local name="$1"
+    shift
+    printf "  %-30s" "${name}..."
+    if "$@" > /dev/null 2>&1; then
+        echo -e "${GREEN}PASS${NC}"
+        ((PASS++))
+    else
+        echo -e "${RED}FAIL${NC}"
+        ((FAIL++))
+    fi
+}
+
+# 1. Check Go formatting
+run_check "Go formatting" test -z "$(gofmt -l . 2>/dev/null | grep -v _templ.go | head -1)"
+
+# 2. Run go vet
+run_check "Go vet" go vet ./...
+
+# 3. Run tests (quick, no race detector for speed)
+run_check "Unit tests" go test -short -count=1 ./...
+
+# 4. Run golangci-lint (if available)
+if command -v golangci-lint &> /dev/null; then
+    run_check "Linter (golangci-lint)" golangci-lint run --fast ./...
+else
+    echo -e "  ${YELLOW}Linter (golangci-lint)...SKIP (not installed)${NC}"
+fi
+
+echo ""
+echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
+
+if [ "${FAIL}" -gt 0 ]; then
+    echo -e "${RED}Pre-commit checks failed. Fix issues before committing.${NC}"
+    echo "Tip: Run 'make lint' to see linting details."
+    exit 1
+fi
+
+echo -e "${GREEN}All checks passed!${NC}"
+exit 0

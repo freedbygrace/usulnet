@@ -56,9 +56,17 @@ type HostDetail struct {
 	CPUs        int
 	MemTotal    int64
 	MemTotalStr string
+	MemUsed     int64
+	MemUsedStr  string
+	MemPercent  float64
 	DiskUsed    string
 	DiskTotal   string
 	DiskPercent float64
+	CPUPercent  float64
+
+	// Network I/O
+	NetworkRxStr string
+	NetworkTxStr string
 
 	// Container Stats
 	ContainersTotal   int
@@ -357,6 +365,85 @@ templ Detail(data HostDetailData) {
 					}
 					if data.Host.Platform != "" {
 						@infoRow("Platform", data.Host.Platform)
+					}
+				</div>
+			</div>
+
+			<!-- Storage & Resources -->
+			<div class="card">
+				<div class="px-5 py-4 border-b border-dark-700">
+					<h2 class="text-lg font-semibold text-white flex items-center gap-2">
+						<i class="fas fa-hdd text-emerald-400"></i>
+						Storage &amp; Resources
+					</h2>
+				</div>
+				<div class="p-5 space-y-4">
+					<!-- Disk Usage -->
+					if data.Host.DiskTotal != "" {
+						<div>
+							<div class="flex justify-between text-sm mb-1.5">
+								<span class="text-gray-400">Disk Usage</span>
+								<span class="text-gray-300 font-mono">{ data.Host.DiskUsed } / { data.Host.DiskTotal }</span>
+							</div>
+							<div class="w-full bg-dark-700 rounded-full h-2.5">
+								<div
+									class={ "h-2.5 rounded-full", templ.KV("bg-emerald-500", data.Host.DiskPercent < 80), templ.KV("bg-yellow-500", data.Host.DiskPercent >= 80 && data.Host.DiskPercent < 90), templ.KV("bg-red-500", data.Host.DiskPercent >= 90) }
+									style={ fmt.Sprintf("width: %.1f%%", data.Host.DiskPercent) }
+								></div>
+							</div>
+							<p class="text-xs text-gray-500 mt-1">{ fmt.Sprintf("%.1f%%", data.Host.DiskPercent) } used</p>
+						</div>
+					}
+					<!-- Memory Usage -->
+					if data.Host.MemUsedStr != "" {
+						<div>
+							<div class="flex justify-between text-sm mb-1.5">
+								<span class="text-gray-400">Memory Usage</span>
+								<span class="text-gray-300 font-mono">{ data.Host.MemUsedStr } / { data.Host.MemTotalStr }</span>
+							</div>
+							<div class="w-full bg-dark-700 rounded-full h-2.5">
+								<div
+									class={ "h-2.5 rounded-full", templ.KV("bg-purple-500", data.Host.MemPercent < 80), templ.KV("bg-yellow-500", data.Host.MemPercent >= 80 && data.Host.MemPercent < 90), templ.KV("bg-red-500", data.Host.MemPercent >= 90) }
+									style={ fmt.Sprintf("width: %.1f%%", data.Host.MemPercent) }
+								></div>
+							</div>
+							<p class="text-xs text-gray-500 mt-1">{ fmt.Sprintf("%.1f%%", data.Host.MemPercent) } used</p>
+						</div>
+					}
+					<!-- CPU Usage -->
+					if data.Host.CPUPercent > 0 {
+						<div>
+							<div class="flex justify-between text-sm mb-1.5">
+								<span class="text-gray-400">CPU Usage</span>
+								<span class="text-gray-300 font-mono">{ fmt.Sprintf("%.1f%%", data.Host.CPUPercent) }</span>
+							</div>
+							<div class="w-full bg-dark-700 rounded-full h-2.5">
+								<div
+									class={ "h-2.5 rounded-full", templ.KV("bg-blue-500", data.Host.CPUPercent < 80), templ.KV("bg-yellow-500", data.Host.CPUPercent >= 80 && data.Host.CPUPercent < 90), templ.KV("bg-red-500", data.Host.CPUPercent >= 90) }
+									style={ fmt.Sprintf("width: %.1f%%", data.Host.CPUPercent) }
+								></div>
+							</div>
+						</div>
+					}
+					<!-- Network I/O -->
+					if data.Host.NetworkRxStr != "" || data.Host.NetworkTxStr != "" {
+						<div class="grid grid-cols-2 gap-4 pt-2 border-t border-dark-700/50">
+							<div>
+								<p class="text-xs text-gray-500 mb-1">Network Received</p>
+								<p class="text-sm text-gray-300 font-mono">
+									<i class="fas fa-arrow-down text-green-400 mr-1 text-xs"></i>{ data.Host.NetworkRxStr }
+								</p>
+							</div>
+							<div>
+								<p class="text-xs text-gray-500 mb-1">Network Transmitted</p>
+								<p class="text-sm text-gray-300 font-mono">
+									<i class="fas fa-arrow-up text-blue-400 mr-1 text-xs"></i>{ data.Host.NetworkTxStr }
+								</p>
+							</div>
+						</div>
+					}
+					if data.Host.DiskTotal == "" && data.Host.MemUsedStr == "" && data.Host.CPUPercent == 0 {
+						<p class="text-sm text-gray-500 italic">No metrics data available yet. Metrics are collected periodically by the scheduler.</p>
 					}
 				</div>
 			</div>

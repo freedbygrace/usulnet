@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 
 	"github.com/fr4nsys/usulnet/internal/pkg/errors"
@@ -188,7 +189,12 @@ func NewLocalClient(ctx context.Context) (*Client, error) {
 
 // buildHTTPClient creates an HTTP client based on connection options
 func buildHTTPClient(opts ClientOptions) (*http.Client, error) {
-	transport := &http.Transport{}
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 50,
+		MaxConnsPerHost:     50,
+		IdleConnTimeout:     90 * time.Second,
+	}
 
 	// Configure for Unix socket
 	if isUnixSocket(opts.Host) {
@@ -367,6 +373,26 @@ func (c *Client) Close() error {
 		return c.cli.Close()
 	}
 	return nil
+}
+
+// BuildCachePrune removes build cache entries from the Docker daemon.
+// It returns the total bytes freed and an error if the operation fails.
+func (c *Client) BuildCachePrune(ctx context.Context, all bool) (int64, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.closed {
+		return 0, errors.New(errors.CodeDockerConnection, "client is closed")
+	}
+
+	report, err := c.cli.BuildCachePrune(ctx, types.BuildCachePruneOptions{
+		All: all,
+	})
+	if err != nil {
+		return 0, errors.Wrap(err, errors.CodeInternal, "failed to prune build cache")
+	}
+
+	return int64(report.SpaceReclaimed), nil
 }
 
 // IsClosed returns true if the client has been closed

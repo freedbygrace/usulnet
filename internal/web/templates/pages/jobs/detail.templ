@@ -260,8 +260,12 @@ templ JobDetail(data JobDetailData) {
 							}
 						};
 
-						this.socket.onclose = () => {
+						this.socket.onclose = (event) => {
+							const graceful = (event.code === 1000 || event.code === 1001);
 							this.socket = null;
+							if (!graceful && (this.currentStatus === 'running' || this.currentStatus === 'pending')) {
+								setTimeout(() => this.connectWS(), 3000);
+							}
 						};
 					},
 

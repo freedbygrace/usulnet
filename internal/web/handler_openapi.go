@@ -17,7 +17,7 @@ func (h *Handler) OpenAPIDocsTempl(w http.ResponseWriter, r *http.Request) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>usulnet API Documentation</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+    <link rel="stylesheet" href="/static/vendor/swagger-ui/swagger-ui.css">
     <style>
         body { margin: 0; padding: 0; }
         .topbar { display: none !important; }
@@ -25,7 +25,7 @@ func (h *Handler) OpenAPIDocsTempl(w http.ResponseWriter, r *http.Request) {
 </head>
 <body>
     <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script src="/static/vendor/swagger-ui/swagger-ui-bundle.js"></script>
     <script>
         SwaggerUIBundle({
             url: '/api/v1/openapi.json',

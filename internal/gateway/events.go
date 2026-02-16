@@ -8,6 +8,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/gateway/protocol"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
+	"github.com/fr4nsys/usulnet/internal/services/notification"
+	"github.com/fr4nsys/usulnet/internal/services/notification/channels"
 )
 
 // EventProcessor processes events from agents.
@@ -261,14 +264,20 @@ func PersistenceHandler(store EventStore) EventHandler {
 	}
 }
 
-// NotificationHandler sends notifications for critical events.
+// NotificationHandler sends notifications for critical events
+// by forwarding them to the notification service.
 type NotificationHandler struct {
-	// notificationService would be injected here
-	log *logger.Logger
+	notifier *notification.Service
+	log      *logger.Logger
 }
 
-func NewNotificationHandler(log *logger.Logger) *NotificationHandler {
-	return &NotificationHandler{log: log}
+// NewNotificationHandler creates a notification handler.
+// If notifier is nil, notifications will only be logged.
+func NewNotificationHandler(notifier *notification.Service, log *logger.Logger) *NotificationHandler {
+	return &NotificationHandler{
+		notifier: notifier,
+		log:      log,
+	}
 }
 
 func (h *NotificationHandler) Handle(ctx context.Context, event *protocol.Event) error {
@@ -276,13 +285,127 @@ func (h *NotificationHandler) Handle(ctx context.Context, event *protocol.Event)
 		return nil
 	}
 
-	h.log.Info("Would send notification",
-		"event_type", event.Type,
-		"severity", event.Severity,
-	)
+	notifType := eventToNotificationType(event.Type)
+	if notifType == "" {
+		h.log.Debug("No notification type mapping for event", "event_type", event.Type)
+		return nil
+	}
 
-	// TODO: Integrate with notification service
+	// If no notification service is configured, just log
+	if h.notifier == nil {
+		h.log.Info("Would send notification (no service configured)",
+			"event_type", event.Type,
+			"severity", event.Severity,
+		)
+		return nil
+	}
+
+	// Build notification data from event attributes
+	data := make(map[string]interface{})
+	if event.AgentID != "" {
+		data["agent_id"] = event.AgentID
+	}
+	if event.HostID != "" {
+		data["host_id"] = event.HostID
+	}
+	if event.Message != "" {
+		data["message"] = event.Message
+	}
+	if event.Actor != nil && event.Actor.ID != "" {
+		data["actor_id"] = event.Actor.ID
+		data["actor_type"] = event.Actor.Type
+	}
+	for k, v := range event.Attributes {
+		data[k] = v
+	}
+
+	msg := notification.Message{
+		Type:     notifType,
+		Title:    fmt.Sprintf("[%s] %s", event.Severity, event.Type),
+		Body:     event.Message,
+		Priority: severityToPriority(event.Severity),
+		Data:     data,
+	}
+
+	if err := h.notifier.SendAsync(ctx, msg); err != nil {
+		h.log.Warn("Failed to queue notification",
+			"event_type", event.Type,
+			"error", err,
+		)
+		return err
+	}
+
+	h.log.Debug("Notification queued for event",
+		"event_type", event.Type,
+		"notification_type", notifType,
+	)
 	return nil
+}
+
+// eventToNotificationType maps gateway event types to notification types.
+func eventToNotificationType(eventType protocol.EventType) channels.NotificationType {
+	switch eventType {
+	// Container events
+	case protocol.EventContainerDie:
+		return channels.TypeContainerDown
+	case protocol.EventContainerOOM:
+		return channels.TypeContainerOOM
+	case protocol.EventContainerHealth:
+		return channels.TypeHealthCheckFailed
+
+	// Agent events
+	case protocol.EventAgentError:
+		return channels.TypeSystemError
+	case protocol.EventAgentStopping:
+		return channels.TypeAgentDisconnected
+
+	// Security events
+	case protocol.EventSecurityVulnFound:
+		return channels.TypeSecurityAlert
+	case protocol.EventSecurityScoreChanged:
+		return channels.TypeSecurityScanDone
+
+	// Backup/Restore events
+	case protocol.EventBackupFailed:
+		return channels.TypeBackupFailed
+	case protocol.EventRestoreFailed:
+		return channels.TypeRestoreFailed
+
+	// Update events
+	case protocol.EventUpdateAvailable:
+		return channels.TypeUpdateAvailable
+	case protocol.EventUpdateFailed:
+		return channels.TypeUpdateFailed
+	case protocol.EventUpdateRollback:
+		return channels.TypeUpdateRolledBack
+
+	// Resource events
+	case protocol.EventResourceCritical:
+		return channels.TypeResourceThreshold
+	case protocol.EventResourceLow:
+		return channels.TypeHostLowDisk
+
+	// Job events
+	case protocol.EventJobFailed:
+		return channels.TypeSystemError
+
+	default:
+		return ""
+	}
+}
+
+// severityToPriority maps event severity to notification priority.
+func severityToPriority(severity protocol.EventSeverity) channels.Priority {
+	switch severity {
+	case protocol.SeverityCritical:
+		return channels.PriorityCritical
+	case protocol.SeverityError:
+		return channels.PriorityHigh
+	case protocol.SeverityWarning:
+		return channels.PriorityNormal
+	default:
+		return channels.PriorityLow
+	}
 }
 
 // MetricsHandler updates metrics based on events.

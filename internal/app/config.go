@@ -28,8 +28,9 @@ type Config struct {
 	NPM      NPMConfig      `mapstructure:"npm"`
 	Caddy    CaddyConfig    `mapstructure:"caddy"`
 	Minio    MinIOConfig    `mapstructure:"minio"`
-	Logging  LoggingConfig  `mapstructure:"logging"`
-	Metrics  MetricsConfig  `mapstructure:"metrics"`
+	Logging       LoggingConfig       `mapstructure:"logging"`
+	Metrics       MetricsConfig       `mapstructure:"metrics"`
+	Observability ObservabilityConfig `mapstructure:"observability"`
 	Terminal TerminalConfig `mapstructure:"terminal"`
 	Guacd   GuacdConfig    `mapstructure:"guacd"`
 }
@@ -249,6 +250,25 @@ type MetricsConfig struct {
 	ProcessMetrics bool   `mapstructure:"process_metrics"`
 }
 
+// ObservabilityConfig holds OpenTelemetry tracing and distributed observability settings.
+type ObservabilityConfig struct {
+	Tracing TracingConfig `mapstructure:"tracing"`
+}
+
+// TracingConfig holds distributed tracing configuration.
+type TracingConfig struct {
+	// Enabled activates OpenTelemetry tracing. Default: false.
+	Enabled bool `mapstructure:"enabled"`
+	// Exporter selects the trace exporter: "otlp" (default).
+	Exporter string `mapstructure:"exporter"`
+	// Endpoint is the collector endpoint (e.g. "localhost:4318" for OTLP/HTTP).
+	Endpoint string `mapstructure:"endpoint"`
+	// Insecure disables TLS for the exporter connection. Default: true.
+	Insecure bool `mapstructure:"insecure"`
+	// SamplingRate controls the fraction of traces sampled (0.0–1.0). Default: 0.1.
+	SamplingRate float64 `mapstructure:"sampling_rate"`
+}
+
 // LoadConfig loads configuration from file and environment
 func LoadConfig(cfgFile string) (*Config, error) {
 	v := viper.New()
@@ -405,6 +425,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("metrics.path", "/metrics")
 	v.SetDefault("metrics.go_metrics", true)
 	v.SetDefault("metrics.process_metrics", true)
+
+	// Observability / Tracing
+	v.SetDefault("observability.tracing.enabled", false)
+	v.SetDefault("observability.tracing.exporter", "otlp")
+	v.SetDefault("observability.tracing.endpoint", "localhost:4318")
+	v.SetDefault("observability.tracing.insecure", true)
+	v.SetDefault("observability.tracing.sampling_rate", 0.1)
 
 	// Host Terminal (migrated from HOST_TERMINAL_* env vars)
 	v.SetDefault("terminal.enabled", true)

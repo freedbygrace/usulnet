@@ -248,11 +248,25 @@ type HostService interface {
 	List(ctx context.Context) ([]HostView, error)
 	Get(ctx context.Context, id string) (*HostView, error)
 	GetDockerInfo(ctx context.Context) (*DockerInfoView, error)
+	GetMetrics(ctx context.Context, id string) (*HostMetricsView, error)
 	Create(ctx context.Context, h *HostView) (string, error) // returns host ID
 	Update(ctx context.Context, h *HostView) error
 	Remove(ctx context.Context, id string) error
 	Test(ctx context.Context, id string) error
 	GenerateAgentToken(ctx context.Context, id string) (string, error)
+}
+
+// HostMetricsView contains host resource metrics for templates.
+type HostMetricsView struct {
+	CPUPercent     float64
+	MemoryUsed     int64
+	MemoryPercent  float64
+	MemoryUsedStr  string
+	DiskPercent    float64
+	DiskUsedStr    string
+	DiskTotalStr   string
+	NetworkRxStr   string
+	NetworkTxStr   string
 }
 
 // DockerInfoView contains Docker daemon information for templates.
@@ -763,10 +777,9 @@ func (h *Handler) requireFeature(feature license.Feature) func(http.Handler) htt
 					_, _ = w.Write([]byte(`<div class="alert alert-warning">This feature requires a Business or Enterprise license.</div>`))
 					return
 				}
-				h.RenderError(w, r, http.StatusPaymentRequired,
-					"License Required",
-					"This feature requires a Business or Enterprise license. Visit usulnet.com/#pricing to upgrade.",
-				)
+				// Redirect with flash instead of rendering a sidebar-less error page
+				h.setFlash(w, r, "warning", "This feature requires a Business or Enterprise license. Visit usulnet.com/#pricing to upgrade.")
+				h.redirect(w, r, "/")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -834,6 +847,7 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	// Step 1: Verify credentials only (no session created yet)
 	userCtx, err := h.services.Auth().VerifyCredentials(r.Context(), username, password, r.UserAgent(), getClientIP(r))
 	if err != nil {
+		RecordAccessEvent(username, "", "login_failed", "session", "", "", "Invalid credentials", getClientIP(r), r.UserAgent(), false, err.Error())
 		h.redirect(w, r, "/login?error=Invalid+username+or+password&username="+url.QueryEscape(username))
 		return
 	}
@@ -870,6 +884,8 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	RecordAccessEvent(userCtx.Username, userCtx.ID, "login", "session", session.ID, "", "Login successful", getClientIP(r), r.UserAgent(), true, "")
+
 	// Redirect to return URL or dashboard (validate to prevent open redirect)
 	if returnURL != "" && returnURL != "/login" && strings.HasPrefix(returnURL, "/") && !strings.HasPrefix(returnURL, "//") {
 		h.redirect(w, r, returnURL)
@@ -882,11 +898,19 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Get session to retrieve session ID for auth service logout
 	session, _ := h.sessionStore.Get(r, "usulnet_session")
-	if session != nil && session.ID != "" {
-		if err := h.services.Auth().Logout(r.Context(), session.ID); err != nil {
-			h.logger.Warn("failed to logout session in auth service", "session_id", session.ID, "error", err)
+	userName := ""
+	userID := ""
+	if session != nil {
+		userName = session.Username
+		userID = session.UserID
+		if session.ID != "" {
+			if err := h.services.Auth().Logout(r.Context(), session.ID); err != nil {
+				h.logger.Warn("failed to logout session in auth service", "session_id", session.ID, "error", err)
+			}
 		}
 	}
+
+	RecordAccessEvent(userName, userID, "logout", "session", "", "", "User logged out", getClientIP(r), r.UserAgent(), true, "")
 
 	// Delete session cookie
 	if err := h.sessionStore.Delete(r, w, "usulnet_session"); err != nil {
@@ -898,7 +922,18 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 // HealthCheck returns health status.
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"ok"}`))
+
+	status := "ok"
+	code := http.StatusOK
+
+	// Check if core services are available
+	if h.services == nil {
+		status = "degraded"
+		code = http.StatusServiceUnavailable
+	}
+
+	w.WriteHeader(code)
+	w.Write([]byte(`{"status":"` + status + `"}`))
 }
 
 // ============================================================================
@@ -1196,11 +1231,11 @@ func (h *Handler) ImageRemove(w http.ResponseWriter, r *http.Request) {
 	force := r.FormValue("force") == "true"
 	if err := h.services.Images().Remove(ctx, id, force); err != nil {
 		h.setFlash(w, r, "error", "Failed to remove image: "+err.Error())
-		http.Redirect(w, r, "/images", http.StatusSeeOther)
+		h.redirect(w, r, "/images")
 		return
 	}
 	h.setFlash(w, r, "success", "Image removed successfully")
-	http.Redirect(w, r, "/images", http.StatusSeeOther)
+	h.redirect(w, r, "/images")
 }
 
 func (h *Handler) ImagesPrune(w http.ResponseWriter, r *http.Request) {
@@ -1208,11 +1243,11 @@ func (h *Handler) ImagesPrune(w http.ResponseWriter, r *http.Request) {
 	_, err := h.services.Images().Prune(ctx)
 	if err != nil {
 		h.setFlash(w, r, "error", "Failed to prune images: "+err.Error())
-		http.Redirect(w, r, "/images", http.StatusSeeOther)
+		h.redirect(w, r, "/images")
 		return
 	}
 	h.setFlash(w, r, "success", "Unused images pruned")
-	http.Redirect(w, r, "/images", http.StatusSeeOther)
+	h.redirect(w, r, "/images")
 }
 
 // ============================================================================
@@ -1246,22 +1281,22 @@ func (h *Handler) VolumeRemove(w http.ResponseWriter, r *http.Request) {
 	force := r.FormValue("force") == "true"
 	if err := h.services.Volumes().Remove(ctx, name, force); err != nil {
 		h.setFlash(w, r, "error", "Failed to remove volume: "+err.Error())
-		http.Redirect(w, r, "/volumes", http.StatusSeeOther)
+		h.redirect(w, r, "/volumes")
 		return
 	}
 	h.setFlash(w, r, "success", "Volume removed successfully")
-	http.Redirect(w, r, "/volumes", http.StatusSeeOther)
+	h.redirect(w, r, "/volumes")
 }
 
 func (h *Handler) VolumesPrune(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := h.services.Volumes().Prune(ctx); err != nil {
 		h.setFlash(w, r, "error", "Failed to prune volumes: "+err.Error())
-		http.Redirect(w, r, "/volumes", http.StatusSeeOther)
+		h.redirect(w, r, "/volumes")
 		return
 	}
 	h.setFlash(w, r, "success", "Unused volumes pruned")
-	http.Redirect(w, r, "/volumes", http.StatusSeeOther)
+	h.redirect(w, r, "/volumes")
 }
 
 // VolumeBrowseAPI returns files inside a volume as JSON (for frontend AJAX).
@@ -1327,11 +1362,11 @@ func (h *Handler) NetworkRemove(w http.ResponseWriter, r *http.Request) {
 	id := getIDParam(r)
 	if err := h.services.Networks().Remove(ctx, id); err != nil {
 		h.setFlash(w, r, "error", "Failed to remove network: "+err.Error())
-		http.Redirect(w, r, "/networks/"+id, http.StatusSeeOther)
+		h.redirect(w, r, "/networks/"+id)
 		return
 	}
 	h.setFlash(w, r, "success", "Network removed successfully")
-	http.Redirect(w, r, "/networks", http.StatusSeeOther)
+	h.redirect(w, r, "/networks")
 }
 
 func (h *Handler) NetworkConnect(w http.ResponseWriter, r *http.Request) {
@@ -2120,6 +2155,9 @@ func (h *Handler) UserUpdate(w http.ResponseWriter, r *http.Request) {
 
 	email := r.FormValue("email")
 	role := r.FormValue("role")
+	if role == "" {
+		role = r.FormValue("role_id") // fallback for legacy form field name
+	}
 	password := r.FormValue("password")
 
 	// Update email and role

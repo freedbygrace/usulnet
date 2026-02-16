@@ -1,0 +1,132 @@
+# usulnet Alertmanager Rules
+# Import into Prometheus via: rule_files: ["alerts.yml"]
+
+groups:
+  - name: usulnet.agents
+    rules:
+      - alert: AgentDown
+        expr: usulnet_agents_connected_total == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No agents connected"
+          description: "No usulnet agents have been connected for more than 5 minutes."
+
+      - alert: AgentCountDecreased
+        expr: delta(usulnet_agents_connected_total[10m]) < -1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent count decreased"
+          description: "The number of connected agents has decreased by more than 1 in the last 10 minutes."
+
+  - name: usulnet.backups
+    rules:
+      - alert: BackupFailed
+        expr: increase(usulnet_backups_total{status="failure"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backup failed"
+          description: "One or more backups have failed in the last hour."
+
+      - alert: NoRecentBackup
+        expr: increase(usulnet_backups_total{status="success"}[25h]) == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful backup in 24+ hours"
+          description: "No successful backup has been recorded in the last 25 hours. Check backup schedules."
+
+  - name: usulnet.security
+    rules:
+      - alert: CriticalVulnerabilityDetected
+        expr: usulnet_vulnerabilities_total{severity="critical"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical vulnerabilities detected"
+          description: "{{ $value }} critical vulnerabilities found across scanned images."
+
+      - alert: HighVulnerabilityCount
+        expr: usulnet_vulnerabilities_total{severity="high"} > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of high-severity vulnerabilities"
+          description: "{{ $value }} high-severity vulnerabilities detected."
+
+  - name: usulnet.system
+    rules:
+      - alert: HighDiskUsage
+        expr: usulnet_host_disk_percent > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host disk usage above 90%"
+          description: "Host {{ $labels.host }} disk usage is at {{ $value }}%."
+
+      - alert: HighMemoryUsage
+        expr: usulnet_host_memory_percent > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory usage above 90%"
+          description: "Host {{ $labels.host }} memory usage is at {{ $value }}%."
+
+      - alert: HighCPUUsage
+        expr: usulnet_host_cpu_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host CPU usage above 90%"
+          description: "Host {{ $labels.host }} CPU usage is at {{ $value }}%."
+
+  - name: usulnet.license
+    rules:
+      - alert: LicenseExpiringSoon
+        expr: usulnet_license_days_remaining > 0 and usulnet_license_days_remaining < 30
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "License expiring soon"
+          description: "usulnet license expires in {{ $value }} days."
+
+      - alert: LicenseExpired
+        expr: usulnet_license_days_remaining == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "License has expired"
+          description: "usulnet license has expired. Platform will operate in Community mode."
+
+  - name: usulnet.api
+    rules:
+      - alert: HighAPIErrorRate
+        expr: sum(rate(usulnet_api_requests_total{status=~"5.."}[5m])) / sum(rate(usulnet_api_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API error rate above 5%"
+          description: "The API error rate is {{ $value | humanizePercentage }}."
+
+      - alert: HighAuthFailureRate
+        expr: rate(usulnet_auth_attempts_total{result="failure"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High authentication failure rate"
+          description: "More than 1 failed auth attempt per second. Possible brute-force attack."

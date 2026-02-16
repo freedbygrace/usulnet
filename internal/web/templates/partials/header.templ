@@ -82,7 +82,6 @@ templ Header(user *types.UserData, notificationsCount int, hosts []types.HostSel
 							hx-target="#search-results"
 						/>
 						<i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"></i>
-						<kbd class="hidden md:inline-flex absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 text-xs bg-dark-700 text-gray-400 rounded border border-dark-600">⌘K</kbd>
 					</div>
 					<div id="search-results"></div>
 				</div>
@@ -96,8 +95,15 @@ templ Header(user *types.UserData, notificationsCount int, hosts []types.HostSel
 					class="p-2 text-gray-400 hover:text-white transition-colors"
 					title="Toggle theme"
 				>
-					<i class="fas fa-moon"></i>
+					<i id="theme-toggle-icon" class="fas fa-moon"></i>
 				</button>
+				<script>
+					(function() {
+						var theme = localStorage.getItem('usulnet-theme') || 'dark';
+						var icon = document.getElementById('theme-toggle-icon');
+						if (icon) icon.className = 'fas ' + (theme === 'dark' ? 'fa-moon' : 'fa-sun');
+					})();
+				</script>
 
 				<!-- Notifications -->
 				<div x-data="{ open: false }" class="relative">

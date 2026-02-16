@@ -1,5 +1,5 @@
 # =============================================================================
-# usulnet - Production Docker Compose
+# usulnet - Production Docker Compose (Deploy Script Version)
 # =============================================================================
 #
 # NOTE: The canonical docker-compose.yml lives at the repository root.
@@ -30,13 +30,10 @@ services:
       - "${USULNET_HTTP_PORT:-8080}:8080"
       - "${USULNET_HTTPS_PORT:-7443}:7443"
     volumes:
-      # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock
-      # Application configuration
       - ./config.yaml:/app/config/config.yaml:ro
-      # Persistent data (backups, PKI certs, license, etc.)
       - usulnet_data:/app/data
-    # Host terminal support (nsenter into host namespaces)
+      - trivy_cache:/var/lib/usulnet/trivy
     pid: "host"
     cap_add:
       - SYS_PTRACE
@@ -45,7 +42,6 @@ services:
       - HOST_TERMINAL_ENABLED=${HOST_TERMINAL_ENABLED:-true}
       - HOST_TERMINAL_USER=${HOST_TERMINAL_USER:-nobody}
       - HOST_TERMINAL_SHELL=/bin/bash
-      # RDP Web Access (guacd service included)
       - GUACD_ENABLED=${GUACD_ENABLED:-true}
       - GUACD_HOST=${GUACD_HOST:-guacd}
       - GUACD_PORT=${GUACD_PORT:-4822}
@@ -55,15 +51,52 @@ services:
       redis:
         condition: service_healthy
       nats:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - usulnet-internal
+      - usulnet-frontend
+      - usulnet-backend
+
+  # --------------------------------------------------------------------------
+  # Apache Guacamole Daemon — RDP/VNC Web Gateway
+  # --------------------------------------------------------------------------
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: usulnet-guacd
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 4822 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - usulnet-frontend
 
   # --------------------------------------------------------------------------
   # PostgreSQL Database
@@ -76,17 +109,42 @@ services:
       POSTGRES_USER: ${DB_USER:-usulnet}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME:-usulnet}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=128MB"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "effective_cache_size=256MB"
+      - "-c"
+      - "max_connections=100"
+      - "-c"
+      - "log_min_duration_statement=1000"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-usulnet}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-usulnet} -d ${DB_NAME:-usulnet}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "30m"
+        max-file: "3"
     networks:
-      - usulnet-internal
-    # NOTE: PostgreSQL port NOT exposed to host in production.
-    # Access via: docker exec -it usulnet-postgres psql -U usulnet
+      - usulnet-backend
 
   # --------------------------------------------------------------------------
   # Redis (sessions and cache)
@@ -95,6 +153,17 @@ services:
     image: redis:8-alpine
     container_name: usulnet-redis
     restart: unless-stopped
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--save"
+      - "60"
+      - "1000"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -102,18 +171,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+        reservations:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
-      - usulnet-internal
-
-  # --------------------------------------------------------------------------
-  # Apache Guacamole Daemon — RDP/VNC Web Gateway
-  # --------------------------------------------------------------------------
-  guacd:
-    image: guacamole/guacd:1.5.5
-    container_name: usulnet-guacd
-    restart: unless-stopped
-    networks:
-      - usulnet-internal
+      - usulnet-backend
 
   # --------------------------------------------------------------------------
   # NATS (messaging, required for agent communication)
@@ -122,7 +193,13 @@ services:
     image: nats:2.12-alpine
     container_name: usulnet-nats
     restart: unless-stopped
-    command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
+    command:
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "-m"
+      - "8222"
+      - "--max_payload"
+      - "8388608"
     volumes:
       - nats_data:/data
     healthcheck:
@@ -130,15 +207,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
-      - usulnet-internal
+      - usulnet-backend
 
 volumes:
+  usulnet_data:
+  trivy_cache:
   postgres_data:
   redis_data:
   nats_data:
-  usulnet_data:
 
 networks:
-  usulnet-internal:
+  usulnet-backend:
+    driver: bridge
+    internal: true
+  usulnet-frontend:
     driver: bridge

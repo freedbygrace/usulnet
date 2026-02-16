@@ -90,6 +90,19 @@ func TerminalHub(data TerminalHubData) templ.Component {
 	})
 }
 
+// pickerOnClick is a templ script that calls the global addTab function
+// exposed by the terminal tabs component. The short ID (first 12 chars)
+// is computed JavaScript-side to keep the Go template simple.
+func pickerOnClick(id string, name string) templ.ComponentScript {
+	return templ.ComponentScript{
+		Name: `__templ_pickerOnClick_781a`,
+		Function: `function __templ_pickerOnClick_781a(id, name){window._terminalAddTab(id.substring(0, 12), 'container', id, name);
+}`,
+		Call:       templ.SafeScript(`__templ_pickerOnClick_781a`, id, name),
+		CallInline: templ.SafeScriptInline(`__templ_pickerOnClick_781a`, id, name),
+	}
+}
+
 // TerminalPicker renders a list of containers that can be opened in a new terminal tab.
 func TerminalPicker(containers []TerminalPickerContainer) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -123,16 +136,16 @@ func TerminalPicker(containers []TerminalPickerContainer) templ.Component {
 			}
 		}
 		for _, c := range containers {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<button @click=\"")
+			templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_Buffer, pickerOnClick(c.ID, c.Name))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var4 string
-			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs("window.location.href = '/terminal?add=" + c.ID + "'")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<button type=\"button\" onclick=\"")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/terminal_hub.templ`, Line: 43, Col: 66}
+				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+			var templ_7745c5c3_Var4 templ.ComponentScript = pickerOnClick(c.ID, c.Name)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4.Call)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -158,7 +171,7 @@ func TerminalPicker(containers []TerminalPickerContainer) templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(c.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/terminal_hub.templ`, Line: 54, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/terminal_hub.templ`, Line: 62, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -171,7 +184,7 @@ func TerminalPicker(containers []TerminalPickerContainer) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(c.Image)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/terminal_hub.templ`, Line: 55, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/terminal_hub.templ`, Line: 63, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
@@ -40,63 +41,63 @@ func NewContainerHandler(containerService *container.Service, log *logger.Logger
 func (h *ContainerHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
+	// Read-only endpoints (viewer+)
 	r.Get("/", h.ListContainers)
 	r.Get("/stats", h.GetContainerStats)
 
 	r.Route("/{hostID}", func(r chi.Router) {
 		r.Get("/", h.ListByHost)
 
-		// Bulk operations
-		r.Post("/bulk/start", h.BulkStart)
-		r.Post("/bulk/stop", h.BulkStop)
-		r.Post("/bulk/restart", h.BulkRestart)
-		r.Post("/bulk/pause", h.BulkPause)
-		r.Post("/bulk/unpause", h.BulkUnpause)
-		r.Post("/bulk/kill", h.BulkKill)
-		r.Delete("/bulk", h.BulkRemove)
-
-		// Import container filesystem as image
-		r.Post("/import", h.ImportContainer)
+		// Operator+ for bulk mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/bulk/start", h.BulkStart)
+			r.Post("/bulk/stop", h.BulkStop)
+			r.Post("/bulk/restart", h.BulkRestart)
+			r.Post("/bulk/pause", h.BulkPause)
+			r.Post("/bulk/unpause", h.BulkUnpause)
+			r.Post("/bulk/kill", h.BulkKill)
+			r.Delete("/bulk", h.BulkRemove)
+			r.Post("/import", h.ImportContainer)
+			r.Post("/prune", h.Prune)
+		})
 
 		r.Route("/{containerID}", func(r chi.Router) {
+			// Read-only (viewer+)
 			r.Get("/", h.GetContainer)
-			r.Delete("/", h.RemoveContainer)
-			r.Post("/start", h.StartContainer)
-			r.Post("/stop", h.StopContainer)
-			r.Post("/restart", h.RestartContainer)
-			r.Post("/pause", h.PauseContainer)
-			r.Post("/unpause", h.UnpauseContainer)
-			r.Post("/kill", h.KillContainer)
-			r.Post("/recreate", h.RecreateContainer)
 			r.Get("/logs", h.GetLogs)
 			r.Get("/stats", h.GetStats)
-			r.Post("/exec", h.ExecCreate)
-			// File copy operations
 			r.Get("/copy/*", h.CopyFromContainer)
-			r.Put("/copy/*", h.CopyToContainer)
-			// Resource update operations
-			r.Put("/resources", h.UpdateResources)
-			r.Post("/commit", h.CommitContainer)
 			r.Get("/export", h.ExportContainer)
-
-			// Environment variables
 			r.Get("/env", h.GetContainerEnv)
-			r.Put("/env", h.UpdateContainerEnv)
-			r.Post("/env/sync", h.SyncContainerConfig)
-
-			// File browser operations
 			r.Get("/browse", h.BrowseContainer)
 			r.Get("/browse/*", h.BrowseContainer)
 			r.Get("/file/*", h.ReadContainerFile)
-			r.Put("/file/*", h.WriteContainerFile)
-			r.Delete("/file/*", h.DeleteContainerFile)
-			r.Post("/mkdir/*", h.CreateContainerDirectory)
 			r.Get("/download/*", h.DownloadContainerFile)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Delete("/", h.RemoveContainer)
+				r.Post("/start", h.StartContainer)
+				r.Post("/stop", h.StopContainer)
+				r.Post("/restart", h.RestartContainer)
+				r.Post("/pause", h.PauseContainer)
+				r.Post("/unpause", h.UnpauseContainer)
+				r.Post("/kill", h.KillContainer)
+				r.Post("/recreate", h.RecreateContainer)
+				r.Post("/exec", h.ExecCreate)
+				r.Put("/copy/*", h.CopyToContainer)
+				r.Put("/resources", h.UpdateResources)
+				r.Post("/commit", h.CommitContainer)
+				r.Put("/env", h.UpdateContainerEnv)
+				r.Post("/env/sync", h.SyncContainerConfig)
+				r.Put("/file/*", h.WriteContainerFile)
+				r.Delete("/file/*", h.DeleteContainerFile)
+				r.Post("/mkdir/*", h.CreateContainerDirectory)
+			})
 		})
 	})
-
-	// Prune
-	r.Post("/{hostID}/prune", h.Prune)
 
 	return r
 }

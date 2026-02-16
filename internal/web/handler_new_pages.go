@@ -226,13 +226,10 @@ func (h *Handler) JobDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For now, we can only cancel jobs in the queue, not delete from DB
-	// The scheduler doesn't have a direct Delete method, but we can use the repository if available
-	// For UX, cancel is close enough for pending/running jobs
-	if err := schedulerSvc.CancelJob(ctx, jobID); err != nil {
-		h.setFlash(w, r, "warning", "Job marked for cleanup")
+	if err := schedulerSvc.DeleteJob(ctx, jobID); err != nil {
+		h.setFlash(w, r, "error", fmt.Sprintf("Failed to delete job: %v", err))
 	} else {
-		h.setFlash(w, r, "success", "Job removed")
+		h.setFlash(w, r, "success", "Job deleted")
 	}
 
 	http.Redirect(w, r, "/jobs", http.StatusSeeOther)

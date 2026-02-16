@@ -5,18 +5,91 @@
 package web
 
 import (
+	"context"
+	"fmt"
+	"mime"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/fr4nsys/usulnet/internal/license"
 )
 
+func init() {
+	// Ensure correct MIME types on systems with incomplete /etc/mime.types
+	// (e.g., Alpine Linux containers). Without this, Go's http.FileServer
+	// may serve .js/.css/.woff2 as text/plain, which browsers reject when
+	// X-Content-Type-Options: nosniff is set.
+	mime.AddExtensionType(".js", "application/javascript")
+	mime.AddExtensionType(".mjs", "application/javascript")
+	mime.AddExtensionType(".css", "text/css")
+	mime.AddExtensionType(".woff2", "font/woff2")
+	mime.AddExtensionType(".woff", "font/woff")
+	mime.AddExtensionType(".ttf", "font/ttf")
+	mime.AddExtensionType(".svg", "image/svg+xml")
+	mime.AddExtensionType(".json", "application/json")
+	mime.AddExtensionType(".map", "application/json")
+}
+
+// noListFS wraps http.FileSystem to disable directory listing.
+type noListFS struct{ http.FileSystem }
+
+func (fs noListFS) Open(name string) (http.File, error) {
+	f, err := fs.FileSystem.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if stat.IsDir() {
+		return nil, os.ErrNotExist
+	}
+	return f, nil
+}
+
+// staticCacheHeaders adds Cache-Control headers for static assets.
+func staticCacheHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.Contains(path, "/vendor/") || strings.HasSuffix(path, ".woff2") || strings.HasSuffix(path, ".ttf") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RegisterFrontendRoutes registers all web routes using Templ handlers.
+// All routes are wrapped in a Group so that Use() calls do not conflict
+// with routes already registered on the parent router (API routes).
 func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
+	r.Group(func(r chi.Router) {
+	// Panic recovery for all frontend routes
+	r.Use(RecoverPanic(h))
+
+	// Request ID for all frontend routes
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqID := r.Header.Get("X-Request-ID")
+			if reqID == "" {
+				reqID = fmt.Sprintf("%d", time.Now().UnixNano())
+			}
+			w.Header().Set("X-Request-ID", reqID)
+			ctx := context.WithValue(r.Context(), ContextKeyRequestID, reqID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+
 	// Static files
-	fileServer := http.FileServer(http.Dir("./web/static"))
-	r.Handle("/static/*", http.StripPrefix("/static/", fileServer))
+	fileServer := http.FileServer(noListFS{http.Dir("./web/static")})
+	r.Handle("/static/*", staticCacheHeaders(http.StripPrefix("/static/", fileServer)))
 
 	// Favicon
 	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
@@ -32,10 +105,16 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		r.Get("/login", h.LoginPageTempl)
 		r.Post("/login", h.LoginSubmit)
 		r.Post("/logout", h.Logout)
+		r.Get("/logout", h.Logout) // GET fallback for <a href="/logout"> links
 
 		// TOTP 2FA verification (during login)
 		r.Get("/login/totp", h.TOTPVerifyPageTempl)
 		r.Post("/login/totp", h.TOTPVerifySubmit)
+
+		// LDAP login (redirect to main login with method hint)
+		r.Get("/login/ldap", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/login?method=ldap", http.StatusSeeOther)
+		})
 
 		// OAuth SSO login
 		r.Get("/login/oauth", h.OAuthLogin)
@@ -252,9 +331,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/catalog/{slug}/deploy", h.StackCatalogDeploySubmit)
 			})
 
-			// Update (start/stop/restart) - require stack:update
+			// Update (start/stop/restart/edit) - require stack:update
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("stack:update"))
+				r.Get("/{name}/edit", h.StackEditTempl)
 				r.Post("/{name}/start", h.StackStart)
 				r.Post("/{name}/stop", h.StackStop)
 				r.Post("/{name}/restart", h.StackRestart)
@@ -290,19 +370,26 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 		// Updates & Auto-Update
 		r.Route("/updates", func(r chi.Router) {
-			r.Get("/", h.UpdatesTempl)
-			r.Post("/check", h.UpdatesCheckTempl)
-			r.Post("/check-all", h.UpdatesCheckTempl)
-			r.Post("/apply-all", h.UpdateBatch)
-			r.Post("/manual", h.UpdateManual)
-			r.Get("/{id}/changelog", h.UpdateChangelog)
-			r.Post("/{id}/apply", h.UpdateApplyTempl)
-			r.Post("/{id}/rollback", h.UpdateRollbackTempl)
-			r.Post("/batch", h.UpdateBatch)
-			// Auto-update policy management
-			r.Post("/policies", h.AutoUpdatePolicyCreate)
-			r.Post("/policies/{id}/toggle", h.AutoUpdatePolicyToggle)
-			r.Post("/policies/{id}/delete", h.AutoUpdatePolicyDelete)
+			// View updates (operator+)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("settings:view"))
+				r.Get("/", h.UpdatesTempl)
+				r.Get("/{id}/changelog", h.UpdateChangelog)
+			})
+			// Apply updates (settings:update)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("settings:update"))
+				r.Post("/check", h.UpdatesCheckTempl)
+				r.Post("/check-all", h.UpdatesCheckTempl)
+				r.Post("/apply-all", h.UpdateBatch)
+				r.Post("/manual", h.UpdateManual)
+				r.Post("/{id}/apply", h.UpdateApplyTempl)
+				r.Post("/{id}/rollback", h.UpdateRollbackTempl)
+				r.Post("/batch", h.UpdateBatch)
+				r.Post("/policies", h.AutoUpdatePolicyCreate)
+				r.Post("/policies/{id}/toggle", h.AutoUpdatePolicyToggle)
+				r.Post("/policies/{id}/delete", h.AutoUpdatePolicyDelete)
+			})
 		})
 
 		// Backups
@@ -372,8 +459,9 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			})
 		})
 
-		// Terminal Hub (multi-tab terminal)
+		// Terminal Hub (multi-tab terminal) - requires container:exec
 		r.Route("/terminal", func(r chi.Router) {
+			r.Use(m.RequirePermission("container:exec"))
 			r.Get("/", h.TerminalHubTempl)
 			r.Get("/picker", h.TerminalPickerTempl)
 		})
@@ -427,6 +515,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("host:view"))
 				r.Get("/", h.SwarmClusterTempl)
+				r.Get("/services/{serviceID}", func(w http.ResponseWriter, r *http.Request) {
+					serviceID := chi.URLParam(r, "serviceID")
+					http.Redirect(w, r, "/swarm?service="+serviceID, http.StatusSeeOther)
+				})
 			})
 
 			// Create/manage - require host:create (Swarm operations are privileged)
@@ -455,69 +547,90 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			http.Redirect(w, r, "/nodes/"+id, http.StatusMovedPermanently)
 		})
 
-		// Proxy
+		// Proxy (operator+ for mutations, viewer+ for reads)
 		r.Route("/proxy", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:view"))
 			r.Get("/", h.ProxyTempl)
 			r.Get("/setup", h.ProxySetupTempl)
-			r.Post("/setup", h.ProxySetupSaveTempl)
-			r.Post("/setup/delete", h.ProxySetupDeleteTempl)
-			r.Post("/setup/test", h.ProxySetupTestTempl)
-			r.Get("/new", h.ProxyNewTempl)
-			r.Post("/hosts", h.ProxyHostCreateTempl)
-			r.Post("/hosts/{id}", h.ProxyHostUpdateTempl)
-			r.Delete("/hosts/{id}", h.ProxyHostDeleteTempl)
-			r.Post("/hosts/{id}/enable", h.ProxyHostEnableTempl)
-			r.Post("/hosts/{id}/disable", h.ProxyHostDisableTempl)
-			r.Post("/sync", h.ProxySyncTempl)
+
+			// Operator+ for proxy mutations
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:update"))
+				r.Post("/setup", h.ProxySetupSaveTempl)
+				r.Post("/setup/delete", h.ProxySetupDeleteTempl)
+				r.Post("/setup/test", h.ProxySetupTestTempl)
+				r.Get("/new", h.ProxyNewTempl)
+				r.Post("/hosts", h.ProxyHostCreateTempl)
+				r.Post("/hosts/{id}", h.ProxyHostUpdateTempl)
+				r.Delete("/hosts/{id}", h.ProxyHostDeleteTempl)
+				r.Post("/hosts/{id}/enable", h.ProxyHostEnableTempl)
+				r.Post("/hosts/{id}/disable", h.ProxyHostDisableTempl)
+				r.Post("/sync", h.ProxySyncTempl)
+			})
 
 			// Certificates
 			r.Route("/certificates", func(r chi.Router) {
 				r.Get("/", h.CertListTempl)
-				r.Get("/new/letsencrypt", h.CertNewLETempl)
-				r.Get("/new/custom", h.CertNewCustomTempl)
-				r.Post("/letsencrypt", h.CertCreateLE)
-				r.Post("/custom", h.CertCreateCustom)
 				r.Get("/{id}", h.CertDetailTempl)
-				r.Post("/{id}/renew", h.CertRenew)
-				r.Delete("/{id}", h.CertDelete)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new/letsencrypt", h.CertNewLETempl)
+					r.Get("/new/custom", h.CertNewCustomTempl)
+					r.Post("/letsencrypt", h.CertCreateLE)
+					r.Post("/custom", h.CertCreateCustom)
+					r.Post("/{id}/renew", h.CertRenew)
+					r.Delete("/{id}", h.CertDelete)
+				})
 			})
 
 			// Redirections
 			r.Route("/redirections", func(r chi.Router) {
 				r.Get("/", h.RedirListTempl)
-				r.Get("/new", h.RedirNewTempl)
-				r.Post("/", h.RedirCreate)
-				r.Get("/{id}/edit", h.RedirEditTempl)
-				r.Post("/{id}", h.RedirUpdate)
-				r.Delete("/{id}", h.RedirDelete)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.RedirNewTempl)
+					r.Post("/", h.RedirCreate)
+					r.Get("/{id}/edit", h.RedirEditTempl)
+					r.Post("/{id}", h.RedirUpdate)
+					r.Delete("/{id}", h.RedirDelete)
+				})
 			})
 
 			// Streams
 			r.Route("/streams", func(r chi.Router) {
 				r.Get("/", h.StreamListTempl)
-				r.Get("/new", h.StreamNewTempl)
-				r.Post("/", h.StreamCreate)
-				r.Get("/{id}/edit", h.StreamEditTempl)
-				r.Post("/{id}", h.StreamUpdate)
-				r.Delete("/{id}", h.StreamDelete)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.StreamNewTempl)
+					r.Post("/", h.StreamCreate)
+					r.Get("/{id}/edit", h.StreamEditTempl)
+					r.Post("/{id}", h.StreamUpdate)
+					r.Delete("/{id}", h.StreamDelete)
+				})
 			})
 
 			// Dead Hosts (404)
 			r.Route("/dead-hosts", func(r chi.Router) {
 				r.Get("/", h.DeadListTempl)
-				r.Get("/new", h.DeadNewTempl)
-				r.Post("/", h.DeadCreate)
-				r.Delete("/{id}", h.DeadDelete)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.DeadNewTempl)
+					r.Post("/", h.DeadCreate)
+					r.Delete("/{id}", h.DeadDelete)
+				})
 			})
 
 			// Access Lists
 			r.Route("/access-lists", func(r chi.Router) {
 				r.Get("/", h.ACLListTempl)
-				r.Get("/new", h.ACLNewTempl)
-				r.Post("/", h.ACLCreate)
-				r.Get("/{id}/edit", h.ACLEditTempl)
-				r.Post("/{id}", h.ACLUpdate)
-				r.Delete("/{id}", h.ACLDelete)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.ACLNewTempl)
+					r.Post("/", h.ACLCreate)
+					r.Get("/{id}/edit", h.ACLEditTempl)
+					r.Post("/{id}", h.ACLUpdate)
+					r.Delete("/{id}", h.ACLDelete)
+				})
 			})
 
 			// Audit Log
@@ -525,33 +638,53 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 			// Proxy host detail/edit (must be last - {id} is catch-all)
 			r.Get("/{id}", h.ProxyDetailTempl)
-			r.Get("/{id}/edit", h.ProxyEditTempl)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:update"))
+				r.Get("/{id}/edit", h.ProxyEditTempl)
+			})
 		})
 
 		// Storage (S3, Azure, GCS, B2, SFTP, Local)
 		r.Route("/storage", func(r chi.Router) {
+			r.Use(m.RequirePermission("backup:view"))
 			r.Get("/", h.StorageTempl)
-			r.Post("/connections", h.StorageCreateConnection)
+
+			// Mutations require backup:create
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("backup:create"))
+				r.Post("/connections", h.StorageCreateConnection)
+			})
+
 			r.Route("/{connID}", func(r chi.Router) {
-				r.Post("/delete", h.StorageDeleteConnection)
-				r.Post("/test", h.StorageTestConnection)
 				r.Get("/buckets", h.StorageBucketsTempl)
-				r.Post("/buckets", h.StorageCreateBucket)
 				r.Get("/audit", h.StorageAuditTempl)
+
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("backup:create"))
+					r.Post("/delete", h.StorageDeleteConnection)
+					r.Post("/test", h.StorageTestConnection)
+					r.Post("/buckets", h.StorageCreateBucket)
+				})
+
 				r.Route("/buckets/{bucket}", func(r chi.Router) {
-					r.Post("/delete", h.StorageDeleteBucket)
 					r.Get("/browse", h.StorageBrowserTempl)
-					r.Post("/upload", h.StorageUploadObject)
-					r.Post("/delete-object", h.StorageDeleteObject)
-					r.Post("/create-folder", h.StorageCreateFolder)
 					r.Get("/download", h.StorageDownloadObject)
 					r.Get("/presign-upload", h.StoragePresignUpload)
+
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("backup:create"))
+						r.Post("/delete", h.StorageDeleteBucket)
+						r.Post("/upload", h.StorageUploadObject)
+						r.Post("/delete-object", h.StorageDeleteObject)
+						r.Post("/create-folder", h.StorageCreateFolder)
+					})
 				})
 			})
 		})
 
 		// Connections (SSH, Web Shortcuts, etc.)
 		r.Route("/connections", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:view"))
 			// Main connections dashboard
 			r.Get("/", h.ConnectionsTempl)
 
@@ -568,6 +701,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/{id}", h.SSHConnectionUpdate)
 				r.Delete("/{id}", h.SSHConnectionDelete)
 				r.Post("/{id}/test", h.SSHConnectionTest)
+				r.Post("/{id}/duplicate", h.SSHConnectionDuplicate)
 				r.Get("/{id}/terminal", h.SSHConnectionTerminalTempl)
 
 				// SFTP Browser
@@ -654,6 +788,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 		// Gitea Integration (legacy routes - kept for backwards compatibility)
 		r.Route("/integrations/gitea", func(r chi.Router) {
+			r.Use(m.RequirePermission("stack:view"))
 			r.Get("/", h.GiteaTempl)
 
 			// Connection management
@@ -783,6 +918,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 		// Unified Git Integration (supports Gitea, GitHub, GitLab)
 		r.Route("/integrations/git", func(r chi.Router) {
+			r.Use(m.RequirePermission("stack:view"))
 			r.Get("/", h.GitListTempl) // Reuses GiteaTempl for now
 
 			// Connection management (multi-provider)
@@ -837,15 +973,17 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			})
 		})
 
-		// Editor (Monaco / Nvim)
+		// Editor (Monaco / Nvim) - requires host:update (file editing is privileged)
 		r.Route("/editor", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:update"))
 			r.Get("/", h.EditorHub)
 			r.Get("/monaco", h.EditorMonaco)
 			r.Get("/nvim", h.EditorNvim)
 		})
 
-		// Snippets API (user file storage for editor)
+		// Snippets API (user file storage for editor) - requires host:update
 		r.Route("/api/snippets", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:update"))
 			r.Get("/", h.SnippetList)
 			r.Post("/", h.SnippetCreate)
 			r.Get("/paths", h.SnippetPaths)
@@ -854,49 +992,62 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Delete("/{id}", h.SnippetDelete)
 		})
 
-		// Monitoring (metrics dashboard)
+		// Monitoring (metrics dashboard) - requires host:view
 		r.Route("/monitoring", func(r chi.Router) {
-			r.Get("/", h.MonitoringTempl)
-			// 301 redirects: partials moved to /partials/monitoring/* (INT-DTO-L1)
+			r.Use(m.RequirePermission("host:view"))
+			r.Get("/", h.MonitoringPage)
+			r.Get("/{id}", h.MonitoringContainerPage)
 			r.Get("/host", redirect301("/partials/monitoring/host"))
 			r.Get("/containers", redirect301("/partials/monitoring/containers"))
 			r.Get("/history", redirect301("/partials/monitoring/history"))
 		})
 
-		// Alerts
+		// Alerts - requires security:view for reads, security:scan for mutations
 		r.Route("/alerts", func(r chi.Router) {
-			r.Get("/", h.AlertsTempl)
-			r.Post("/", h.AlertCreate)
-			r.Get("/{id}", h.AlertEditTempl)
-			r.Post("/{id}", h.AlertUpdate)
-			r.Delete("/{id}", h.AlertDelete)
-			r.Post("/{id}/enable", h.AlertEnable)
-			r.Post("/{id}/disable", h.AlertDisable)
-			r.Post("/events/{id}/ack", h.AlertEventAck)
-			r.Post("/silences", h.AlertSilenceCreate)
-			r.Delete("/silences/{id}", h.AlertSilenceDelete)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:view"))
+				r.Get("/", h.AlertsTempl)
+				r.Get("/{id}", h.AlertEditTempl)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:scan"))
+				r.Post("/", h.AlertCreate)
+				r.Post("/{id}", h.AlertUpdate)
+				r.Delete("/{id}", h.AlertDelete)
+				r.Post("/{id}/enable", h.AlertEnable)
+				r.Post("/{id}/disable", h.AlertDisable)
+				r.Post("/events/{id}/ack", h.AlertEventAck)
+				r.Post("/silences", h.AlertSilenceCreate)
+				r.Delete("/silences/{id}", h.AlertSilenceDelete)
+			})
 		})
 
 		// Tools
 		r.Route("/tools", func(r chi.Router) {
-			// Command Cheat Sheet
+			// Command Cheat Sheet (any authenticated user)
 			r.Get("/cheatsheet", h.CheatSheet)
 			r.Post("/cheatsheet/custom", h.CheatSheetCustomCreate)
 			r.Delete("/cheatsheet/custom/{id}", h.CheatSheetCustomDelete)
 
-			// Ansible Inventory Browser
-			r.Get("/ansible", h.AnsibleInventory)
-			r.Post("/ansible/upload", h.AnsibleInventoryUpload)
-			r.Post("/ansible/parse", h.AnsibleInventoryParse)
-			r.Delete("/ansible/{id}", h.AnsibleInventoryDelete)
+			// Ansible Inventory Browser (host:view)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:view"))
+				r.Get("/ansible", h.AnsibleInventory)
+				r.Post("/ansible/upload", h.AnsibleInventoryUpload)
+				r.Post("/ansible/parse", h.AnsibleInventoryParse)
+				r.Delete("/ansible/{id}", h.AnsibleInventoryDelete)
+			})
 
-			// Network Packet Capture
-			r.Get("/capture", h.PacketCapture)
-			r.Get("/capture/{id}", h.PacketCaptureDetail)
-			r.Post("/capture/start", h.PacketCaptureStart)
-			r.Post("/capture/{id}/stop", h.PacketCaptureStop)
-			r.Get("/capture/{id}/download", h.PacketCaptureDownload)
-			r.Delete("/capture/{id}", h.PacketCaptureDelete)
+			// Network Packet Capture (host:update - highly sensitive)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:update"))
+				r.Get("/capture", h.PacketCapture)
+				r.Get("/capture/{id}", h.PacketCaptureDetail)
+				r.Post("/capture/start", h.PacketCaptureStart)
+				r.Post("/capture/{id}/stop", h.PacketCaptureStop)
+				r.Get("/capture/{id}/download", h.PacketCaptureDownload)
+				r.Delete("/capture/{id}", h.PacketCaptureDelete)
+			})
 		})
 
 		// Topology
@@ -905,42 +1056,62 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Dependencies (full dependency graph)
 		r.Get("/dependencies", h.DependenciesTempl)
 
-		// Lifecycle Policies (automated resource cleanup)
+		// Lifecycle Policies (automated resource cleanup) - requires settings:update
 		r.Route("/lifecycle", func(r chi.Router) {
-			r.Get("/", h.LifecyclePoliciesTempl)
-			r.Post("/policies", h.LifecyclePolicyCreate)
-			r.Post("/policies/{id}/toggle", h.LifecyclePolicyToggle)
-			r.Post("/policies/{id}/delete", h.LifecyclePolicyDelete)
-			r.Post("/policies/{id}/execute", h.LifecyclePolicyExecute)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("settings:view"))
+				r.Get("/", h.LifecyclePoliciesTempl)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("settings:update"))
+				r.Post("/policies", h.LifecyclePolicyCreate)
+				r.Post("/policies/{id}/toggle", h.LifecyclePolicyToggle)
+				r.Post("/policies/{id}/delete", h.LifecyclePolicyDelete)
+				r.Post("/policies/{id}/execute", h.LifecyclePolicyExecute)
+			})
 		})
 
-		// Resource Quotas
+		// Resource Quotas (admin only)
 		r.Route("/quotas", func(r chi.Router) {
+			r.Use(m.AdminRequired)
 			r.Get("/", h.QuotasTempl)
 			r.Post("/", h.QuotaCreate)
 			r.Post("/{id}/toggle", h.QuotaToggle)
 			r.Post("/{id}/delete", h.QuotaDelete)
 		})
 
-		// GitOps Pipelines (automated deployment from Git)
+		// GitOps Pipelines (automated deployment from Git) - requires stack:deploy
 		r.Route("/gitops", func(r chi.Router) {
-			r.Get("/", h.GitOpsTempl)
-			r.Post("/pipelines", h.GitOpsPipelineCreate)
-			r.Post("/pipelines/{id}/toggle", h.GitOpsPipelineToggle)
-			r.Post("/pipelines/{id}/delete", h.GitOpsPipelineDelete)
-			r.Post("/pipelines/{id}/deploy", h.GitOpsPipelineDeploy)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("stack:view"))
+				r.Get("/", h.GitOpsTempl)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("stack:deploy"))
+				r.Post("/pipelines", h.GitOpsPipelineCreate)
+				r.Post("/pipelines/{id}/toggle", h.GitOpsPipelineToggle)
+				r.Post("/pipelines/{id}/delete", h.GitOpsPipelineDelete)
+				r.Post("/pipelines/{id}/deploy", h.GitOpsPipelineDeploy)
+			})
 		})
 
-		// Container Templates (reusable container configs)
+		// Container Templates (reusable container configs) - requires container:create
 		r.Route("/container-templates", func(r chi.Router) {
-			r.Get("/", h.ContainerTemplatesTempl)
-			r.Post("/", h.ContainerTemplateCreate)
-			r.Post("/{id}/deploy", h.ContainerTemplateDeploy)
-			r.Post("/{id}/delete", h.ContainerTemplateDelete)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("container:view"))
+				r.Get("/", h.ContainerTemplatesTempl)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("container:create"))
+				r.Post("/", h.ContainerTemplateCreate)
+				r.Post("/{id}/deploy", h.ContainerTemplateDeploy)
+				r.Post("/{id}/delete", h.ContainerTemplateDelete)
+			})
 		})
 
-		// Maintenance Windows (scheduled maintenance)
+		// Maintenance Windows (admin only)
 		r.Route("/maintenance", func(r chi.Router) {
+			r.Use(m.AdminRequired)
 			r.Get("/", h.MaintenanceTempl)
 			r.Post("/", h.MaintenanceCreate)
 			r.Post("/{id}/toggle", h.MaintenanceToggle)
@@ -948,48 +1119,70 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Post("/{id}/execute", h.MaintenanceExecute)
 		})
 
-		// Compliance Policies (security & compliance)
+		// Compliance Policies (security & compliance) - requires security:view/scan
 		r.Route("/compliance", func(r chi.Router) {
-			r.Get("/", h.ComplianceTempl)
-			r.Post("/policies", h.CompliancePolicyCreate)
-			r.Post("/policies/{id}/toggle", h.CompliancePolicyToggle)
-			r.Post("/policies/{id}/delete", h.CompliancePolicyDelete)
-			r.Post("/scan", h.ComplianceScan)
-			r.Post("/violations/{id}/acknowledge", h.ComplianceViolationAcknowledge)
-			r.Post("/violations/{id}/resolve", h.ComplianceViolationResolve)
-			r.Post("/violations/{id}/exempt", h.ComplianceViolationExempt)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:view"))
+				r.Get("/", h.ComplianceTempl)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:scan"))
+				r.Post("/policies", h.CompliancePolicyCreate)
+				r.Post("/policies/{id}/toggle", h.CompliancePolicyToggle)
+				r.Post("/policies/{id}/delete", h.CompliancePolicyDelete)
+				r.Post("/scan", h.ComplianceScan)
+				r.Post("/violations/{id}/acknowledge", h.ComplianceViolationAcknowledge)
+				r.Post("/violations/{id}/resolve", h.ComplianceViolationResolve)
+				r.Post("/violations/{id}/exempt", h.ComplianceViolationExempt)
+			})
 		})
 
-		// Secret Management
+		// Secret Management (admin only - highly sensitive)
 		r.Route("/secrets", func(r chi.Router) {
+			r.Use(m.AdminRequired)
 			r.Get("/", h.SecretsTempl)
 			r.Post("/", h.SecretCreate)
 			r.Post("/{id}/delete", h.SecretDelete)
 			r.Post("/{id}/rotate", h.SecretRotate)
 		})
 
-		// Vulnerability Management
+		// Vulnerability Management - requires security:view/scan
 		r.Route("/vulnerabilities", func(r chi.Router) {
-			r.Get("/", h.VulnMgmtTempl)
-			r.Post("/scan", h.VulnScan)
-			r.Post("/{id}/acknowledge", h.VulnAcknowledge)
-			r.Post("/{id}/resolve", h.VulnResolve)
-			r.Post("/{id}/accept", h.VulnAcceptRisk)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:view"))
+				r.Get("/", h.VulnMgmtTempl)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:scan"))
+				r.Post("/scan", h.VulnScan)
+				r.Post("/{id}/acknowledge", h.VulnAcknowledge)
+				r.Post("/{id}/resolve", h.VulnResolve)
+				r.Post("/{id}/accept", h.VulnAcceptRisk)
+			})
 		})
 
-		// Access Control Audit
+		// Access Control Audit (admin only)
 		r.Route("/access-audit", func(r chi.Router) {
+			r.Use(m.AdminRequired)
 			r.Get("/", h.AccessAuditTempl)
 			r.Post("/export", h.AccessAuditExport)
+			r.Post("/sessions/{id}/revoke", h.AccessAuditSessionRevoke)
 		})
 
 		// Container Health Dashboard
-		r.Get("/health-dashboard", h.HealthDashTempl)
+		r.Group(func(r chi.Router) {
+			r.Use(m.RequirePermission("container:view"))
+			r.Get("/health-dashboard", h.HealthDashTempl)
+		})
 
-		// Bulk Operations (dedicated page)
+		// Bulk Operations (dedicated page) - requires container:start (container management)
 		r.Route("/bulk-ops", func(r chi.Router) {
+			r.Use(m.RequirePermission("container:view"))
 			r.Get("/", h.BulkOpsTempl)
-			r.Post("/action", h.BulkOpsAction)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("container:start"))
+				r.Post("/action", h.BulkOpsAction)
+			})
 		})
 
 		// Ports
@@ -1030,6 +1223,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Post("/", h.UpdateProfile)
 			r.Post("/password", h.UpdatePassword)
 			r.Put("/preferences", h.UpdatePreferences)
+			r.Put("/sidebar-prefs", h.UpdateSidebarPrefs)
 			r.Post("/preferences/reset", h.ResetPreferences)
 			r.Post("/theme", h.ToggleTheme)
 			r.Post("/export", h.ExportUserData)
@@ -1141,7 +1335,8 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Route("/admin/notifications", func(r chi.Router) {
 				r.Get("/channels", h.NotificationChannelsTempl)
 				r.Post("/channels", h.NotificationChannelCreate)
-				r.Delete("/channels/{name}", h.NotificationChannelDelete)
+				r.Get("/channels/{name}/edit", h.NotificationChannelEditTempl)
+				r.Post("/channels/{name}/delete", h.NotificationChannelDelete)
 				r.Post("/channels/{name}/test", h.NotificationChannelTest)
 			})
 
@@ -1216,23 +1411,24 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			})
 		})
 
-		// WebSocket endpoints
+		// WebSocket endpoints (with per-resource permissions)
 		r.Route("/ws", func(r chi.Router) {
-			r.Get("/logs/{id}", h.WSContainerLogs)
-			r.Get("/exec/{id}", h.WSContainerExec)
-			r.Get("/stats/{id}", h.WSContainerStats)
-			r.Get("/host-exec/{id}", h.WSHostExec)
-			r.Get("/events", h.WSEvents)
-			r.Get("/jobs/{id}", h.WSJobProgress)
-			r.Get("/capture/{id}", h.WSCapture)
-			r.Get("/metrics", h.WSMetrics)
-			r.Get("/editor/nvim", h.WSEditorNvim)
-			r.Get("/monitoring/stats", h.WsMonitoringStats)
-			r.Get("/monitoring/container/{id}", h.WsMonitoringContainer)
+			r.With(m.RequirePermission("container:logs")).Get("/logs/{id}", h.WSContainerLogs)
+			r.With(m.RequirePermission("container:exec")).Get("/exec/{id}", h.WSContainerExec)
+			r.With(m.RequirePermission("container:view")).Get("/stats/{id}", h.WSContainerStats)
+			r.With(m.RequirePermission("host:update")).Get("/host-exec/{id}", h.WSHostExec)
+			r.With(m.RequirePermission("container:view")).Get("/events", h.WSEvents)
+			r.With(m.RequirePermission("container:view")).Get("/jobs/{id}", h.WSJobProgress)
+			r.With(m.RequirePermission("host:update")).Get("/capture/{id}", h.WSCapture)
+			r.With(m.RequirePermission("container:view")).Get("/metrics", h.WSMetrics)
+			r.With(m.RequirePermission("host:update")).Get("/editor/nvim", h.WSEditorNvim)
+			r.With(m.RequirePermission("host:view")).Get("/monitoring/stats", h.WsMonitoringStats)
+			r.With(m.RequirePermission("host:view")).Get("/monitoring/container/{id}", h.WsMonitoringContainer)
 		})
 
-		// Internal API for host filesystem browser (requires nsenter)
+		// Internal API for host filesystem browser (requires nsenter) - admin only
 		r.Route("/api/v1/hosts/{hostID}", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:update"))
 			r.Get("/browse", h.APIHostBrowse)
 			r.Get("/browse/*", h.APIHostBrowse)
 			r.Get("/file/*", h.APIHostReadFile)
@@ -1379,6 +1575,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			})
 		})
 	})
+	}) // end r.Group wrapper
 }
 
 // redirect301 returns a handler that issues a permanent redirect to the target path.

@@ -153,32 +153,35 @@ func (s *Service) IsTrivyAvailable() bool {
 	return s.scanner.IsTrivyAvailable()
 }
 
-// ScanContainer performs a security scan on a container and persists results
+// ScanContainer performs a security scan on a container and persists results.
+// It accepts either a types.ContainerJSON directly or a *types.ContainerJSON pointer
+// and delegates to ScanContainerJSON for the actual scan.
 func (s *Service) ScanContainer(ctx context.Context, containerInspect interface{}, hostID uuid.UUID) (*models.SecurityScan, error) {
 	log := logger.FromContext(ctx)
 
-	// Type assert to Docker types.ContainerJSON
-	// In production, this would use the actual Docker types
-	// For now, we'll need the caller to pass the correct type
-	inspect, ok := containerInspect.(interface {
-		GetID() string
-		GetName() string
-		GetImage() string
-	})
+	// Try direct type assertion to types.ContainerJSON
+	switch v := containerInspect.(type) {
+	case types.ContainerJSON:
+		log.Info("Scanning container",
+			"container_id", v.ID,
+			"container_name", v.Name,
+			"host_id", hostID)
+		return s.ScanContainerJSON(ctx, v, hostID)
 
-	if !ok {
-		return nil, errors.New(errors.CodeInvalidInput, "invalid container inspect data")
+	case *types.ContainerJSON:
+		if v == nil {
+			return nil, errors.New(errors.CodeInvalidInput, "container inspect data is nil")
+		}
+		log.Info("Scanning container",
+			"container_id", v.ID,
+			"container_name", v.Name,
+			"host_id", hostID)
+		return s.ScanContainerJSON(ctx, *v, hostID)
+
+	default:
+		return nil, errors.New(errors.CodeInvalidInput,
+			fmt.Sprintf("unsupported container inspect type %T: expected types.ContainerJSON or *types.ContainerJSON", containerInspect))
 	}
-
-	log.Info("Scanning container",
-		"container_id", inspect.GetID(),
-		"host_id", hostID)
-
-	// For actual implementation, cast to types.ContainerJSON
-	// result, err := s.scanner.ScanContainer(ctx, inspect.(types.ContainerJSON), hostID)
-
-	// Placeholder - in real implementation, this calls the scanner
-	return nil, errors.New(errors.CodeInternal, "not implemented - use ScanContainerDirect")
 }
 
 // ScanContainerJSON performs a scan using Docker types.ContainerJSON and persists results

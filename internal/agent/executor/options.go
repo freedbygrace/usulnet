@@ -124,7 +124,12 @@ func imagePullOptionsFromParams(p protocol.CommandParams) image.PullOptions {
 		opts.Platform = p.Platform
 	}
 
-	// TODO: Add registry auth support
+	// Registry auth: the master sends base64-encoded JSON credentials
+	// for private registries (Docker Hub, GHCR, ECR, GCR, ACR, etc.)
+	if p.RegistryAuth != "" {
+		opts.RegistryAuth = p.RegistryAuth
+	}
+
 	return opts
 }
 

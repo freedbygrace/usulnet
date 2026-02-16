@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/services/volume"
@@ -38,29 +39,37 @@ func (h *VolumeHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Route("/{hostID}", func(r chi.Router) {
+		// Read-only (viewer+)
 		r.Get("/", h.ListVolumes)
-		r.Post("/", h.CreateVolume)
 		r.Get("/stats", h.GetStats)
-		r.Post("/prune", h.PruneVolumes)
-
-		// Orphan volume detection
 		r.Get("/orphans", h.DetectOrphanVolumes)
-		r.Post("/orphans/cleanup", h.CleanupOrphanVolumes)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.CreateVolume)
+			r.Post("/prune", h.PruneVolumes)
+			r.Post("/orphans/cleanup", h.CleanupOrphanVolumes)
+		})
 
 		r.Route("/{volumeName}", func(r chi.Router) {
+			// Read-only (viewer+)
 			r.Get("/", h.GetVolume)
-			r.Delete("/", h.DeleteVolume)
 			r.Get("/used-by", h.GetUsedBy)
 			r.Get("/info", h.GetVolumeInfo)
-
-			// File browser endpoints
 			r.Get("/browse", h.BrowseVolume)
 			r.Get("/browse/*", h.BrowseVolume)
 			r.Get("/file/*", h.ReadVolumeFile)
-			r.Put("/file/*", h.WriteVolumeFile)
-			r.Delete("/file/*", h.DeleteVolumeFile)
-			r.Post("/mkdir/*", h.CreateVolumeDirectory)
 			r.Get("/download/*", h.DownloadVolumeFile)
+
+			// Operator+ for mutations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOperator)
+				r.Delete("/", h.DeleteVolume)
+				r.Put("/file/*", h.WriteVolumeFile)
+				r.Delete("/file/*", h.DeleteVolumeFile)
+				r.Post("/mkdir/*", h.CreateVolumeDirectory)
+			})
 		})
 	})
 

@@ -327,6 +327,7 @@ func issueToView(i *models.SecurityIssue) IssueView {
 
 	v := IssueView{
 		ID:             fmt.Sprintf("%d", i.ID),
+		ContainerID:    i.ContainerID,
 		Severity:       string(i.Severity),
 		Category:       string(i.Category),
 		Title:          i.Title,

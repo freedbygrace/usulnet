@@ -32,6 +32,13 @@ templ TerminalHub(data TerminalHubData) {
 	}
 }
 
+// pickerOnClick is a templ script that calls the global addTab function
+// exposed by the terminal tabs component. The short ID (first 12 chars)
+// is computed JavaScript-side to keep the Go template simple.
+script pickerOnClick(id string, name string) {
+	window._terminalAddTab(id.substring(0, 12), 'container', id, name);
+}
+
 // TerminalPicker renders a list of containers that can be opened in a new terminal tab.
 templ TerminalPicker(containers []TerminalPickerContainer) {
 	<div class="space-y-2 max-h-64 overflow-y-auto">
@@ -40,7 +47,8 @@ templ TerminalPicker(containers []TerminalPickerContainer) {
 		}
 		for _, c := range containers {
 			<button
-				@click={ "window.location.href = '/terminal?add=" + c.ID + "'" }
+				type="button"
+				onclick={ pickerOnClick(c.ID, c.Name) }
 				class="w-full flex items-center gap-3 p-3 bg-dark-700 hover:bg-dark-600 rounded-lg transition-colors text-left"
 			>
 				<div class="flex items-center justify-center w-8 h-8 rounded-lg bg-dark-600">
