@@ -57,7 +57,7 @@ Every contribution, whether a coffee, a license purchase, or a star on GitHub, h
 Deploy usulnet in one command. No manual configuration needed &mdash; all secrets are generated automatically.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/install.sh | sudo bash
 ```
 
 This will:
@@ -68,21 +68,29 @@ This will:
 
 **Access:** `https://your-server-ip:7443` &mdash; Default credentials: `admin` / `usulnet`
 
-Or deploy manually with Docker Compose:
+Or deploy manually with Docker Compose (requires sudo/root):
 
 ```bash
 # Download the files
-mkdir -p /opt/usulnet && cd /opt/usulnet
-curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/docker-compose.prod.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/.env.example -o .env
+sudo mkdir -p /opt/usulnet && cd /opt/usulnet
+sudo curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/docker-compose.prod.yml -o docker-compose.yml
+sudo curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/.env.example -o .env
+# IMPORTANT: download config.yaml — without this, Docker creates a directory and the app boot-loops
+sudo curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/config.yaml -o config.yaml
 
-# Generate secrets (or edit .env manually)
-sed -i "s|CHANGE_ME_GENERATE_RANDOM_PASSWORD|$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)|" .env
-sed -i "s|CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32|$(openssl rand -hex 32)|" .env
-sed -i "s|CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32|$(openssl rand -hex 32)|" .env
+# Generate secrets
+DB_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)
+JWT_SECRET=$(openssl rand -hex 32)
+ENCRYPTION_KEY=$(openssl rand -hex 32)
+# Set database password in .env (used by PostgreSQL service)
+sudo sed -i "s|CHANGE_ME_GENERATE_RANDOM_PASSWORD|${DB_PASS}|" .env
+# Set secrets in config.yaml (used by usulnet application)
+sudo sed -i "s|usulnet_dev|${DB_PASS}|" config.yaml
+sudo sed -i "s|edbdbc0721315fc2529c04509d65c62e7c51ce9b10941078f2fae131acfb0e96|${JWT_SECRET}|" config.yaml
+sudo sed -i "s|ed2cb601a830465890822d80d13668530b5af3c1c372799310339e8daf02e2e6|${ENCRYPTION_KEY}|" config.yaml
 
 # Start
-docker compose up -d
+sudo docker compose up -d
 ```
 
 ---
