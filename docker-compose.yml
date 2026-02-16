@@ -288,8 +288,6 @@ services:
       - "--store_dir=/data"
       - "-m"
       - "8222"
-      - "--max_payload"
-      - "8388608"
     volumes:
       - nats_data:/data
     healthcheck:
