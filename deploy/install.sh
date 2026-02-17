@@ -61,6 +61,7 @@ cd "${INSTALL_DIR}"
 echo "Downloading docker-compose.yml..."
 curl -fsSL "${REPO_BASE}/docker-compose.prod.yml" -o docker-compose.yml
 curl -fsSL "${REPO_BASE}/.env.example" -o .env
+curl -fsSL "${REPO_BASE}/nats-server.conf" -o nats-server.conf
 
 # --- Generate secrets ---
 
@@ -220,8 +221,9 @@ echo "   HTTPS: https://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'lo
 echo "   HTTP:  http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):8080"
 echo ""
 echo " Files: ${INSTALL_DIR}/"
-echo "   config.yaml      # Application configuration"
-echo "   .env              # Docker Compose variables"
+echo "   config.yaml        # Application configuration"
+echo "   .env                # Docker Compose variables"
+echo "   nats-server.conf    # NATS server configuration"
 echo "   docker-compose.yml"
 echo ""
 echo " Useful commands:"

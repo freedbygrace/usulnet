@@ -194,14 +194,11 @@ services:
     container_name: usulnet-nats
     restart: unless-stopped
     command:
-      - "--jetstream"
-      - "--store_dir=/data"
-      - "-m"
-      - "8222"
-      - "--max_payload"
-      - "8388608"
+      - "-c"
+      - "/etc/nats/nats-server.conf"
     volumes:
       - nats_data:/data
+      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
       interval: 10s
