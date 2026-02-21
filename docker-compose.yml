@@ -17,15 +17,19 @@
 # Requirements:
 #   - Docker Engine 24+ with Compose v2
 #   - 2 GB RAM minimum (4 GB recommended)
-#   - Ports 8080 (HTTP) and 7443 (HTTPS) available
+#   - Ports 7443 (HTTPS) and 4222 (NATS, agent communication) available
 #
 # Image registries:
 #   - Docker Hub:  usulnet/usulnet          (default)
 #   - GHCR:        ghcr.io/usulnet/usulnet  (alternative)
 #
 # Network architecture:
-#   - usulnet-backend: Internal network for PostgreSQL, Redis, NATS (not exposed)
+#   - usulnet-backend: Internal network for PostgreSQL, Redis, NATS
 #   - usulnet-frontend: Network for the application and web-facing services
+#
+# Exposed ports:
+#   - 7443  HTTPS (application entry point)
+#   - 4222  NATS  (agent communication for multi-node deployments)
 #
 # Documentation: https://docs.usulnet.com
 # Source:        https://github.com/fr4nsys/usulnet
@@ -333,6 +337,10 @@ services:
     image: nats:2.12-alpine
     container_name: usulnet-nats
     restart: unless-stopped
+    ports:
+      # Required for remote agent communication in multi-node deployments.
+      # Agents on other hosts connect to this port via USULNET_GATEWAY_URL.
+      - "${NATS_PORT:-4222}:4222"
     command:
       - "-c"
       - "/etc/nats/nats-server.conf"

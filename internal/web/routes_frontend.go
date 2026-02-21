@@ -711,7 +711,16 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Route("/ssh", func(r chi.Router) {
 				r.Use(h.requireServiceMiddleware(
 					func() bool { return h.sshService != nil },
-					"SSH Connections", "Enable SSH by configuring an encryption key (USULNET_ENCRYPTION_KEY)",
+					"SSH Connections",
+					`<p class="mb-3 text-gray-400">SSH requires an <strong class="text-gray-200">encryption key</strong> to securely store credentials. The key is auto-derived from your JWT secret if not set explicitly.</p>`+
+						`<p class="mb-2 text-gray-400">If you see this message, the encryption key failed to initialize. Check the application logs for details.</p>`+
+						`<p class="mb-2 text-gray-400"><strong class="text-gray-200">To set a key explicitly:</strong></p>`+
+						`<ol class="list-decimal list-inside space-y-1 text-gray-400 mb-3">`+
+						`<li>Generate a 64-character hex key: <code class="bg-dark-700 px-1.5 py-0.5 rounded text-primary-400 text-xs">openssl rand -hex 32</code></li>`+
+						`<li>Set the environment variable: <code class="bg-dark-700 px-1.5 py-0.5 rounded text-primary-400 text-xs">USULNET_ENCRYPTION_KEY=&lt;your-64-hex-chars&gt;</code></li>`+
+						`<li>Or set <code class="bg-dark-700 px-1.5 py-0.5 rounded text-primary-400 text-xs">security.config_encryption_key</code> in config.yaml</li>`+
+						`</ol>`+
+						`<p class="text-xs text-gray-600">The key must be exactly 64 hexadecimal characters (32 bytes for AES-256).</p>`,
 				))
 				// Read-only (inherits host:view)
 				r.Get("/", h.SSHConnectionsTempl)

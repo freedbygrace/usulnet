@@ -148,10 +148,12 @@ func (app *Application) initServices(ctx context.Context, ic *initContext) error
 	{
 		encKey := app.Config.Security.ConfigEncryptionKey
 		if encKey == "" {
-			// Derive a 32-byte hex key from JWT secret via SHA-256.
-			// WARNING: changing jwt_secret will invalidate all encrypted data
-			// (TOTP secrets, NPM credentials, config values). Set
-			// USULNET_ENCRYPTION_KEY explicitly for independent key rotation.
+			// Derive a deterministic 32-byte hex key from JWT secret via SHA-256.
+			// This survives restarts (unlike random generation) as long as
+			// jwt_secret stays the same. WARNING: changing jwt_secret will
+			// invalidate all encrypted data (TOTP secrets, SSH credentials,
+			// NPM credentials, config values). Set USULNET_ENCRYPTION_KEY
+			// explicitly for independent key rotation.
 			h := crypto.SHA256String(ic.jwtSecret)
 			encKey = h[:64] // 64 hex chars = 32 bytes
 			app.Logger.Warn("encryption_key not set — deriving from jwt_secret (set USULNET_ENCRYPTION_KEY for independent rotation)")
@@ -159,7 +161,11 @@ func (app *Application) initServices(ctx context.Context, ic *initContext) error
 		var encErr error
 		encryptor, encErr = crypto.NewAESEncryptor(encKey)
 		if encErr != nil {
-			app.Logger.Warn("Failed to create encryptor, TOTP/NPM/ConfigService will be unavailable", "error", encErr)
+			app.Logger.Error("Failed to create encryptor — SSH, TOTP, NPM, and Config services will be unavailable",
+				"error", encErr,
+				"key_length", len(encKey),
+				"hint", "key must be exactly 64 hexadecimal characters (generate with: openssl rand -hex 32)",
+			)
 		}
 	}
 

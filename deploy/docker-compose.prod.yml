@@ -15,6 +15,7 @@
 #   - Docker Engine 24+ with Docker Compose v2
 #   - 2GB RAM minimum (4GB recommended)
 #   - Port 7443 (HTTPS) available. Port 8080 (HTTP) is internal-only by default.
+#   - Port 4222 (NATS) exposed for remote agent communication (multi-node).
 #
 # =============================================================================
 
@@ -248,6 +249,10 @@ services:
     image: nats:2.12-alpine
     container_name: usulnet-nats
     restart: unless-stopped
+    ports:
+      # Required for remote agent communication in multi-node deployments.
+      # Agents on other hosts connect to this port via USULNET_GATEWAY_URL.
+      - "${NATS_PORT:-4222}:4222"
     command:
       - "-c"
       - "/etc/nats/nats-server.conf"

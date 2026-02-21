@@ -540,15 +540,11 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("security.jwt_secret must be at least 32 characters"))
 		}
 
-		if c.Security.ConfigEncryptionKey == "" {
-			b := make([]byte, 32)
-			if _, err := rand.Read(b); err != nil {
-				errs = append(errs, fmt.Errorf("security.config_encryption_key is required (auto-generation failed: %w)", err))
-			} else {
-				c.Security.ConfigEncryptionKey = hex.EncodeToString(b)
-				slog.Warn("security.config_encryption_key not configured — auto-generated a temporary key. Encrypted data will be unreadable after restart. Set a permanent key in config.yaml or via USULNET_SECURITY_CONFIG_ENCRYPTION_KEY.")
-			}
-		}
+		// Note: if ConfigEncryptionKey is empty, init_services.go will derive
+		// a deterministic key from jwt_secret via SHA-256. This is preferable
+		// to auto-generating a random key here because the derived key survives
+		// restarts and keeps encrypted data (SSH credentials, TOTP secrets,
+		// config values) readable across application lifecycles.
 	}
 
 	// Encryption key validation (64 hex chars = 32 bytes for AES-256)
