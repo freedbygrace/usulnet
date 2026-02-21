@@ -111,27 +111,29 @@ services:
     image: postgres:16-alpine
     container_name: usulnet-postgres
     restart: unless-stopped
-    # SSL is always enabled. A self-signed ECDSA P-256 cert is generated on
-    # every startup — no external files or init containers required.
-    # To use your own certificate, uncomment the volume below and place
-    # postgres-server.crt / postgres-server.key inside the host directory,
-    # then set sslmode=verify-full in config.yaml.
+    # SSL is always enabled. install.sh pre-generates self-signed ECDSA P-256
+    # certs in ./certs/ and mounts them at /certs-src/. To use your own
+    # certificate, replace the files in ./certs/ and set sslmode=verify-full
+    # in config.yaml.
     entrypoint:
       - /bin/sh
       - -c
       - |
         set -e
-        apk add --no-cache openssl >/dev/null 2>&1
         mkdir -p /tmp/pg-certs
         if [ -f /certs-src/postgres-server.crt ] && [ -f /certs-src/postgres-server.key ]; then
           cp /certs-src/postgres-server.crt /tmp/pg-certs/server.crt
           cp /certs-src/postgres-server.key /tmp/pg-certs/server.key
-        else
+        elif command -v openssl >/dev/null 2>&1; then
           openssl req -new -x509 -days 3650 -nodes \
             -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
             -subj "/CN=postgres/O=usulnet" \
             -keyout /tmp/pg-certs/server.key \
             -out /tmp/pg-certs/server.crt 2>/dev/null
+        else
+          echo "ERROR: No TLS certs found at /certs-src/ and openssl is not available."
+          echo "       Run install.sh to generate certs, or mount them manually."
+          exit 1
         fi
         chown 70:70 /tmp/pg-certs/server.key /tmp/pg-certs/server.crt
         chmod 600 /tmp/pg-certs/server.key
@@ -153,8 +155,7 @@ services:
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Optional: mount your own TLS certs to use sslmode=verify-full
-      # - ${PG_CERTS_DIR:-./certs}:/certs-src:ro
+      - ./certs:/certs-src:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-usulnet} -d ${DB_NAME:-usulnet}"]
       interval: 10s
@@ -182,26 +183,28 @@ services:
     image: redis:8-alpine
     container_name: usulnet-redis
     restart: unless-stopped
-    # TLS is always enabled. A self-signed ECDSA P-256 cert is generated on
-    # every startup — no external files or init containers required.
-    # To use your own certificate, uncomment the volume below and place
-    # redis-server.crt / redis-server.key inside the host directory.
+    # TLS is always enabled. install.sh pre-generates self-signed ECDSA P-256
+    # certs in ./certs/ and mounts them at /certs-src/. To use your own
+    # certificate, replace the files in ./certs/.
     entrypoint:
       - /bin/sh
       - -c
       - |
         set -e
-        apk add --no-cache openssl >/dev/null 2>&1
         mkdir -p /tmp/redis-certs
         if [ -f /certs-src/redis-server.crt ] && [ -f /certs-src/redis-server.key ]; then
           cp /certs-src/redis-server.crt /tmp/redis-certs/server.crt
           cp /certs-src/redis-server.key /tmp/redis-certs/server.key
-        else
+        elif command -v openssl >/dev/null 2>&1; then
           openssl req -new -x509 -days 3650 -nodes \
             -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
             -subj "/CN=redis/O=usulnet" \
             -keyout /tmp/redis-certs/server.key \
             -out /tmp/redis-certs/server.crt 2>/dev/null
+        else
+          echo "ERROR: No TLS certs found at /certs-src/ and openssl is not available."
+          echo "       Run install.sh to generate certs, or mount them manually."
+          exit 1
         fi
         chmod 600 /tmp/redis-certs/server.key
         chmod 644 /tmp/redis-certs/server.crt
@@ -217,8 +220,7 @@ services:
           --save "60 1000"
     volumes:
       - redis_data:/data
-      # Optional: mount your own TLS certs for CA-verified connections
-      # - ${REDIS_CERTS_DIR:-./certs}:/certs-src:ro
+      - ./certs:/certs-src:ro
     healthcheck:
       test: ["CMD", "redis-cli", "--tls", "--insecure", "ping"]
       interval: 10s

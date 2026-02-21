@@ -102,10 +102,7 @@ services:
       - -c
       - |
         set -e
-        # Install openssl to generate a self-signed TLS cert (Alpine cache makes
-        # subsequent starts fast). No external certs or init containers needed.
-        apk add --no-cache openssl >/dev/null 2>&1
-
+        command -v openssl >/dev/null 2>&1 || apk add --no-cache openssl >/dev/null 2>&1
         mkdir -p /tmp/pg-certs
         openssl req -new -x509 -days 3650 -nodes \
           -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
@@ -115,7 +112,6 @@ services:
         chown 70:70 /tmp/pg-certs/server.key /tmp/pg-certs/server.crt
         chmod 600 /tmp/pg-certs/server.key
         chmod 644 /tmp/pg-certs/server.crt
-
         exec docker-entrypoint.sh postgres \
           -c ssl=on \
           -c ssl_cert_file=/tmp/pg-certs/server.crt \
@@ -145,7 +141,7 @@ services:
       - -c
       - |
         set -e
-        apk add --no-cache openssl >/dev/null 2>&1
+        command -v openssl >/dev/null 2>&1 || apk add --no-cache openssl >/dev/null 2>&1
         mkdir -p /tmp/redis-certs
         openssl req -new -x509 -days 3650 -nodes \
           -newkey ec -pkeyopt ec_paramgen_curve:P-256 \

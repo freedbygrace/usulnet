@@ -90,6 +90,41 @@ ENCRYPTION_KEY=$(generate_hex)
 # Replace DB_PASSWORD placeholder in .env (for PostgreSQL service)
 sed -i "s|CHANGE_ME_GENERATE_RANDOM_PASSWORD|${DB_PASSWORD}|" .env
 
+# --- Generate TLS certificates for PostgreSQL and Redis ---
+# These are generated on the host (which has internet + openssl) and mounted
+# into the containers. The backend network uses internal:true (no internet)
+# so containers cannot install openssl at runtime.
+
+echo "Generating TLS certificates..."
+mkdir -p "${INSTALL_DIR}/certs"
+
+if command -v openssl &>/dev/null; then
+    # PostgreSQL self-signed ECDSA P-256 cert (10 years)
+    if [ ! -f "${INSTALL_DIR}/certs/postgres-server.crt" ]; then
+        openssl req -new -x509 -days 3650 -nodes \
+            -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+            -subj "/CN=postgres/O=usulnet" \
+            -keyout "${INSTALL_DIR}/certs/postgres-server.key" \
+            -out "${INSTALL_DIR}/certs/postgres-server.crt" 2>/dev/null
+        chmod 600 "${INSTALL_DIR}/certs/postgres-server.key"
+        chmod 644 "${INSTALL_DIR}/certs/postgres-server.crt"
+    fi
+
+    # Redis self-signed ECDSA P-256 cert (10 years)
+    if [ ! -f "${INSTALL_DIR}/certs/redis-server.crt" ]; then
+        openssl req -new -x509 -days 3650 -nodes \
+            -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+            -subj "/CN=redis/O=usulnet" \
+            -keyout "${INSTALL_DIR}/certs/redis-server.key" \
+            -out "${INSTALL_DIR}/certs/redis-server.crt" 2>/dev/null
+        chmod 600 "${INSTALL_DIR}/certs/redis-server.key"
+        chmod 644 "${INSTALL_DIR}/certs/redis-server.crt"
+    fi
+else
+    echo "WARNING: openssl not found. TLS certificates will be generated inside containers."
+    echo "         If containers fail to start, install openssl and re-run this script."
+fi
+
 # --- Generate config.yaml ---
 
 echo "Generating config.yaml..."
