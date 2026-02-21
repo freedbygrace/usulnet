@@ -39,7 +39,7 @@ func TestEditionConstants(t *testing.T) {
 // ============================================================================
 
 func TestFeatureConstants(t *testing.T) {
-	// Verify all 22 feature constants have expected string values
+	// Verify all 24 feature constants have expected string values
 	features := map[Feature]string{
 		FeatureCustomRoles:       "custom_roles",
 		FeatureOAuth:             "oauth",
@@ -54,6 +54,7 @@ func TestFeatureConstants(t *testing.T) {
 		FeatureSharedTerminals:   "shared_terminals",
 		FeatureWhiteLabel:        "white_label",
 		FeatureSwarm:             "swarm",
+		FeatureTemplateCatalog:   "template_catalog",
 		FeatureCompliance:        "compliance",
 		FeatureOPAPolicies:       "opa_policies",
 		FeatureImageSigning:      "image_signing",
@@ -63,6 +64,7 @@ func TestFeatureConstants(t *testing.T) {
 		FeatureGitSync:           "git_sync",
 		FeatureEphemeralEnvs:     "ephemeral_envs",
 		FeatureManifestBuilder:   "manifest_builder",
+		FeatureRegistryBrowsing:  "registry_browsing",
 	}
 
 	for feat, want := range features {
@@ -79,9 +81,9 @@ func TestFeatureConstants(t *testing.T) {
 func TestAllBusinessFeatures(t *testing.T) {
 	features := AllBusinessFeatures()
 
-	// Business edition has exactly 10 features
-	if len(features) != 10 {
-		t.Fatalf("AllBusinessFeatures() returned %d features, want 10", len(features))
+	// Business edition has exactly 12 features
+	if len(features) != 12 {
+		t.Fatalf("AllBusinessFeatures() returned %d features, want 12", len(features))
 	}
 
 	// Business must include these features
@@ -95,7 +97,9 @@ func TestAllBusinessFeatures(t *testing.T) {
 		FeatureAPIKeys,
 		FeaturePrioritySupport,
 		FeatureSwarm,
+		FeatureTemplateCatalog,
 		FeatureGitSync,
+		FeatureRegistryBrowsing,
 	}
 
 	featureSet := make(map[Feature]bool)
@@ -111,14 +115,31 @@ func TestAllBusinessFeatures(t *testing.T) {
 
 	// Business must NOT include Enterprise-only features
 	enterpriseOnly := []Feature{
+		FeatureCompliance,
+		FeatureOPAPolicies,
+		FeatureImageSigning,
+		FeatureRuntimeSecurity,
+		FeatureLogAggregation,
+		FeatureCustomDashboards,
+		FeatureEphemeralEnvs,
+		FeatureManifestBuilder,
+	}
+	for _, f := range enterpriseOnly {
+		if featureSet[f] {
+			t.Errorf("AllBusinessFeatures() should NOT include enterprise-only feature %q", f)
+		}
+	}
+
+	// Business must NOT include unimplemented features
+	unimplemented := []Feature{
 		FeatureSSOSAML,
 		FeatureHAMode,
 		FeatureSharedTerminals,
 		FeatureWhiteLabel,
 	}
-	for _, f := range enterpriseOnly {
+	for _, f := range unimplemented {
 		if featureSet[f] {
-			t.Errorf("AllBusinessFeatures() should NOT include enterprise-only feature %q", f)
+			t.Errorf("AllBusinessFeatures() should NOT include unimplemented feature %q", f)
 		}
 	}
 }
@@ -126,9 +147,11 @@ func TestAllBusinessFeatures(t *testing.T) {
 func TestAllEnterpriseFeatures(t *testing.T) {
 	features := AllEnterpriseFeatures()
 
-	// Enterprise has all 22 features (10 business + 12 enterprise-only)
-	if len(features) != 22 {
-		t.Fatalf("AllEnterpriseFeatures() returned %d features, want 22", len(features))
+	// Enterprise has all 20 features (12 business + 8 enterprise-only)
+	// Note: 4 features (SSO SAML, HA Mode, Shared Terminals, White Label) are
+	// excluded until implemented — see technical-development-plan.md FG-002
+	if len(features) != 20 {
+		t.Fatalf("AllEnterpriseFeatures() returned %d features, want 20", len(features))
 	}
 
 	// Enterprise must include all business features
@@ -145,12 +168,8 @@ func TestAllEnterpriseFeatures(t *testing.T) {
 		}
 	}
 
-	// Plus the 12 enterprise-only features
+	// Plus the 8 enterprise-only features (excludes unimplemented features)
 	enterpriseOnly := []Feature{
-		FeatureSSOSAML,
-		FeatureHAMode,
-		FeatureSharedTerminals,
-		FeatureWhiteLabel,
 		FeatureCompliance,
 		FeatureOPAPolicies,
 		FeatureImageSigning,
@@ -673,5 +692,163 @@ func TestCE_DisabledFeatures(t *testing.T) {
 	}
 	if info.HasFeature(FeatureOAuth) {
 		t.Error("CE should not have FeatureOAuth")
+	}
+}
+
+// ============================================================================
+// resolveFeatures
+// ============================================================================
+
+func TestResolveFeatures_NilJWT(t *testing.T) {
+	// When JWT features are nil, all edition defaults should be returned
+	result := resolveFeatures(nil, AllEnterpriseFeatures())
+	if len(result) != len(AllEnterpriseFeatures()) {
+		t.Errorf("resolveFeatures(nil, enterprise) returned %d features, want %d",
+			len(result), len(AllEnterpriseFeatures()))
+	}
+}
+
+func TestResolveFeatures_EmptyJWT(t *testing.T) {
+	// When JWT features are empty slice, all edition defaults should be returned
+	result := resolveFeatures([]Feature{}, AllBusinessFeatures())
+	if len(result) != len(AllBusinessFeatures()) {
+		t.Errorf("resolveFeatures(empty, business) returned %d features, want %d",
+			len(result), len(AllBusinessFeatures()))
+	}
+}
+
+func TestResolveFeatures_ExplicitJWT_MatchesDefaults(t *testing.T) {
+	// When JWT features exactly match defaults, result should have same count
+	result := resolveFeatures(AllEnterpriseFeatures(), AllEnterpriseFeatures())
+	if len(result) != len(AllEnterpriseFeatures()) {
+		t.Errorf("resolveFeatures(enterprise, enterprise) returned %d, want %d",
+			len(result), len(AllEnterpriseFeatures()))
+	}
+}
+
+func TestResolveFeatures_JWTAddsExtraFeature(t *testing.T) {
+	// When JWT has a feature not in defaults (forward-compat), it should be merged
+	jwtFeatures := []Feature{"future_feature"}
+	defaults := AllBusinessFeatures()
+	result := resolveFeatures(jwtFeatures, defaults)
+	if len(result) != len(defaults)+1 {
+		t.Errorf("resolveFeatures(extra, business) returned %d, want %d",
+			len(result), len(defaults)+1)
+	}
+
+	// Verify the extra feature is in the result
+	found := false
+	for _, f := range result {
+		if f == "future_feature" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("resolveFeatures should include JWT-explicit features not in defaults")
+	}
+}
+
+func TestResolveFeatures_NoDuplicates(t *testing.T) {
+	// Even when JWT and defaults overlap, no duplicates
+	jwtFeatures := []Feature{FeatureAPIKeys, FeatureOAuth}
+	defaults := AllBusinessFeatures()
+	result := resolveFeatures(jwtFeatures, defaults)
+
+	seen := make(map[Feature]int)
+	for _, f := range result {
+		seen[f]++
+		if seen[f] > 1 {
+			t.Errorf("feature %q appears %d times, want 1", f, seen[f])
+		}
+	}
+}
+
+// ============================================================================
+// ClaimsToInfo — empty features regression (the bug fix)
+// ============================================================================
+
+func TestClaimsToInfo_Enterprise_NilFeatures(t *testing.T) {
+	// This is the exact bug scenario: Enterprise JWT with no explicit features
+	expiry := time.Now().Add(365 * 24 * time.Hour)
+	claims := &Claims{
+		LicenseID: "USN-ent-nofeats",
+		Edition:   Enterprise,
+		Features:  nil, // JWT doesn't list features explicitly
+	}
+	claims.ExpiresAt = jwt.NewNumericDate(expiry)
+
+	info := ClaimsToInfo(claims, "inst-test")
+
+	if !info.Valid {
+		t.Fatal("Valid = false, want true")
+	}
+	if info.Edition != Enterprise {
+		t.Fatalf("Edition = %q, want %q", info.Edition, Enterprise)
+	}
+
+	// Must have all enterprise features derived from the edition
+	for _, f := range AllEnterpriseFeatures() {
+		if !info.HasFeature(f) {
+			t.Errorf("Enterprise with nil JWT features: HasFeature(%q) = false, want true", f)
+		}
+	}
+}
+
+func TestClaimsToInfo_Business_EmptyFeatures(t *testing.T) {
+	// Business JWT with empty features array
+	expiry := time.Now().Add(365 * 24 * time.Hour)
+	claims := &Claims{
+		LicenseID: "USN-biz-empty",
+		Edition:   Business,
+		MaxNodes:  2,
+		MaxUsers:  10,
+		Features:  []Feature{}, // explicitly empty
+	}
+	claims.ExpiresAt = jwt.NewNumericDate(expiry)
+
+	info := ClaimsToInfo(claims, "inst-test")
+
+	if !info.Valid {
+		t.Fatal("Valid = false, want true")
+	}
+
+	// Must have all business features derived from the edition
+	for _, f := range AllBusinessFeatures() {
+		if !info.HasFeature(f) {
+			t.Errorf("Business with empty JWT features: HasFeature(%q) = false, want true", f)
+		}
+	}
+
+	// Must NOT have enterprise-only features
+	enterpriseOnly := []Feature{
+		FeatureCompliance, FeatureOPAPolicies, FeatureImageSigning,
+		FeatureRuntimeSecurity, FeatureLogAggregation, FeatureCustomDashboards,
+		FeatureEphemeralEnvs, FeatureManifestBuilder,
+	}
+	for _, f := range enterpriseOnly {
+		if info.HasFeature(f) {
+			t.Errorf("Business license should NOT have enterprise-only feature %q", f)
+		}
+	}
+}
+
+func TestClaimsToInfo_Enterprise_PartialFeatures(t *testing.T) {
+	// JWT lists only a subset of features — the edition defaults should fill in the rest
+	expiry := time.Now().Add(365 * 24 * time.Hour)
+	claims := &Claims{
+		LicenseID: "USN-ent-partial",
+		Edition:   Enterprise,
+		Features:  []Feature{FeatureOPAPolicies, FeatureRuntimeSecurity},
+	}
+	claims.ExpiresAt = jwt.NewNumericDate(expiry)
+
+	info := ClaimsToInfo(claims, "inst-test")
+
+	// Must still have ALL enterprise features (partial JWT + edition defaults merged)
+	for _, f := range AllEnterpriseFeatures() {
+		if !info.HasFeature(f) {
+			t.Errorf("Enterprise with partial JWT features: HasFeature(%q) = false, want true", f)
+		}
 	}
 }

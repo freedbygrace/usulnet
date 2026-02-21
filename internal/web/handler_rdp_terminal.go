@@ -9,10 +9,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -31,15 +29,7 @@ var rdpUpgrader = websocket.Upgrader{
 	WriteBufferSize: 32768,
 	Subprotocols:    []string{"guacamole"},
 	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true
-		}
-		u, err := url.Parse(origin)
-		if err != nil {
-			return false
-		}
-		return u.Host == r.Host
+		return isAllowedWebSocketOrigin(r)
 	},
 	HandshakeTimeout: 10 * time.Second,
 }
@@ -129,10 +119,10 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 	ws.NetConn().SetDeadline(time.Time{})
 
 	// Connect to guacd
-	guacdAddr := fmt.Sprintf("%s:%d", guacdCfg.Host, guacdCfg.Port)
+	guacdAddr := net.JoinHostPort(guacdCfg.Host, fmt.Sprintf("%d", guacdCfg.Port))
 	guacdConn, err := net.DialTimeout("tcp", guacdAddr, 10*time.Second)
 	if err != nil {
-		log.Printf("[ERROR] RDP: failed to connect to guacd at %s: %v", guacdAddr, err)
+		h.logger.Error("RDP: failed to connect to guacd", "address", guacdAddr, "error", err)
 		ws.WriteMessage(websocket.TextMessage, []byte(guacEncode("error", "Failed to connect to RDP gateway", "519")))
 		return
 	}
@@ -141,7 +131,7 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 	// Perform Guacamole protocol handshake
 	// 1. Send "select" instruction with protocol type "rdp"
 	if _, err := guacdConn.Write([]byte(guacEncode("select", "rdp"))); err != nil {
-		log.Printf("[ERROR] RDP: failed to send select to guacd: %v", err)
+		h.logger.Error("RDP: failed to send select to guacd", "error", err)
 		ws.WriteMessage(websocket.TextMessage, []byte(guacEncode("error", "Protocol error", "519")))
 		return
 	}
@@ -150,16 +140,16 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 	argsBuf := make([]byte, 16384)
 	n, err := guacdConn.Read(argsBuf)
 	if err != nil {
-		log.Printf("[ERROR] RDP: failed to read args from guacd: %v", err)
+		h.logger.Error("RDP: failed to read args from guacd", "error", err)
 		ws.WriteMessage(websocket.TextMessage, []byte(guacEncode("error", "Protocol error", "519")))
 		return
 	}
 	argsResponse := string(argsBuf[:n])
-	log.Printf("[DEBUG] RDP guacd args response (%d bytes): %.200s...", n, argsResponse)
+	h.logger.Debug("RDP guacd args response", "bytes", n)
 
 	// Parse the args instruction to get parameter names
 	paramNames := guacParseArgs(argsResponse)
-	log.Printf("[DEBUG] RDP guacd expects %d params: %v", len(paramNames), paramNames)
+	h.logger.Debug("RDP guacd param count", "count", len(paramNames))
 
 	// 3. Build connection parameters
 	password := ""
@@ -195,46 +185,46 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 		// Protocol version — must match guacd and JS client version.
 		// Without this, guacd falls back to legacy protocol and sends
 		// instructions that guacamole-common-js 1.5.0 cannot parse.
-		"VERSION_1_5_0":        "VERSION_1_5_0",
-		"hostname":             conn.Host,
-		"port":                 fmt.Sprintf("%d", conn.Port),
-		"username":             conn.Username,
-		"password":             password,
-		"domain":               conn.Domain,
-		"width":                width,
-		"height":               height,
-		"dpi":                  "96",
-		"color-depth":          conn.ColorDepth,
-		"security":             security,
-		"ignore-cert":          "true",
-		"disable-audio":        "true",
-		"enable-wallpaper":     "false",
-		"enable-theming":       "true",
+		"VERSION_1_5_0":         "VERSION_1_5_0",
+		"hostname":              conn.Host,
+		"port":                  fmt.Sprintf("%d", conn.Port),
+		"username":              conn.Username,
+		"password":              password,
+		"domain":                conn.Domain,
+		"width":                 width,
+		"height":                height,
+		"dpi":                   "96",
+		"color-depth":           conn.ColorDepth,
+		"security":              security,
+		"ignore-cert":           "true",
+		"disable-audio":         "true",
+		"enable-wallpaper":      "false",
+		"enable-theming":        "true",
 		"enable-font-smoothing": "true",
-		"resize-method":        "display-update",
+		"resize-method":         "display-update",
 	}
 
 	// 4. Send "size" instruction
 	if _, err := guacdConn.Write([]byte(guacEncode("size", width, height, "96"))); err != nil {
-		log.Printf("[ERROR] RDP: failed to send size to guacd: %v", err)
+		h.logger.Error("RDP: failed to send size to guacd", "error", err)
 		return
 	}
 
 	// 5. Send "audio" instruction (empty - no audio)
 	if _, err := guacdConn.Write([]byte(guacEncode("audio"))); err != nil {
-		log.Printf("[ERROR] RDP: failed to send audio to guacd: %v", err)
+		h.logger.Error("RDP: failed to send audio to guacd", "error", err)
 		return
 	}
 
 	// 6. Send "video" instruction (empty - no video)
 	if _, err := guacdConn.Write([]byte(guacEncode("video"))); err != nil {
-		log.Printf("[ERROR] RDP: failed to send video to guacd: %v", err)
+		h.logger.Error("RDP: failed to send video to guacd", "error", err)
 		return
 	}
 
 	// 7. Send "image" instruction (supported formats)
 	if _, err := guacdConn.Write([]byte(guacEncode("image", "image/png", "image/jpeg", "image/webp"))); err != nil {
-		log.Printf("[ERROR] RDP: failed to send image to guacd: %v", err)
+		h.logger.Error("RDP: failed to send image to guacd", "error", err)
 		return
 	}
 
@@ -247,7 +237,7 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 	}
 	connectInstruction := guacEncode("connect", connectArgs...)
 	if _, err := guacdConn.Write([]byte(connectInstruction)); err != nil {
-		log.Printf("[ERROR] RDP: failed to send connect to guacd: %v", err)
+		h.logger.Error("RDP: failed to send connect to guacd", "error", err)
 		return
 	}
 
@@ -255,20 +245,51 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 	readyBuf := make([]byte, 8192)
 	rn, err := guacdConn.Read(readyBuf)
 	if err != nil {
-		log.Printf("[ERROR] RDP: failed to read connect response from guacd: %v", err)
+		h.logger.Error("RDP: failed to read connect response from guacd", "error", err)
 		ws.WriteMessage(websocket.TextMessage, []byte(guacEncode("error", "RDP connection failed", "519")))
 		return
 	}
-	readyResponse := string(readyBuf[:rn])
-	log.Printf("[DEBUG] RDP guacd connect response (%d bytes): %.200s", rn, readyResponse)
+	h.logger.Debug("RDP guacd connect response", "bytes", rn)
 
 	// Forward the guacd response to the browser — the JS client needs it
 	if err := ws.WriteMessage(websocket.TextMessage, readyBuf[:rn]); err != nil {
-		log.Printf("[ERROR] RDP: failed to forward ready to browser: %v", err)
+		h.logger.Error("RDP: failed to forward ready to browser", "error", err)
 		return
 	}
 
-	log.Printf("[INFO] RDP Session: conn=%s host=%s user=%s", connID, conn.Host, conn.Username)
+	h.logger.Info("RDP session started",
+		"conn_id", connID,
+		"host", conn.Host,
+		"rdp_user", conn.Username,
+		"user_id", user.ID,
+	)
+
+	// Record terminal session for audit trail
+	var terminalSessionID uuid.UUID
+	if h.terminalSessionRepo != nil {
+		userUUID, parseErr := uuid.Parse(user.ID)
+		if parseErr == nil {
+			sessionInput := &CreateTerminalSessionInput{
+				UserID:     userUUID,
+				Username:   user.Username,
+				TargetType: "rdp",
+				TargetID:   connID.String(),
+				TargetName: fmt.Sprintf("RDP (%s@%s:%d)", conn.Username, conn.Host, conn.Port),
+				Shell:      "rdp",
+				TermCols:   0,
+				TermRows:   0,
+				ClientIP:   getRealIP(r),
+				UserAgent:  r.UserAgent(),
+			}
+
+			if sid, createErr := h.terminalSessionRepo.Create(context.Background(), sessionInput); createErr != nil {
+				h.logger.Warn("Failed to log RDP terminal session", "error", createErr)
+			} else {
+				terminalSessionID = sid
+				h.logger.Debug("RDP terminal session created", "session_id", sid)
+			}
+		}
+	}
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -278,6 +299,14 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 	cleanup := func() {
 		closeOnce.Do(func() {
 			cancel()
+
+			// End terminal session if it was created
+			if h.terminalSessionRepo != nil && terminalSessionID != uuid.Nil {
+				if endErr := h.terminalSessionRepo.End(context.Background(), terminalSessionID, "completed", ""); endErr != nil {
+					h.logger.Warn("Failed to end RDP terminal session", "error", endErr)
+				}
+			}
+
 			guacdConn.Close()
 			wsMu.Lock()
 			ws.WriteControl(
@@ -358,7 +387,7 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 					writeErr := ws.WriteMessage(websocket.TextMessage, complete)
 					wsMu.Unlock()
 					if writeErr != nil {
-						log.Printf("[DEBUG] RDP WS write error: %v", writeErr)
+						h.logger.Debug("RDP WS write error", "error", writeErr)
 						return
 					}
 				}
@@ -372,7 +401,7 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 					wsMu.Unlock()
 				}
 				if err != io.EOF {
-					log.Printf("[DEBUG] RDP guacd read ended: %v", err)
+					h.logger.Debug("RDP guacd read ended", "error", err)
 				}
 				return
 			}
@@ -394,7 +423,7 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 			_, message, err := ws.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
-					log.Printf("[DEBUG] RDP WS read error: %v", err)
+					h.logger.Debug("RDP WS read error", "error", err)
 				}
 				return
 			}
@@ -411,14 +440,14 @@ func (h *Handler) WSRDPExec(w http.ResponseWriter, r *http.Request) {
 
 			guacdConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if _, err := guacdConn.Write(message); err != nil {
-				log.Printf("[DEBUG] RDP guacd write error: %v", err)
+				h.logger.Debug("RDP guacd write error", "error", err)
 				return
 			}
 		}
 	}()
 
 	wg.Wait()
-	log.Printf("[DEBUG] RDP session ended: conn=%s", connID)
+	h.logger.Debug("RDP session ended", "conn_id", connID)
 }
 
 // RDPSessionTempl renders the RDP session page with the web client.
@@ -457,7 +486,7 @@ func (h *Handler) RDPSessionTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := connections.RDPSession(data).Render(r.Context(), w); err != nil {
-		log.Printf("[ERROR] failed to render RDP session: %v", err)
+		h.logger.Error("Failed to render RDP session", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }

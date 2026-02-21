@@ -44,6 +44,10 @@ const (
 	JobTypeMetricsCollection JobType = "metrics_collection"
 	JobTypeCleanup           JobType = "cleanup"
 	JobTypeRetention         JobType = "retention"
+	JobTypeWebhookDispatch   JobType = "webhook_dispatch"
+	JobTypeRunbookExecute    JobType = "runbook_execute"
+	JobTypeAutoDeploy        JobType = "auto_deploy"
+	JobTypeSLABreach         JobType = "sla_breach"
 )
 
 // JobPriority represents job priority
@@ -287,4 +291,29 @@ type StackDeployPayload struct {
 	Variables     map[string]string `json:"variables,omitempty"`
 	Prune         bool              `json:"prune"`
 	ForceRecreate bool              `json:"force_recreate"`
+}
+
+// WebhookDispatchPayload represents payload for webhook dispatch job
+type WebhookDispatchPayload struct {
+	DeliveryID uuid.UUID `json:"delivery_id"`
+	WebhookID  uuid.UUID `json:"webhook_id"`
+}
+
+// RunbookExecutePayload represents payload for runbook execution job
+type RunbookExecutePayload struct {
+	RunbookID   uuid.UUID  `json:"runbook_id"`
+	ExecutionID uuid.UUID  `json:"execution_id"`
+	Trigger     string     `json:"trigger"`
+	TriggerRef  string     `json:"trigger_ref,omitempty"`
+	ExecutedBy  *uuid.UUID `json:"executed_by,omitempty"`
+}
+
+// AutoDeployPayload represents payload for auto-deploy job
+type AutoDeployPayload struct {
+	RuleID     uuid.UUID       `json:"rule_id"`
+	SourceType string          `json:"source_type"`
+	SourceRepo string          `json:"source_repo"`
+	Branch     string          `json:"branch,omitempty"`
+	CommitSHA  string          `json:"commit_sha,omitempty"`
+	Payload    json.RawMessage `json:"payload,omitempty"`
 }

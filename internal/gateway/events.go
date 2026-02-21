@@ -208,33 +208,15 @@ func (c *EventCollector) HandleRawEvent(data []byte) {
 }
 
 // ============================================================================
-// Event Store Interface
+// Event Store Interface (aliases to protocol package)
 // ============================================================================
 
 // EventStore defines the interface for event persistence.
-type EventStore interface {
-	// Save persists an event
-	Save(ctx context.Context, event *protocol.Event) error
-	// GetByID retrieves an event by ID
-	GetByID(ctx context.Context, id string) (*protocol.Event, error)
-	// List retrieves events with filters
-	List(ctx context.Context, opts EventListOptions) ([]*protocol.Event, int64, error)
-	// DeleteOlderThan deletes events older than a duration
-	DeleteOlderThan(ctx context.Context, duration time.Duration) (int64, error)
-}
+// Canonical definition is in protocol package; aliased here for backwards compatibility.
+type EventStore = protocol.EventStore
 
 // EventListOptions contains options for listing events.
-type EventListOptions struct {
-	HostID    *uuid.UUID
-	AgentID   string
-	Type      *protocol.EventType
-	Severity  *protocol.EventSeverity
-	Since     *time.Time
-	Until     *time.Time
-	Page      int
-	PerPage   int
-	SortDesc  bool
-}
+type EventListOptions = protocol.EventListOptions
 
 // ============================================================================
 // Built-in Event Handlers

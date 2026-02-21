@@ -415,7 +415,7 @@ func NewAPIKeyRepository(db *DB) *APIKeyRepository {
 func (r *APIKeyRepository) Create(ctx context.Context, key *models.APIKey) error {
 	query := `
 		INSERT INTO api_keys (
-			id, user_id, name, key_hash, prefix, expires_at, created_at
+			id, user_id, name, key_hash, key_prefix, expires_at, created_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7
 		)`
@@ -449,7 +449,7 @@ func (r *APIKeyRepository) Create(ctx context.Context, key *models.APIKey) error
 // GetByID retrieves an API key by ID.
 func (r *APIKeyRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.APIKey, error) {
 	query := `
-		SELECT id, user_id, name, key_hash, prefix, last_used_at, expires_at, created_at
+		SELECT id, user_id, name, key_hash, key_prefix, last_used_at, expires_at, created_at
 		FROM api_keys
 		WHERE id = $1`
 
@@ -478,7 +478,7 @@ func (r *APIKeyRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.A
 // GetByKeyHash retrieves an API key by its hash.
 func (r *APIKeyRepository) GetByKeyHash(ctx context.Context, keyHash string) (*models.APIKey, error) {
 	query := `
-		SELECT id, user_id, name, key_hash, prefix, last_used_at, expires_at, created_at
+		SELECT id, user_id, name, key_hash, key_prefix, last_used_at, expires_at, created_at
 		FROM api_keys
 		WHERE key_hash = $1`
 
@@ -507,9 +507,9 @@ func (r *APIKeyRepository) GetByKeyHash(ctx context.Context, keyHash string) (*m
 // GetByPrefix retrieves API keys by prefix (for identification in UI).
 func (r *APIKeyRepository) GetByPrefix(ctx context.Context, prefix string) ([]*models.APIKey, error) {
 	query := `
-		SELECT id, user_id, name, key_hash, prefix, last_used_at, expires_at, created_at
+		SELECT id, user_id, name, key_hash, key_prefix, last_used_at, expires_at, created_at
 		FROM api_keys
-		WHERE prefix = $1`
+		WHERE key_prefix = $1`
 
 	rows, err := r.db.Query(ctx, query, prefix)
 	if err != nil {
@@ -541,7 +541,7 @@ func (r *APIKeyRepository) GetByPrefix(ctx context.Context, prefix string) ([]*m
 // ListByUserID retrieves all API keys for a user.
 func (r *APIKeyRepository) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*models.APIKey, error) {
 	query := `
-		SELECT id, user_id, name, key_hash, prefix, last_used_at, expires_at, created_at
+		SELECT id, user_id, name, key_hash, key_prefix, last_used_at, expires_at, created_at
 		FROM api_keys
 		WHERE user_id = $1
 		ORDER BY created_at DESC`

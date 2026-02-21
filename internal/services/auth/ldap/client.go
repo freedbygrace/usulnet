@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
@@ -69,6 +70,7 @@ type User struct {
 
 // Client provides LDAP authentication and user lookup.
 type Client struct {
+	mu        sync.RWMutex
 	config    Config
 	encryptor *crypto.AESEncryptor
 	logger    *logger.Logger
@@ -121,9 +123,15 @@ func (c *Client) connect() (*ldap.Conn, error) {
 	var conn *ldap.Conn
 	var err error
 
+	if c.config.SkipTLSVerify {
+		c.logger.Warn("LDAP TLS certificate verification is DISABLED — this is insecure outside development environments",
+			"host", c.config.Host,
+		)
+	}
+
 	// Configure TLS
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: c.config.SkipTLSVerify,
+		InsecureSkipVerify: c.config.SkipTLSVerify, //nolint:gosec // User-configurable for self-signed LDAP servers
 		ServerName:         c.config.Host,
 	}
 
@@ -165,11 +173,11 @@ func (c *Client) bindAsReader(conn *ldap.Conn) error {
 	if c.encryptor != nil && password != "" {
 		decrypted, err := c.encryptor.DecryptString(password)
 		if err != nil {
-			// Assume password is not encrypted (legacy)
-			c.logger.Warn("failed to decrypt bind password, using as-is")
-		} else {
-			password = decrypted
+			// Do NOT fall back to using the ciphertext as a password — this hides
+			// key rotation failures and would always fail the bind anyway.
+			return fmt.Errorf("failed to decrypt LDAP bind password (check encryption key): %w", err)
 		}
+		password = decrypted
 	}
 
 	return conn.Bind(c.config.BindDN, password)
@@ -187,7 +195,7 @@ func (c *Client) Authenticate(ctx context.Context, username, password string) (*
 
 	conn, err := c.connect()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("connect to LDAP server: %w", err)
 	}
 	defer conn.Close()
 
@@ -339,19 +347,26 @@ func (c *Client) getUserGroups(conn *ldap.Conn, userDN string) []string {
 }
 
 // determineRole determines the user role based on group membership.
+// Admin always takes priority over operator, regardless of group order.
 func (c *Client) determineRole(groups []string) models.UserRole {
+	hasOperator := false
+
 	for _, group := range groups {
 		groupLower := strings.ToLower(group)
 
-		// Check admin group
+		// Check admin group — highest priority, return immediately
 		if c.config.AdminGroup != "" && strings.ToLower(c.config.AdminGroup) == groupLower {
 			return models.RoleAdmin
 		}
 
-		// Check operator group
+		// Check operator group — remember it but keep looking for admin
 		if c.config.OperatorGroup != "" && strings.ToLower(c.config.OperatorGroup) == groupLower {
-			return models.RoleOperator
+			hasOperator = true
 		}
+	}
+
+	if hasOperator {
+		return models.RoleOperator
 	}
 
 	return c.config.DefaultRole
@@ -369,7 +384,7 @@ func (c *Client) SearchUsers(ctx context.Context) ([]User, error) {
 
 	conn, err := c.connect()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("connect to LDAP server for user search: %w", err)
 	}
 	defer conn.Close()
 
@@ -421,7 +436,7 @@ func (c *Client) SearchUsers(ctx context.Context) ([]User, error) {
 func (c *Client) TestConnection(ctx context.Context) error {
 	conn, err := c.connect()
 	if err != nil {
-		return err
+		return fmt.Errorf("test ldap connection: connect: %w", err)
 	}
 	defer conn.Close()
 
@@ -437,7 +452,7 @@ func (c *Client) TestConnection(ctx context.Context) error {
 func (c *Client) TestAuthentication(ctx context.Context, username, password string) error {
 	user, err := c.Authenticate(ctx, username, password)
 	if err != nil {
-		return err
+		return fmt.Errorf("test ldap authentication for %q: %w", username, err)
 	}
 
 	c.logger.Info("LDAP authentication test successful",
@@ -501,8 +516,11 @@ func (c *Client) SearchGroups(ctx context.Context) ([]string, error) {
 // ============================================================================
 
 // UpdateConfig updates the client configuration.
+// Thread-safe: may be called while goroutines read config via Authenticate/SearchUsers.
 func (c *Client) UpdateConfig(config Config) {
+	c.mu.Lock()
 	c.config = config
+	c.mu.Unlock()
 }
 
 // GetConfig returns the current configuration (with password masked).

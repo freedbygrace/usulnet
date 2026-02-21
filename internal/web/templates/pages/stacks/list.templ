@@ -9,6 +9,7 @@ import (
 type StacksData struct {
 	PageData layouts.PageData
 	Stacks   []StackItem
+	Error    string
 }
 
 type StackItem struct {
@@ -43,6 +44,12 @@ func stackStatusLabel(status string) string {
 templ List(data StacksData) {
 	@layouts.Base(data.PageData) {
 		<div class="space-y-6">
+			if data.Error != "" {
+				<div class="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-3">
+					<i class="fas fa-exclamation-circle text-red-400"></i>
+					<p class="text-sm text-red-400">{ data.Error }</p>
+				</div>
+			}
 			<!-- Header -->
 			<div class="flex items-center justify-between">
 				<div>
@@ -173,6 +180,8 @@ templ List(data StacksData) {
 													<button
 														hx-post={ "/stacks/" + stack.Name + "/stop" }
 														hx-swap="none"
+														hx-headers={ fmt.Sprintf(`{"X-CSRF-Token":"%s"}`, data.PageData.CSRFToken) }
+														hx-on::after-request="setTimeout(()=>location.reload(),500)"
 														hx-confirm={ "Stop stack '" + stack.Name + "'?" }
 														class="p-1.5 text-gray-400 hover:text-yellow-400 hover:bg-dark-600 rounded transition-colors"
 														title="Stop">
@@ -181,6 +190,8 @@ templ List(data StacksData) {
 													<button
 														hx-post={ "/stacks/" + stack.Name + "/restart" }
 														hx-swap="none"
+														hx-headers={ fmt.Sprintf(`{"X-CSRF-Token":"%s"}`, data.PageData.CSRFToken) }
+														hx-on::after-request="setTimeout(()=>location.reload(),500)"
 														class="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-dark-600 rounded transition-colors"
 														title="Restart">
 														<i class="fas fa-redo text-xs"></i>
@@ -189,6 +200,8 @@ templ List(data StacksData) {
 													<button
 														hx-post={ "/stacks/" + stack.Name + "/start" }
 														hx-swap="none"
+														hx-headers={ fmt.Sprintf(`{"X-CSRF-Token":"%s"}`, data.PageData.CSRFToken) }
+														hx-on::after-request="setTimeout(()=>location.reload(),500)"
 														class="p-1.5 text-gray-400 hover:text-green-400 hover:bg-dark-600 rounded transition-colors"
 														title="Start">
 														<i class="fas fa-play text-xs"></i>

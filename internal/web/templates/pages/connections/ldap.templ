@@ -191,11 +191,11 @@ templ LDAPConnectionsList(data LDAPConnectionsListData) {
 
 							<div class="flex items-center gap-6">
 								<label class="flex items-center gap-2 cursor-pointer">
-									<input type="checkbox" name="use_ssl" class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
+									<input type="checkbox" name="use_tls" class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
 									<span class="text-sm text-gray-300">Use LDAPS (SSL)</span>
 								</label>
 								<label class="flex items-center gap-2 cursor-pointer">
-									<input type="checkbox" name="use_tls" class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
+									<input type="checkbox" name="start_tls" class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
 									<span class="text-sm text-gray-300">Use StartTLS</span>
 								</label>
 							</div>
@@ -220,7 +220,10 @@ templ LDAPConnectionsList(data LDAPConnectionsListData) {
 			document.getElementById('new-ldap-modal').classList.add('hidden');
 		}
 		function testLDAP(id) {
-			fetch(`/connections/ldap/${id}/test`, { method: 'POST' })
+			fetch(`/connections/ldap/${id}/test`, {
+				method: 'POST',
+				headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' }
+			})
 				.then(r => r.json())
 				.then(data => {
 					if (data.success) {
@@ -228,7 +231,8 @@ templ LDAPConnectionsList(data LDAPConnectionsListData) {
 					} else {
 						alert('Connection failed: ' + data.error);
 					}
-				});
+				})
+				.catch(err => { console.error('Connection test failed:', err); });
 		}
 		</script>
 	}
@@ -487,7 +491,7 @@ templ LDAPBrowser(data LDAPBrowserData) {
 				toggleWriteMode() {
 					fetch(`/connections/ldap/${this.connID}/write-mode`, {
 						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
+					headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' },
 						body: JSON.stringify({ enabled: this.writeEnabled })
 					}).then(() => {
 						location.reload();
@@ -569,7 +573,10 @@ func ldapBoolToString(b bool) string {
 }
 
 script testLDAPConnection(id string) {
-	fetch(`/connections/ldap/${id}/test`, { method: 'POST' })
+	fetch(`/connections/ldap/${id}/test`, {
+		method: 'POST',
+		headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' }
+	})
 		.then(r => r.json())
 		.then(data => {
 			if (data.success) {
@@ -577,7 +584,8 @@ script testLDAPConnection(id string) {
 			} else {
 				alert('Connection failed: ' + data.error);
 			}
-		});
+		})
+		.catch(err => { console.error('Connection test failed:', err); });
 }
 
 script deleteLDAPConnection(id string, name string) {

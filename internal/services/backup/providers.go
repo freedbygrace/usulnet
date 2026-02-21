@@ -458,6 +458,59 @@ func (p *DockerStackProvider) GetStackContainers(ctx context.Context, id uuid.UU
 	return result, nil
 }
 
+// DeployStack creates and deploys a stack. If a stack with the given name
+// already exists on the host, it updates the compose/env files and redeploys.
+func (p *DockerStackProvider) DeployStack(ctx context.Context, hostID uuid.UUID, name, composeFile string, envFile *string) (uuid.UUID, error) {
+	// Try to create a new stack
+	stack, err := p.stackService.Create(ctx, hostID, &models.CreateStackInput{
+		Name:        name,
+		ComposeFile: composeFile,
+		EnvFile:     envFile,
+		AutoStart:   true,
+	})
+	if err != nil {
+		// If duplicate name, find the existing stack and update+redeploy
+		existing, findErr := p.stackService.GetByName(ctx, hostID, name)
+		if findErr != nil {
+			return uuid.Nil, fmt.Errorf("deploy stack %s: create failed (%w) and lookup failed (%w)", name, err, findErr)
+		}
+
+		// Update compose and env
+		updateInput := &models.UpdateStackInput{
+			ComposeFile: &composeFile,
+			EnvFile:     envFile,
+		}
+		if _, updErr := p.stackService.Update(ctx, existing.ID, updateInput); updErr != nil {
+			return uuid.Nil, fmt.Errorf("update existing stack %s: %w", name, updErr)
+		}
+
+		// Deploy existing
+		result, depErr := p.stackService.Deploy(ctx, existing.ID)
+		if depErr != nil {
+			return existing.ID, fmt.Errorf("deploy existing stack %s: %w", name, depErr)
+		}
+		if !result.Success {
+			return existing.ID, fmt.Errorf("deploy existing stack %s failed: %s", name, result.Error)
+		}
+		return existing.ID, nil
+	}
+
+	// Deploy newly created stack
+	result, depErr := p.stackService.Deploy(ctx, stack.ID)
+	if depErr != nil {
+		return stack.ID, fmt.Errorf("deploy new stack %s: %w", name, depErr)
+	}
+	if !result.Success {
+		return stack.ID, fmt.Errorf("deploy new stack %s failed: %s", name, result.Error)
+	}
+	return stack.ID, nil
+}
+
+// StopStack stops a running stack without removing its volumes.
+func (p *DockerStackProvider) StopStack(ctx context.Context, id uuid.UUID) error {
+	return p.stackService.Stop(ctx, id, false)
+}
+
 // Verify interface compliance at compile time
 var _ VolumeProvider = (*DockerVolumeProvider)(nil)
 var _ ContainerProvider = (*DockerContainerProvider)(nil)

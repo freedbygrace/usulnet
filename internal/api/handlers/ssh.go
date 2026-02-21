@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/services/ssh"
@@ -36,21 +37,31 @@ func (h *SSHHandler) Routes() chi.Router {
 	// SSH Keys
 	r.Route("/keys", func(r chi.Router) {
 		r.Get("/", h.ListKeys)
-		r.Post("/", h.CreateKey)
 		r.Get("/{id}", h.GetKey)
-		r.Delete("/{id}", h.DeleteKey)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.CreateKey)
+			r.Delete("/{id}", h.DeleteKey)
+		})
 	})
 
 	// SSH Connections
 	r.Route("/connections", func(r chi.Router) {
 		r.Get("/", h.ListConnections)
-		r.Post("/", h.CreateConnection)
 		r.Get("/categories", h.GetCategories)
 		r.Get("/{id}", h.GetConnection)
-		r.Put("/{id}", h.UpdateConnection)
-		r.Delete("/{id}", h.DeleteConnection)
-		r.Post("/{id}/test", h.TestConnection)
 		r.Get("/{id}/sessions", h.GetSessionHistory)
+
+		// Operator+ for mutations
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOperator)
+			r.Post("/", h.CreateConnection)
+			r.Put("/{id}", h.UpdateConnection)
+			r.Delete("/{id}", h.DeleteConnection)
+			r.Post("/{id}/test", h.TestConnection)
+		})
 	})
 
 	// Active sessions

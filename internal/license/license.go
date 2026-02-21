@@ -2,22 +2,10 @@
 // Copyright (c) 2024-2026 usulnet contributors
 // https://github.com/fr4nsys/usulnet
 
-// Package license defines the usulnet edition system, feature flags,
-// resource limits, and JWT license claims.
-//
-// Editions:
-//   - CE (Community Edition): free, AGPLv3, limited resources
-//   - Business: paid per-node, expanded limits
-//   - Enterprise: custom pricing, unlimited
-//
-// License keys are JWT tokens signed with RSA-4096 (RS512).
-// The public key is embedded in the binary; the private key
-// exists only on the Cloudflare Worker that issues licenses.
 package license
 
 import "time"
 
-// Edition identifies the usulnet product tier.
 type Edition string
 
 const (
@@ -26,7 +14,6 @@ const (
 	Enterprise Edition = "ee"
 )
 
-// Feature is a boolean capability gated by edition.
 type Feature string
 
 const (
@@ -49,13 +36,13 @@ const (
 	FeatureRuntimeSecurity   Feature = "runtime_security"
 	FeatureLogAggregation    Feature = "log_aggregation"
 	FeatureCustomDashboards  Feature = "custom_dashboards"
-	// Phase 3: Market Expansion - GitOps
+	FeatureTemplateCatalog   Feature = "template_catalog"
 	FeatureGitSync           Feature = "git_sync"
 	FeatureEphemeralEnvs     Feature = "ephemeral_envs"
 	FeatureManifestBuilder   Feature = "manifest_builder"
+	FeatureRegistryBrowsing  Feature = "registry_browsing"
 )
 
-// AllBusinessFeatures returns every feature flag enabled in Business edition.
 func AllBusinessFeatures() []Feature {
 	return []Feature{
 		FeatureCustomRoles,
@@ -67,11 +54,12 @@ func AllBusinessFeatures() []Feature {
 		FeatureAPIKeys,
 		FeaturePrioritySupport,
 		FeatureSwarm,
+		FeatureTemplateCatalog,
 		FeatureGitSync,
+		FeatureRegistryBrowsing,
 	}
 }
 
-// AllEnterpriseFeatures returns every feature flag enabled in Enterprise edition.
 func AllEnterpriseFeatures() []Feature {
 	return []Feature{
 		FeatureCustomRoles,
@@ -83,6 +71,7 @@ func AllEnterpriseFeatures() []Feature {
 		FeatureAPIKeys,
 		FeaturePrioritySupport,
 		FeatureSwarm,
+		FeatureTemplateCatalog,
 		FeatureSSOSAML,
 		FeatureHAMode,
 		FeatureSharedTerminals,
@@ -96,10 +85,10 @@ func AllEnterpriseFeatures() []Feature {
 		FeatureGitSync,
 		FeatureEphemeralEnvs,
 		FeatureManifestBuilder,
+		FeatureRegistryBrowsing,
 	}
 }
 
-// Limits defines numeric resource caps. Value 0 = unlimited.
 type Limits struct {
 	MaxNodes                int `json:"max_nodes"`
 	MaxUsers                int `json:"max_users"`
@@ -115,22 +104,19 @@ type Limits struct {
 }
 
 const (
-	// CEBaseNodes is the number of nodes included free with every installation.
-	// CE gets only the master/local node. Business licenses add their purchased
-	// nodes on top of this base (buy 1 → get 2, buy 2 → get 3, etc.).
-	CEBaseNodes = 1
+	CEBaseNodes     = 1
+	ReceiptTTL      = 7 * 24 * time.Hour
+	SyncGracePeriod = 7 * 24 * time.Hour
 )
 
-// CELimits returns the hard-coded limits for Community Edition.
-// These are the DEFAULTS when no valid license JWT is present.
 func CELimits() Limits {
 	return Limits{
-		MaxNodes:                CEBaseNodes, // 1 — master/local node only
+		MaxNodes:                CEBaseNodes,
 		MaxUsers:                3,
 		MaxTeams:                1,
 		MaxCustomRoles:          1,
-		MaxLDAPServers:          1, // 1 LDAP server in CE
-		MaxOAuthProviders:       0, // disabled entirely (no FeatureOAuth)
+		MaxLDAPServers:          1,
+		MaxOAuthProviders:       0,
 		MaxAPIKeys:              3,
 		MaxGitConnections:       1,
 		MaxS3Connections:        1,
@@ -139,48 +125,45 @@ func CELimits() Limits {
 	}
 }
 
-// BusinessDefaultLimits returns the default limits for a Business license.
-// In practice, nod and usr come from the JWT claims.
 func BusinessDefaultLimits() Limits {
 	return Limits{
-		MaxNodes:                0, // from JWT nod + CEBaseNodes
-		MaxUsers:                0, // from JWT usr
+		MaxNodes:                0,
+		MaxUsers:                0,
 		MaxTeams:                5,
-		MaxCustomRoles:          0, // unlimited
+		MaxCustomRoles:          0,
 		MaxLDAPServers:          3,
 		MaxOAuthProviders:       3,
 		MaxAPIKeys:              25,
 		MaxGitConnections:       5,
 		MaxS3Connections:        5,
 		MaxBackupDestinations:   5,
-		MaxNotificationChannels: 0, // unlimited
+		MaxNotificationChannels: 0,
 	}
 }
 
-// EnterpriseLimits returns limits for Enterprise (all unlimited).
 func EnterpriseLimits() Limits {
-	return Limits{} // all zeros = unlimited
+	return Limits{}
 }
 
-// LimitProvider is the interface services use to check resource limits.
-// Defined here so services can import license without depending on the
-// full Provider implementation.
 type LimitProvider interface {
 	GetLimits() Limits
 }
 
-// Info holds the resolved license state at runtime.
 type Info struct {
-	Edition    Edition   `json:"edition"`
-	Valid      bool      `json:"valid"`
-	LicenseID  string   `json:"license_id,omitempty"`
+	Edition    Edition    `json:"edition"`
+	Valid      bool       `json:"valid"`
+	LicenseID  string     `json:"license_id,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Features   []Feature `json:"features"`
-	Limits     Limits    `json:"limits"`
-	InstanceID string   `json:"instance_id,omitempty"`
+	Features   []Feature  `json:"features"`
+	Limits     Limits     `json:"limits"`
+	InstanceID string     `json:"instance_id,omitempty"`
+
+	ActivatedAt       *time.Time `json:"activated_at,omitempty"`
+	LastCheckinAt     *time.Time `json:"last_checkin_at,omitempty"`
+	SyncWarning       bool       `json:"sync_warning,omitempty"`
+	SyncDegradationAt *time.Time `json:"sync_degradation_at,omitempty"`
 }
 
-// HasFeature returns true if the given feature is enabled.
 func (i *Info) HasFeature(f Feature) bool {
 	if i == nil || !i.Valid {
 		return false
@@ -193,7 +176,6 @@ func (i *Info) HasFeature(f Feature) bool {
 	return false
 }
 
-// IsExpired returns true if the license has a set expiration that has passed.
 func (i *Info) IsExpired() bool {
 	if i == nil || i.ExpiresAt == nil {
 		return false
@@ -201,7 +183,6 @@ func (i *Info) IsExpired() bool {
 	return time.Now().After(*i.ExpiresAt)
 }
 
-// EditionName returns the human-readable edition name.
 func (i *Info) EditionName() string {
 	if i == nil {
 		return "Community Edition"
@@ -216,7 +197,6 @@ func (i *Info) EditionName() string {
 	}
 }
 
-// NewCEInfo returns the default Community Edition info (no JWT needed).
 func NewCEInfo() *Info {
 	limits := CELimits()
 	return &Info{
@@ -227,21 +207,16 @@ func NewCEInfo() *Info {
 	}
 }
 
-// IsWithinLimit checks if a current count is within a resource limit.
-// Returns true if the resource can accept more items.
-// A limit of 0 means unlimited (always returns true).
 func IsWithinLimit(current, limit int) bool {
 	if limit <= 0 {
-		return true // Unlimited
+		return true
 	}
 	return current < limit
 }
 
-// LimitUsagePercent returns the percentage of a limit that is used.
-// Returns 0 for unlimited resources (limit=0).
 func LimitUsagePercent(current, limit int) float64 {
 	if limit <= 0 {
-		return 0 // Unlimited
+		return 0
 	}
 	return float64(current) / float64(limit) * 100
 }

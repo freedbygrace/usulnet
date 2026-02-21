@@ -99,7 +99,10 @@ func (a *volumeAdapter) Create(ctx context.Context, name, driver string, labels 
 		Labels: labels,
 	}
 	_, err := a.svc.Create(ctx, resolveHostID(ctx, a.hostID), input)
-	return err
+	if err != nil {
+		return fmt.Errorf("volumeAdapter.Create: create volume %q: %w", name, err)
+	}
+	return nil
 }
 
 func (a *volumeAdapter) Remove(ctx context.Context, name string, force bool) error {
@@ -115,7 +118,7 @@ func (a *volumeAdapter) Prune(ctx context.Context) (int64, error) {
 	}
 	result, err := a.svc.Prune(ctx, resolveHostID(ctx, a.hostID))
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("prune volumes: %w", err)
 	}
 	return result.SpaceReclaimed, nil
 }
@@ -131,13 +134,14 @@ func (a *volumeAdapter) Browse(ctx context.Context, volumeName, path string) ([]
 	entries := make([]VolumeFileEntry, len(files))
 	for i, f := range files {
 		entries[i] = VolumeFileEntry{
-			Name:      f.Name,
-			Path:      f.Path,
-			IsDir:     f.IsDir,
-			Size:      f.Size,
-			SizeHuman: f.SizeHuman,
-			Mode:      f.Mode,
-			ModTime:   f.ModTime.Format("2006-01-02 15:04:05"),
+			Name:       f.Name,
+			Path:       f.Path,
+			IsDir:      f.IsDir,
+			Size:       f.Size,
+			SizeHuman:  f.SizeHuman,
+			Mode:       f.Mode,
+			ModTime:    f.ModTime.Format("2006-01-02 15:04:05"),
+			ModTimeAgo: humanTime(f.ModTime),
 		}
 	}
 	return entries, nil

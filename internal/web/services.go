@@ -8,6 +8,7 @@ package web
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -67,6 +68,9 @@ type ServiceRegistry struct {
 	// User repository for user management
 	userRepo *postgres.UserRepository
 
+	// Audit log repository for recent events
+	auditLogRepo *postgres.AuditLogRepository
+
 	// Encryptor for TOTP secrets
 	encryptor *crypto.AESEncryptor
 
@@ -75,6 +79,11 @@ type ServiceRegistry struct {
 
 	// Docker client for events
 	dockerClient docker.ClientAPI
+
+	// TOTP replay guard and lockout config
+	totpReplayGuard  TOTPReplayGuard
+	totpMaxAttempts  int
+	totpLockDuration time.Duration
 
 	// Default host ID for standalone mode
 	defaultHostID uuid.UUID
@@ -96,7 +105,7 @@ type ServiceRegistryDeps struct {
 	HostService      *hostsvc.Service
 	AuthService      *authsvc.Service
 	NPMService       *npm.Service        // Optional: requires npm.enabled
-	ProxyService     *proxysvc.Service    // Optional: requires caddy.enabled
+	ProxyService     *proxysvc.Service    // Optional: requires nginx.enabled or caddy.enabled
 	StorageService   *storagesvc.Service  // Optional: requires minio.enabled
 	TeamService      *teamsvc.Service
 	GiteaService     *giteapkg.Service    // Optional: requires Gitea integration
@@ -106,9 +115,13 @@ type ServiceRegistryDeps struct {
 	AlertService     *monitoring.AlertService
 	SchedulerService *scheduler.Scheduler // Optional: set after scheduler init
 	UserRepository   *postgres.UserRepository
-	Encryptor        *crypto.AESEncryptor // Optional: requires encryption key
+	AuditLogRepo     *postgres.AuditLogRepository // Optional: for recent events feed
+	Encryptor        *crypto.AESEncryptor          // Optional: requires encryption key
 	SessionStore     *WebSessionStore     // Optional: requires Redis
 	DockerClient     docker.ClientAPI     // Optional: set after Docker init
+	TOTPReplayGuard  TOTPReplayGuard      // Optional: requires Redis
+	TOTPMaxAttempts  int
+	TOTPLockDuration time.Duration
 }
 
 // NewServiceRegistry creates a new service registry with all dependencies injected.
@@ -137,9 +150,13 @@ func NewServiceRegistry(deps ServiceRegistryDeps) *ServiceRegistry {
 		alertSvc:      deps.AlertService,
 		schedulerSvc:  deps.SchedulerService,
 		userRepo:      deps.UserRepository,
+		auditLogRepo:  deps.AuditLogRepo,
 		encryptor:     deps.Encryptor,
 		sessionStore:  deps.SessionStore,
-		dockerClient:  deps.DockerClient,
+		dockerClient:     deps.DockerClient,
+		totpReplayGuard:  deps.TOTPReplayGuard,
+		totpMaxAttempts:  deps.TOTPMaxAttempts,
+		totpLockDuration: deps.TOTPLockDuration,
 	}
 }
 
@@ -176,7 +193,7 @@ func (r *ServiceRegistry) Networks() NetworkService {
 }
 
 func (r *ServiceRegistry) Stacks() StackService {
-	return &stackAdapter{svc: r.stackSvc, hostID: r.defaultHostID}
+	return &stackAdapter{svc: r.stackSvc, userRepo: r.userRepo, hostID: r.defaultHostID}
 }
 
 func (r *ServiceRegistry) Backups() BackupService {
@@ -200,15 +217,15 @@ func (r *ServiceRegistry) Hosts() HostService {
 }
 
 func (r *ServiceRegistry) Events() EventService {
-	return &eventAdapter{dockerClient: r.dockerClient}
+	return &eventAdapter{dockerClient: r.dockerClient, auditLogRepo: r.auditLogRepo}
 }
 
 func (r *ServiceRegistry) Proxy() ProxyService {
-	// Prefer Caddy-based proxy if configured
+	// Prefer native proxy (nginx/Caddy backend) if configured
 	if r.proxySvc != nil {
 		return newCaddyProxyAdapter(r.proxySvc)
 	}
-	// Fallback to NPM adapter
+	// Fallback to NPM adapter (external connection)
 	return &proxyAdapter{npmSvc: r.npmSvc, hostID: r.defaultHostID}
 }
 
@@ -224,7 +241,14 @@ func (r *ServiceRegistry) Auth() AuthService {
 }
 
 func (r *ServiceRegistry) Users() UserService {
-	return &userAdapter{repo: r.userRepo, authSvc: r.authSvc, encryptor: r.encryptor}
+	return &userAdapter{
+		repo:         r.userRepo,
+		authSvc:      r.authSvc,
+		encryptor:    r.encryptor,
+		replayGuard:  r.totpReplayGuard,
+		maxAttempts:  r.totpMaxAttempts,
+		lockDuration: r.totpLockDuration,
+	}
 }
 
 func (r *ServiceRegistry) Stats() StatsService {
@@ -241,6 +265,9 @@ func (r *ServiceRegistry) Stats() StatsService {
 }
 
 func (r *ServiceRegistry) Teams() TeamService {
+	if r.teamSvc == nil {
+		return nil
+	}
 	return r.teamSvc
 }
 

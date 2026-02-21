@@ -788,13 +788,19 @@ func (h *Handler) GiteaWebhookReceiver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate signature if webhook secret is configured
+	// Validate signature — require a webhook secret to be configured.
+	// Without a secret, any caller can forge payloads. Reject the request
+	// if the connection has no secret set.
 	secret, _ := svc.GetWebhookSecret(r.Context(), connID)
-	if secret != "" {
-		if !gitea.ValidateWebhookSignature(secret, body, signature) {
-			http.Error(w, "Invalid signature", http.StatusUnauthorized)
-			return
-		}
+	if secret == "" {
+		slog.Warn("webhook rejected: no secret configured for connection",
+			"connection_id", connID, "event", eventType, "delivery", deliveryID)
+		http.Error(w, "Webhook secret not configured", http.StatusForbidden)
+		return
+	}
+	if !gitea.ValidateWebhookSignature(secret, body, signature) {
+		http.Error(w, "Invalid signature", http.StatusUnauthorized)
+		return
 	}
 
 	// Store and process

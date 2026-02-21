@@ -18,11 +18,12 @@ NC='\033[0m' # No Color
 
 PASS=0
 FAIL=0
+SKIP=0
 
 run_check() {
     local name="$1"
     shift
-    printf "  %-30s" "${name}..."
+    printf "  %-35s" "${name}..."
     if "$@" > /dev/null 2>&1; then
         echo -e "${GREEN}PASS${NC}"
         ((PASS++))
@@ -30,6 +31,14 @@ run_check() {
         echo -e "${RED}FAIL${NC}"
         ((FAIL++))
     fi
+}
+
+skip_check() {
+    local name="$1"
+    local reason="$2"
+    printf "  %-35s" "${name}..."
+    echo -e "${YELLOW}SKIP (${reason})${NC}"
+    ((SKIP++))
 }
 
 # 1. Check Go formatting
@@ -45,15 +54,32 @@ run_check "Unit tests" go test -short -count=1 ./...
 if command -v golangci-lint &> /dev/null; then
     run_check "Linter (golangci-lint)" golangci-lint run --fast ./...
 else
-    echo -e "  ${YELLOW}Linter (golangci-lint)...SKIP (not installed)${NC}"
+    skip_check "Linter (golangci-lint)" "not installed"
+fi
+
+# 5. Check go mod tidy produces no changes
+run_check "Go modules tidy" bash -c 'cp go.mod go.mod.bak && cp go.sum go.sum.bak && go mod tidy && diff -q go.mod go.mod.bak && diff -q go.sum go.sum.bak; ret=$?; mv go.mod.bak go.mod; mv go.sum.bak go.sum; exit $ret'
+
+# 6. Verify migration file pairs
+if [ -f scripts/verify-migrations.sh ]; then
+    run_check "Migration integrity" bash scripts/verify-migrations.sh
+else
+    skip_check "Migration integrity" "script not found"
+fi
+
+# 7. Run govulncheck (if available)
+if command -v govulncheck &> /dev/null; then
+    run_check "Vulnerability check" govulncheck ./...
+else
+    skip_check "Vulnerability check (govulncheck)" "not installed"
 fi
 
 echo ""
-echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
+echo "=== Results: ${PASS} passed, ${FAIL} failed, ${SKIP} skipped ==="
 
 if [ "${FAIL}" -gt 0 ]; then
     echo -e "${RED}Pre-commit checks failed. Fix issues before committing.${NC}"
-    echo "Tip: Run 'make lint' to see linting details."
+    echo "Tip: Run 'make quality' to see details."
     exit 1
 fi
 

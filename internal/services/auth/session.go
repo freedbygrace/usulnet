@@ -234,7 +234,7 @@ func (s *SessionService) Refresh(ctx context.Context, refreshToken string, user 
 func (s *SessionService) Validate(ctx context.Context, sessionID uuid.UUID) (*models.Session, error) {
 	session, err := s.sessionRepo.GetByID(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get session for validation: %w", err)
 	}
 
 	if session.IsExpired() {
@@ -280,7 +280,7 @@ func (s *SessionService) ExtendIfNeeded(ctx context.Context, sessionID uuid.UUID
 
 	session, err := s.sessionRepo.GetByID(ctx, sessionID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get session for extension: %w", err)
 	}
 
 	// Check if extension is needed
@@ -322,7 +322,7 @@ func (s *SessionService) RevokeByRefreshToken(ctx context.Context, refreshToken 
 	tokenHash := crypto.HashToken(refreshToken)
 	session, err := s.sessionRepo.GetByRefreshTokenHash(ctx, tokenHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("find session by refresh token: %w", err)
 	}
 
 	return s.Revoke(ctx, session.ID)

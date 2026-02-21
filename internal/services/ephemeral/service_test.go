@@ -84,6 +84,19 @@ func (m *mockRepo) UpdateStatus(_ context.Context, id uuid.UUID, status models.E
 	return nil
 }
 
+func (m *mockRepo) UpdateTTL(_ context.Context, id uuid.UUID, ttlMinutes int, expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	env, ok := m.envs[id]
+	if !ok {
+		return fmt.Errorf("environment %s not found", id)
+	}
+	env.TTLMinutes = ttlMinutes
+	env.ExpiresAt = &expiresAt
+	env.UpdatedAt = time.Now()
+	return nil
+}
+
 func (m *mockRepo) SetURL(_ context.Context, id uuid.UUID, url string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -382,6 +395,73 @@ func TestCleanupExpired(t *testing.T) {
 	repo.mu.Unlock()
 }
 
+func TestDestroyEnvironment_DeletesEvenWhenStopFails(t *testing.T) {
+	svc, repo := newService()
+	ctx := context.Background()
+
+	env, err := svc.CreateEnvironment(ctx, validInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	repo.mu.Lock()
+	repo.envs[env.ID].Status = models.EphemeralStatusRunning
+	repo.mu.Unlock()
+
+	err = svc.DestroyEnvironment(ctx, env.ID, &mockFailingDeployer{removeErr: fmt.Errorf("remove failed")})
+	if err != nil {
+		t.Fatalf("destroy should continue even if stop fails, got: %v", err)
+	}
+
+	_, getErr := repo.GetByID(ctx, env.ID)
+	if getErr == nil {
+		t.Fatal("expected environment to be deleted")
+	}
+}
+
+func TestDestroyEnvironment_ConcurrentCalls(t *testing.T) {
+	svc, repo := newService()
+	ctx := context.Background()
+
+	env, err := svc.CreateEnvironment(ctx, validInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- svc.DestroyEnvironment(ctx, env.ID, nil)
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	failures := 0
+	for result := range results {
+		if result == nil {
+			successes++
+			continue
+		}
+		failures++
+	}
+
+	if successes != 1 || failures != 1 {
+		t.Fatalf("expected one success and one failure, got successes=%d failures=%d", successes, failures)
+	}
+
+	_, getErr := repo.GetByID(ctx, env.ID)
+	if getErr == nil {
+		t.Fatal("expected environment to be deleted after concurrent destroy")
+	}
+}
+
 // ============================================================================
 // Mock StackDeployer
 // ============================================================================
@@ -397,5 +477,21 @@ func (d *mockDeployer) RemoveStack(_ context.Context, _ string) error {
 }
 
 func (d *mockDeployer) GetStackStatus(_ context.Context, _ string) (string, error) {
+	return "running", nil
+}
+
+type mockFailingDeployer struct {
+	removeErr error
+}
+
+func (d *mockFailingDeployer) DeployStack(_ context.Context, _ string, _ string, _ map[string]string) error {
+	return nil
+}
+
+func (d *mockFailingDeployer) RemoveStack(_ context.Context, _ string) error {
+	return d.removeErr
+}
+
+func (d *mockFailingDeployer) GetStackStatus(_ context.Context, _ string) (string, error) {
 	return "running", nil
 }

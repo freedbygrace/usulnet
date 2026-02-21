@@ -362,10 +362,11 @@ func toTemplContainerFull(c ContainerView) containers.ContainerFull {
 		CreatedAgo:    c.CreatedHuman,
 		CPUShares:     0,
 		Memory:        c.MemoryLimit,
-		CPUs:          c.CPUPercent,
-		Hostname:      c.Name, // Default
+		CPUs:          0,       // Actual CPU quota comes from Docker inspect, not from stats
+		Hostname:      "",      // Actual hostname comes from Docker inspect
 		SecurityScore: c.SecurityScore,
 		SecurityGrade: c.SecurityGrade,
+		HasUpdates:    c.UpdateAvailable,
 		Labels:        c.Labels,
 	}
 
@@ -599,8 +600,8 @@ func toTemplImage(img ImageView) images.Image {
 		CreatedAgo:   img.CreatedHuman,
 		InUse:        img.InUse,
 		Containers:   img.Containers,
-		Architecture: "", // Not available in ImageView
-		OS:           "", // Not available in ImageView
+		Architecture: img.Architecture,
+		OS:           img.OS,
 	}
 }
 

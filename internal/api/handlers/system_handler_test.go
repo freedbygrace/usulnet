@@ -46,7 +46,8 @@ func TestSystemHandler_Readiness(t *testing.T) {
 func TestSystemHandler_Version(t *testing.T) {
 	ts := setupTestSuite(t)
 
-	w := doRequest(t, ts.router, http.MethodGet, "/api/v1/system/version", "", "")
+	token := generateTestToken(t, testUser(), "viewer", "viewer")
+	w := doRequest(t, ts.router, http.MethodGet, "/api/v1/system/version", "", token)
 	assertStatus(t, w, http.StatusOK)
 
 	body := assertJSON(t, w)
@@ -107,6 +108,74 @@ func TestSystemHandler_Health_WithChecker(t *testing.T) {
 
 	if resp.Components["test-db"].Status != "up" {
 		t.Errorf("expected test-db status 'up', got %s", resp.Components["test-db"].Status)
+	}
+}
+
+func TestSystemHandler_Readiness_WithComponents(t *testing.T) {
+	handler := handlers.NewSystemHandler("1.0.0", "abc123", "2026-01-01", nil)
+
+	handler.RegisterHealthChecker("db", func(ctx context.Context) *handlers.HealthStatus {
+		return &handlers.HealthStatus{Status: "healthy"}
+	})
+	handler.RegisterHealthChecker("cache", func(ctx context.Context) *handlers.HealthStatus {
+		return &handlers.HealthStatus{Status: "healthy"}
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	handler.Readiness(w, r)
+
+	assertStatus(t, w, http.StatusOK)
+
+	var resp handlers.ReadinessResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse readiness response: %v", err)
+	}
+
+	if resp.Status != "ready" {
+		t.Errorf("expected status 'ready', got %q", resp.Status)
+	}
+	if len(resp.Components) != 2 {
+		t.Errorf("expected 2 components, got %d", len(resp.Components))
+	}
+	for name, cs := range resp.Components {
+		if cs.CheckedAt == "" {
+			t.Errorf("component %q missing checked_at", name)
+		}
+	}
+}
+
+func TestSystemHandler_Readiness_UnhealthyComponent(t *testing.T) {
+	handler := handlers.NewSystemHandler("1.0.0", "abc123", "2026-01-01", nil)
+
+	handler.RegisterHealthChecker("db", func(ctx context.Context) *handlers.HealthStatus {
+		return &handlers.HealthStatus{Status: "healthy"}
+	})
+	handler.RegisterHealthChecker("cache", func(ctx context.Context) *handlers.HealthStatus {
+		return &handlers.HealthStatus{Status: "unhealthy", Message: "connection refused"}
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	handler.Readiness(w, r)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+
+	var resp handlers.ReadinessResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse readiness response: %v", err)
+	}
+
+	if resp.Status != "not_ready" {
+		t.Errorf("expected status 'not_ready', got %q", resp.Status)
+	}
+	if resp.Components["cache"] == nil {
+		t.Fatal("expected cache component in response")
+	}
+	if resp.Components["cache"].Status != "unhealthy" {
+		t.Errorf("expected cache unhealthy, got %q", resp.Components["cache"].Status)
 	}
 }
 

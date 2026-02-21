@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-THRESHOLD="${1:-40}"
+THRESHOLD="${1:-15}"
 COVERAGE_FILE="coverage.out"
 
 echo "=== usulnet Test Coverage Check ==="

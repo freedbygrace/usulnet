@@ -261,11 +261,13 @@ func (r *BackupRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// DeleteExpired deletes expired backups.
+// DeleteExpired finds expired backups and returns their IDs and storage paths.
+// The caller is responsible for deleting from storage first, then calling Delete()
+// for each ID to remove the database record. This prevents orphaned storage files
+// when the DB record is deleted before the storage file.
 func (r *BackupRepository) DeleteExpired(ctx context.Context) ([]uuid.UUID, error) {
-	// First get IDs of expired backups
 	selectQuery := `
-		SELECT id FROM backups 
+		SELECT id FROM backups
 		WHERE expires_at IS NOT NULL AND expires_at < NOW()`
 
 	rows, err := r.db.Query(ctx, selectQuery)
@@ -281,20 +283,6 @@ func (r *BackupRepository) DeleteExpired(ctx context.Context) ([]uuid.UUID, erro
 			continue
 		}
 		ids = append(ids, id)
-	}
-
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	// Delete expired backups
-	deleteQuery := `
-		DELETE FROM backups 
-		WHERE expires_at IS NOT NULL AND expires_at < NOW()`
-
-	_, err = r.db.Exec(ctx, deleteQuery)
-	if err != nil {
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to delete expired backups")
 	}
 
 	return ids, nil

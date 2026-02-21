@@ -15,28 +15,64 @@ import (
 // ============================================================================
 
 // getRealIP extracts the real client IP from the request.
-// It checks X-Forwarded-For and X-Real-IP headers before falling back to RemoteAddr.
+// It uses RemoteAddr as primary source, then checks X-Real-IP (typically set
+// by the closest reverse proxy) as a fallback. X-Forwarded-For is used last
+// and takes the rightmost non-private IP to mitigate client-side spoofing.
 func getRealIP(r *http.Request) string {
-	// Check X-Forwarded-For header (can contain multiple IPs)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the chain
-		if idx := strings.Index(xff, ","); idx > 0 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
+	// Primary: RemoteAddr is set by the HTTP server and is not client-spoofable
+	remoteIP := r.RemoteAddr
+	if ip, _, err := net.SplitHostPort(remoteIP); err == nil {
+		remoteIP = ip
 	}
 
-	// Check X-Real-IP header
+	// If behind a trusted reverse proxy, X-Real-IP is set by the proxy itself
 	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-		return xrip
+		return strings.TrimSpace(xrip)
 	}
 
-	// Fall back to RemoteAddr
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	// X-Forwarded-For: take the rightmost non-private IP (the one appended by
+	// the closest trusted proxy, not the leftmost client-controlled value)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := strings.TrimSpace(parts[i])
+			if ip != "" && !isPrivateIP(ip) {
+				return ip
+			}
+		}
+		// All IPs are private — use the rightmost one
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[len(parts)-1])
+		}
 	}
-	return ip
+
+	return remoteIP
+}
+
+// isPrivateIP checks if an IP string is in a private/reserved range.
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	privateRanges := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"127.0.0.0/8",
+		"::1/128",
+		"fc00::/7",
+	}
+	for _, cidr := range privateRanges {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // ============================================================================

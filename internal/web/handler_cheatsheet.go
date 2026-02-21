@@ -45,10 +45,15 @@ func (h *Handler) CheatSheet(w http.ResponseWriter, r *http.Request) {
 					if len(s.Path) > 11 { // len("cheatsheet/") = 11
 						category = s.Path[11:]
 					}
+					// Fetch full snippet to get Content (List returns lightweight items without it)
+					command := ""
+					if full, err := h.snippetRepo.Get(ctx, userID, s.ID); err == nil {
+						command = full.Content
+					}
 					customCmds = append(customCmds, toolspages.CustomCommand{
 						ID:          s.ID.String(),
 						Title:       s.Name,
-						Command:     "", // Content not included in list items
+						Command:     command,
 						Category:    category,
 						Description: ptrToString(s.Description),
 						CreatedAt:   s.UpdatedAt.Format("Jan 2, 2006"),

@@ -21,6 +21,7 @@ import (
 	"github.com/fr4nsys/usulnet/internal/api"
 	"github.com/fr4nsys/usulnet/internal/api/handlers"
 	"github.com/fr4nsys/usulnet/internal/api/middleware"
+	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 )
 
 const testJWTSecret = "test-secret-key-for-testing-purposes-only-minimum-32-chars"
@@ -38,7 +39,15 @@ func setupTestSuite(t *testing.T) *testSuite {
 	systemHandler := handlers.NewSystemHandler("test-version", "test-commit", "2026-01-01T00:00:00Z", nil)
 
 	h := &api.Handlers{
-		System: systemHandler,
+		System:    systemHandler,
+		WebSocket: handlers.NewWebSocketHandler(nil, logger.Nop()),
+		Container: handlers.NewContainerHandler(nil, logger.Nop()),
+		Image:     handlers.NewImageHandler(nil, logger.Nop()),
+		Volume:    handlers.NewVolumeHandler(nil, logger.Nop()),
+		Network:   handlers.NewNetworkHandler(nil, logger.Nop()),
+		Stack:     handlers.NewStackHandler(nil, logger.Nop()),
+		Backup:    handlers.NewBackupHandler(nil, logger.Nop()),
+		Proxy:     handlers.NewProxyHandler(nil, logger.Nop()),
 	}
 
 	config := api.RouterConfig{

@@ -138,8 +138,9 @@ templ ShortcutsList(data ShortcutsListData) {
 
 		<script>
 			function deleteShortcut(id) {
-				fetch('/connections/shortcuts/' + id, {
+			fetch('/connections/shortcuts/' + id, {
 					method: 'DELETE',
+				headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' },
 				}).then(response => {
 					if (response.ok) {
 						window.location.reload();
@@ -338,6 +339,7 @@ templ ShortcutNew(data ShortcutNewData) {
 							type="text"
 							name="icon"
 							x-show="iconType === 'fa'"
+							:disabled="iconType !== 'fa'"
 							placeholder="fa-globe, fa-server, fa-database..."
 							class="w-full px-4 py-2.5 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
 						/>
@@ -345,6 +347,7 @@ templ ShortcutNew(data ShortcutNewData) {
 							type="url"
 							name="icon"
 							x-show="iconType === 'url'"
+							:disabled="iconType !== 'url'"
 							placeholder="https://example.com/favicon.ico"
 							class="w-full px-4 py-2.5 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
 						/>
@@ -352,6 +355,7 @@ templ ShortcutNew(data ShortcutNewData) {
 							type="text"
 							name="icon"
 							x-show="iconType === 'emoji'"
+							:disabled="iconType !== 'emoji'"
 							placeholder="🚀"
 							class="w-full px-4 py-2.5 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
 						/>
@@ -534,6 +538,7 @@ templ ShortcutEdit(data ShortcutEditData) {
 							type="text"
 							name="icon"
 							x-show="iconType === 'fa'"
+							:disabled="iconType !== 'fa'"
 							value={ getIconValue(data.Shortcut.IconType, data.Shortcut.Icon, "fa") }
 							placeholder="fa-globe, fa-server, fa-database..."
 							class="w-full px-4 py-2.5 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
@@ -542,6 +547,7 @@ templ ShortcutEdit(data ShortcutEditData) {
 							type="url"
 							name="icon"
 							x-show="iconType === 'url'"
+							:disabled="iconType !== 'url'"
 							value={ getIconValue(data.Shortcut.IconType, data.Shortcut.Icon, "url") }
 							placeholder="https://example.com/favicon.ico"
 							class="w-full px-4 py-2.5 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
@@ -550,6 +556,7 @@ templ ShortcutEdit(data ShortcutEditData) {
 							type="text"
 							name="icon"
 							x-show="iconType === 'emoji'"
+							:disabled="iconType !== 'emoji'"
 							value={ getIconValue(data.Shortcut.IconType, data.Shortcut.Icon, "emoji") }
 							placeholder="🚀"
 							class="w-full px-4 py-2.5 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"

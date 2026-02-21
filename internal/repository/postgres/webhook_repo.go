@@ -140,10 +140,68 @@ func (r *OutgoingWebhookRepository) CreateDelivery(ctx context.Context, d *model
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO webhook_deliveries (id, webhook_id, event, payload, response_code, response_body, error, duration_ms, attempt, status, delivered_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		d.ID, d.WebhookID, d.Event, d.Payload, d.ResponseCode,
+		d.ID, d.WebhookID, d.Event, string(d.Payload), d.ResponseCode,
 		d.ResponseBody, d.Error, d.Duration, d.Attempt, d.Status, d.DeliveredAt,
 	)
 	return err
+}
+
+// UpdateDelivery updates a webhook delivery record (status, response, error, etc.).
+func (r *OutgoingWebhookRepository) UpdateDelivery(ctx context.Context, d *models.WebhookDelivery) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE webhook_deliveries SET
+			status=$2, response_code=$3, response_body=$4, error=$5,
+			duration_ms=$6, attempt=$7, delivered_at=$8
+		WHERE id=$1`,
+		d.ID, d.Status, d.ResponseCode, d.ResponseBody, d.Error,
+		d.Duration, d.Attempt, d.DeliveredAt,
+	)
+	return err
+}
+
+// GetDelivery retrieves a webhook delivery by ID.
+func (r *OutgoingWebhookRepository) GetDelivery(ctx context.Context, id uuid.UUID) (*models.WebhookDelivery, error) {
+	d := &models.WebhookDelivery{}
+	err := r.db.QueryRow(ctx, `
+		SELECT id, webhook_id, event, payload, response_code, response_body, error,
+			duration_ms, attempt, status, delivered_at, created_at
+		FROM webhook_deliveries WHERE id = $1`, id).Scan(
+		&d.ID, &d.WebhookID, &d.Event, &d.Payload, &d.ResponseCode,
+		&d.ResponseBody, &d.Error, &d.Duration, &d.Attempt, &d.Status, &d.DeliveredAt, &d.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// ListPendingDeliveries returns deliveries with "pending" status.
+func (r *OutgoingWebhookRepository) ListPendingDeliveries(ctx context.Context, limit int) ([]*models.WebhookDelivery, error) {
+	q := `SELECT id, webhook_id, event, payload, response_code, response_body, error,
+		duration_ms, attempt, status, delivered_at, created_at
+		FROM webhook_deliveries WHERE status = 'pending' ORDER BY created_at ASC`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := r.db.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var deliveries []*models.WebhookDelivery
+	for rows.Next() {
+		d := &models.WebhookDelivery{}
+		if err := rows.Scan(
+			&d.ID, &d.WebhookID, &d.Event, &d.Payload, &d.ResponseCode,
+			&d.ResponseBody, &d.Error, &d.Duration, &d.Attempt, &d.Status, &d.DeliveredAt, &d.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		deliveries = append(deliveries, d)
+	}
+	return deliveries, nil
 }
 
 // ListDeliveries returns webhook deliveries with filtering.
@@ -204,9 +262,15 @@ func (r *OutgoingWebhookRepository) ListDeliveries(ctx context.Context, opts mod
 	return deliveries, total, nil
 }
 
+// JobEnqueuer can enqueue background jobs for async processing.
+type JobEnqueuer interface {
+	EnqueueJob(ctx context.Context, input models.CreateJobInput) (*models.Job, error)
+}
+
 // WebhookDispatcher dispatches events to outgoing webhooks.
 type WebhookDispatcher struct {
-	repo *OutgoingWebhookRepository
+	repo      *OutgoingWebhookRepository
+	enqueuer  JobEnqueuer
 }
 
 // NewWebhookDispatcher creates a new webhook dispatcher.
@@ -214,7 +278,14 @@ func NewWebhookDispatcher(repo *OutgoingWebhookRepository) *WebhookDispatcher {
 	return &WebhookDispatcher{repo: repo}
 }
 
+// SetJobEnqueuer sets the job enqueuer for async dispatch.
+func (d *WebhookDispatcher) SetJobEnqueuer(enqueuer JobEnqueuer) {
+	d.enqueuer = enqueuer
+}
+
 // Dispatch sends an event to all matching enabled webhooks.
+// If a job enqueuer is configured, deliveries are processed asynchronously
+// via background workers. Otherwise, delivery records are created as pending.
 func (d *WebhookDispatcher) Dispatch(ctx context.Context, event string, payload interface{}) error {
 	webhooks, err := d.repo.ListEnabled(ctx, event)
 	if err != nil {
@@ -234,8 +305,28 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, event string, payload 
 			Attempt:   1,
 			Status:    "pending",
 		}
-		// Create delivery record — actual HTTP dispatch done asynchronously
-		d.repo.CreateDelivery(ctx, delivery)
+		// Create delivery record
+		if err := d.repo.CreateDelivery(ctx, delivery); err != nil {
+			continue
+		}
+
+		// Enqueue dispatch job if enqueuer is available
+		if d.enqueuer != nil {
+			deliveryIDStr := delivery.ID.String()
+			whName := wh.Name
+			jobInput := models.CreateJobInput{
+				Type:        models.JobTypeWebhookDispatch,
+				TargetID:    &deliveryIDStr,
+				TargetName:  &whName,
+				Payload: models.WebhookDispatchPayload{
+					DeliveryID: delivery.ID,
+					WebhookID:  wh.ID,
+				},
+				Priority:    models.JobPriorityHigh,
+				MaxAttempts: 1, // Retries are handled within the worker
+			}
+			d.enqueuer.EnqueueJob(ctx, jobInput)
+		}
 	}
 
 	return nil

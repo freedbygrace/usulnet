@@ -8,6 +8,7 @@ package host
 import (
 	"context"
 	cryptorand "crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -203,8 +204,23 @@ func (s *Service) initializeConnections(ctx context.Context) {
 				"host", host.Name,
 				"error", err,
 			)
-			// Mark as offline
-			_ = s.repo.SetOffline(ctx, host.ID, err.Error())
+			// Only mark agent-type hosts offline here. Local/socket/TCP hosts are
+			// reconnected automatically by GetClient on next use and by the
+			// healthCheckWorker. Calling SetOffline for local hosts would race with
+			// bootstrapLocalHost and could incorrectly mark the host offline,
+			// preventing the container event watcher from starting.
+			if host.EndpointType == models.EndpointAgent {
+				_ = s.repo.SetOffline(ctx, host.ID, err.Error())
+			}
+		} else {
+			// Sync Docker info (version, OS, memory, etc.) into the DB so the
+			// host list and cards show accurate data immediately on startup.
+			if err := s.syncDockerInfo(ctx, host); err != nil {
+				s.logger.Warn("failed to sync docker info on startup",
+					"host", host.Name,
+					"error", err,
+				)
+			}
 		}
 	}
 }
@@ -249,16 +265,20 @@ func (s *Service) performHealthChecks(ctx context.Context) {
 	// Check connectivity of all hosts in pool
 	results := s.clientPool.HealthCheck(ctx)
 	for hostID, err := range results {
+		id, _ := uuid.Parse(hostID)
+		if id == uuid.Nil {
+			continue
+		}
 		if err != nil {
 			s.logger.Warn("host health check failed",
 				"host_id", hostID,
 				"error", err,
 			)
-			// Update status in DB
-			id, _ := uuid.Parse(hostID)
-			if id != uuid.Nil {
-				_ = s.repo.SetOffline(ctx, id, err.Error())
-			}
+			_ = s.repo.SetOffline(ctx, id, err.Error())
+		} else {
+			// Ping succeeded: update last_seen_at and restore online status
+			// (covers recovery after a transient Docker failure)
+			_ = s.repo.UpdateStatus(ctx, id, string(models.HostStatusOnline), time.Now())
 		}
 	}
 }
@@ -359,7 +379,7 @@ func (s *Service) Create(ctx context.Context, input *models.CreateHostInput) (*m
 
 	// Create in database
 	if err := s.repo.CreateHost(ctx, host); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create host %q: %w", input.Name, err)
 	}
 
 	// Attempt to connect
@@ -437,7 +457,7 @@ func (s *Service) GetByName(ctx context.Context, name string) (*models.Host, err
 func (s *Service) Update(ctx context.Context, id uuid.UUID, input *models.UpdateHostInput) (*models.Host, error) {
 	host, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get host %s: %w", id, err)
 	}
 
 	// Apply updates
@@ -479,7 +499,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, input *models.Update
 
 	// Save to database
 	if err := s.repo.UpdateHost(ctx, host); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update host %s: %w", id, err)
 	}
 
 	// Reconnect if connection settings changed
@@ -506,7 +526,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, input *models.Update
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	host, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get host %s for delete: %w", id, err)
 	}
 
 	// Remove from connection pool
@@ -514,7 +534,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 
 	// Delete from database
 	if err := s.repo.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("delete host %s: %w", id, err)
 	}
 
 	s.logger.Info("host deleted", "id", id, "name", host.Name)
@@ -531,7 +551,7 @@ func (s *Service) GenerateAgentToken(ctx context.Context, hostID uuid.UUID) (str
 
 	host, err := s.repo.GetByID(ctx, hostID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get host %s: %w", hostID, err)
 	}
 	if host.EndpointType != models.EndpointAgent {
 		return "", apperrors.New(apperrors.CodeValidation, "agent tokens are only for agent-type hosts")
@@ -546,7 +566,7 @@ func (s *Service) GenerateAgentToken(ctx context.Context, hostID uuid.UUID) (str
 
 	// Store the bcrypt hash
 	if err := s.repo.SetAgentToken(ctx, hostID, token); err != nil {
-		return "", err
+		return "", fmt.Errorf("store agent token for host %s: %w", hostID, err)
 	}
 
 	s.logger.Info("agent token generated", "host_id", hostID, "host_name", host.Name)
@@ -559,7 +579,11 @@ func (s *Service) GenerateAgentToken(ctx context.Context, hostID uuid.UUID) (str
 
 // List retrieves hosts with pagination and filtering.
 func (s *Service) List(ctx context.Context, opts postgres.HostListOptions) ([]*models.Host, int64, error) {
-	if s.repo == nil {
+	s.mu.RLock()
+	repo := s.repo
+	s.mu.RUnlock()
+
+	if repo == nil {
 		// Standalone mode: return hosts from client pool
 		ids := s.clientPool.HostIDs()
 		hosts := make([]*models.Host, 0, len(ids))
@@ -576,7 +600,7 @@ func (s *Service) List(ctx context.Context, opts postgres.HostListOptions) ([]*m
 		}
 		return hosts, int64(len(hosts)), nil
 	}
-	return s.repo.ListWithOptions(ctx, opts)
+	return repo.ListWithOptions(ctx, opts)
 }
 
 // ListSummaries retrieves host summaries with metrics.
@@ -584,7 +608,7 @@ func (s *Service) ListSummaries(ctx context.Context) ([]*models.HostSummary, err
 	if s.repo != nil {
 		summaries, err := s.repo.GetHostSummaries(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get host summaries: %w", err)
 		}
 		// Enrich with live Docker data for online hosts
 		for _, summary := range summaries {
@@ -601,6 +625,7 @@ func (s *Service) ListSummaries(ctx context.Context) ([]*models.HostSummary, err
 			}
 			summary.ContainerCount = info.Containers
 			summary.RunningCount = info.ContainersRunning
+			summary.ImageCount = info.Images
 			if summary.DockerVersion == nil || *summary.DockerVersion == "" {
 				summary.DockerVersion = &info.ServerVersion
 			}
@@ -657,6 +682,7 @@ func (s *Service) ListSummaries(ctx context.Context) ([]*models.HostSummary, err
 			summary.Host.LastSeenAt = &now
 			summary.ContainerCount = info.Containers
 			summary.RunningCount = info.ContainersRunning
+			summary.ImageCount = info.Images
 			if info.Name != "" {
 				summary.Host.Name = info.Name
 				displayName := info.Name
@@ -796,7 +822,7 @@ func (s *Service) GetClient(ctx context.Context, hostID uuid.UUID) (docker.Clien
 	// Look up host to determine type
 	host, err := s.repo.GetByID(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get host %s: %w", hostID, err)
 	}
 
 	// For agent hosts, create a proxy client routed through NATS gateway
@@ -813,7 +839,7 @@ func (s *Service) GetClient(ctx context.Context, hostID uuid.UUID) (docker.Clien
 
 	// For direct hosts, connect normally
 	if err := s.connect(ctx, host); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("connect to host %s: %w", hostID, err)
 	}
 
 	client, _ := s.clientPool.Get(hostID.String())
@@ -824,7 +850,7 @@ func (s *Service) GetClient(ctx context.Context, hostID uuid.UUID) (docker.Clien
 func (s *Service) Reconnect(ctx context.Context, id uuid.UUID) error {
 	host, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get host %s: %w", id, err)
 	}
 
 	// Remove existing connection
@@ -836,7 +862,7 @@ func (s *Service) Reconnect(ctx context.Context, id uuid.UUID) error {
 	// Reconnect
 	if err := s.connect(ctx, host); err != nil {
 		_ = s.repo.SetError(ctx, id, err.Error())
-		return err
+		return fmt.Errorf("reconnect to host %s: %w", id, err)
 	}
 
 	// Sync Docker info
@@ -987,11 +1013,24 @@ func (s *Service) syncDockerInfo(ctx context.Context, host *models.Host) error {
 	return nil
 }
 
+// SyncDockerInfoForHost synchronizes Docker information for a host into the DB.
+// Used at startup to ensure the host record has accurate Docker version data.
+func (s *Service) SyncDockerInfoForHost(ctx context.Context, hostID uuid.UUID) error {
+	if s.repo == nil {
+		return nil // no DB in standalone mode
+	}
+	host, err := s.repo.GetByID(ctx, hostID)
+	if err != nil {
+		return fmt.Errorf("get host: %w", err)
+	}
+	return s.syncDockerInfo(ctx, host)
+}
+
 // GetDockerInfo retrieves current Docker info for a host.
 func (s *Service) GetDockerInfo(ctx context.Context, hostID uuid.UUID) (*models.HostDockerInfo, error) {
 	client, err := s.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	info, err := client.Info(ctx)
@@ -1012,7 +1051,7 @@ func (s *Service) SetMaintenance(ctx context.Context, id uuid.UUID, reason strin
 	s.clientPool.Remove(id.String())
 
 	if err := s.repo.SetMaintenance(ctx, id, reason); err != nil {
-		return err
+		return fmt.Errorf("set maintenance for host %s: %w", id, err)
 	}
 
 	s.logger.Info("host set to maintenance", "id", id, "reason", reason)
@@ -1023,13 +1062,13 @@ func (s *Service) SetMaintenance(ctx context.Context, id uuid.UUID, reason strin
 func (s *Service) ClearMaintenance(ctx context.Context, id uuid.UUID) error {
 	host, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get host %s: %w", id, err)
 	}
 
 	// Attempt to reconnect
 	if err := s.connect(ctx, host); err != nil {
 		_ = s.repo.SetError(ctx, id, err.Error())
-		return err
+		return fmt.Errorf("reconnect host %s after maintenance: %w", id, err)
 	}
 
 	// Sync Docker info
@@ -1070,7 +1109,7 @@ func (s *Service) RegisterAgent(ctx context.Context, reg *models.AgentRegistrati
 	if err == nil {
 		// Agent exists, validate token and update
 		tokenHash := crypto.HashToken(token)
-		if existingHost.AgentTokenHash != nil && *existingHost.AgentTokenHash != tokenHash {
+		if existingHost.AgentTokenHash != nil && subtle.ConstantTimeCompare([]byte(*existingHost.AgentTokenHash), []byte(tokenHash)) != 1 {
 			return nil, apperrors.Unauthorized("invalid agent token")
 		}
 
@@ -1126,7 +1165,7 @@ func (s *Service) RegisterAgent(ctx context.Context, reg *models.AgentRegistrati
 	}
 
 	if err := s.repo.CreateHost(ctx, host); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create agent host %q: %w", reg.HostName, err)
 	}
 
 	s.logger.Info("new agent registered",
@@ -1142,12 +1181,12 @@ func (s *Service) ProcessHeartbeat(ctx context.Context, heartbeat *models.AgentH
 	// Validate agent
 	host, err := s.repo.ValidateAgentToken(ctx, heartbeat.AgentID, tokenHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate agent token for %s: %w", heartbeat.AgentID, err)
 	}
 
 	// Update last seen
 	if err := s.repo.UpdateLastSeen(ctx, host.ID); err != nil {
-		return err
+		return fmt.Errorf("update last seen for host %s: %w", host.ID, err)
 	}
 
 	// Record metrics

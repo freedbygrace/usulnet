@@ -7,6 +7,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -252,7 +253,7 @@ func (h *Handler) sendMetricsSnapshot(ctx context.Context, conn *websocket.Conn,
 			Data: formatHostStats(hostMetrics),
 		}
 		if err := conn.WriteJSON(msg); err != nil {
-			return err
+			return fmt.Errorf("sendMetricsSnapshot: write host metrics: %w", err)
 		}
 	}
 
@@ -264,7 +265,7 @@ func (h *Handler) sendMetricsSnapshot(ctx context.Context, conn *websocket.Conn,
 			Data: formatContainerStats(containerMetrics),
 		}
 		if err := conn.WriteJSON(msg); err != nil {
-			return err
+			return fmt.Errorf("sendMetricsSnapshot: write container metrics: %w", err)
 		}
 	}
 

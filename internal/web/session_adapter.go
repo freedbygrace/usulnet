@@ -121,7 +121,7 @@ func (s *WebSessionStore) Save(r *http.Request, w http.ResponseWriter, session *
 
 	// Set cookie (Secure flag from config, falls back to TLS auto-detection)
 	http.SetCookie(w, &http.Cookie{
-		Name:     "usulnet_session",
+		Name:     CookieSession,
 		Value:    session.ID,
 		Path:     "/",
 		Domain:   s.cookie.Domain,

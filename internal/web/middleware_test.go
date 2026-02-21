@@ -97,16 +97,16 @@ func TestGetCSRFTokenFromContext(t *testing.T) {
 func TestGetStatsFromContext(t *testing.T) {
 	t.Run("returns stats when present", func(t *testing.T) {
 		stats := &GlobalStats{
-			ContainerCount: 10,
-			ImageCount:     20,
+			ContainersTotal: 10,
+			ImagesCount:     20,
 		}
 		ctx := context.WithValue(context.Background(), ContextKeyStats, stats)
 		got := GetStatsFromContext(ctx)
 		if got == nil {
 			t.Fatal("expected stats, got nil")
 		}
-		if got.ContainerCount != 10 {
-			t.Errorf("ContainerCount = %d, want 10", got.ContainerCount)
+		if got.ContainersTotal != 10 {
+			t.Errorf("ContainersTotal = %d, want 10", got.ContainersTotal)
 		}
 	})
 

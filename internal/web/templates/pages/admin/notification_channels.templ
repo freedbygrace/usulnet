@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"strings"
 	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
 )
 
@@ -35,6 +36,14 @@ func channelIcon(t string) string {
 		return "fab fa-telegram"
 	case "webhook":
 		return "fas fa-globe"
+	case "gotify":
+		return "fas fa-server"
+	case "ntfy":
+		return "fas fa-comment-dots"
+	case "pagerduty":
+		return "fas fa-pager"
+	case "opsgenie":
+		return "fas fa-eye"
 	default:
 		return "fas fa-bell"
 	}
@@ -53,14 +62,114 @@ func channelColor(t string) string {
 		return "text-cyan-400 bg-cyan-500/10"
 	case "webhook":
 		return "text-gray-400 bg-gray-500/10"
+	case "gotify":
+		return "text-green-400 bg-green-500/10"
+	case "ntfy":
+		return "text-yellow-400 bg-yellow-500/10"
+	case "pagerduty":
+		return "text-green-400 bg-green-500/10"
+	case "opsgenie":
+		return "text-blue-400 bg-blue-500/10"
 	default:
 		return "text-primary-400 bg-primary-500/10"
 	}
 }
 
+// getSetting retrieves a string setting value with a default.
+func getSetting(s map[string]interface{}, key string) string {
+	if s == nil {
+		return ""
+	}
+	if v, ok := s[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// getSettingBool retrieves a bool setting value.
+func getSettingBool(s map[string]interface{}, key string) bool {
+	if s == nil {
+		return false
+	}
+	if v, ok := s[key].(bool); ok {
+		return v
+	}
+	return false
+}
+
+// getSettingInt retrieves an int setting value as string for form fields.
+func getSettingInt(s map[string]interface{}, key string) string {
+	if s == nil {
+		return ""
+	}
+	if v, ok := s[key].(float64); ok {
+		return fmt.Sprintf("%d", int(v))
+	}
+	return ""
+}
+
+// getSettingSlice retrieves a string slice setting joined by comma.
+func getSettingSlice(s map[string]interface{}, key string) string {
+	if s == nil {
+		return ""
+	}
+	if v, ok := s[key].([]interface{}); ok {
+		var parts []string
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				parts = append(parts, str)
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+	return ""
+}
+
+// channelSummary returns a brief description of the channel config.
+func channelSummary(ch ChannelView) string {
+	switch ch.Type {
+	case "email":
+		host := getSetting(ch.Settings, "host")
+		to := getSettingSlice(ch.Settings, "to_addresses")
+		if host != "" && to != "" {
+			return host + " → " + to
+		}
+		if to != "" {
+			return to
+		}
+		return "Not configured"
+	case "slack":
+		if ch := getSetting(ch.Settings, "channel"); ch != "" {
+			return ch
+		}
+		return "Webhook configured"
+	case "discord":
+		return "Webhook configured"
+	case "telegram":
+		return getSettingSlice(ch.Settings, "chat_ids")
+	case "webhook":
+		return getSetting(ch.Settings, "url")
+	case "gotify":
+		return getSetting(ch.Settings, "server_url")
+	case "ntfy":
+		topic := getSetting(ch.Settings, "topic")
+		server := getSetting(ch.Settings, "server_url")
+		if server != "" {
+			return server + "/" + topic
+		}
+		return "ntfy.sh/" + topic
+	case "pagerduty":
+		return "Events API v2"
+	case "opsgenie":
+		return "Alerts API v2"
+	default:
+		return ch.Type
+	}
+}
+
 templ NotificationChannels(data NotificationChannelsData) {
 	@layouts.Base(data.PageData) {
-		<div class="space-y-6" x-data="notificationChannels()">
+		<div class="space-y-6" x-data={ notifChannelsInit(data) }>
 			<!-- Header -->
 			<div class="flex items-center justify-between">
 				<div>
@@ -71,7 +180,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 					<p class="text-gray-400 mt-1">Configure where notifications are sent</p>
 				</div>
 				<button
-					@click="showAddModal = true"
+					@click="openAdd()"
 					class="flex items-center gap-2 bg-primary-500 hover:bg-primary-600 text-black font-medium px-4 py-2 rounded-lg transition-colors"
 				>
 					<i class="fas fa-plus"></i>
@@ -87,7 +196,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 						<p class="text-lg">No notification channels configured</p>
 						<p class="text-sm mt-1">Add a channel to start receiving notifications</p>
 						<button
-							@click="showAddModal = true"
+							@click="openAdd()"
 							class="mt-4 flex items-center gap-2 bg-primary-500 hover:bg-primary-600 text-black font-medium px-4 py-2 rounded-lg transition-colors"
 						>
 							<i class="fas fa-plus"></i>
@@ -105,6 +214,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 									<div>
 										<div class="flex items-center gap-2">
 											<span class="font-medium text-white">{ ch.Name }</span>
+											<span class="text-xs text-gray-500 px-1.5 py-0.5 rounded bg-dark-600 capitalize">{ ch.Type }</span>
 											if ch.Enabled {
 												<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-500/10 text-green-400">
 													<i class="fas fa-check-circle text-[10px]"></i>
@@ -117,7 +227,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 												</span>
 											}
 										</div>
-										<p class="text-sm text-gray-500 capitalize">{ ch.Type }</p>
+										<p class="text-sm text-gray-500 mt-0.5">{ channelSummary(ch) }</p>
 									</div>
 								</div>
 								<div class="flex items-center gap-2">
@@ -128,13 +238,13 @@ templ NotificationChannels(data NotificationChannelsData) {
 									>
 										<i class="fas fa-paper-plane"></i>
 									</button>
-									<button
-										@click={ fmt.Sprintf("editChannel('%s')", ch.Name) }
+									<a
+										href={ templ.SafeURL(fmt.Sprintf("/admin/notifications/channels/%s/edit", ch.Name)) }
 										class="text-gray-400 hover:text-white transition-colors p-2"
 										title="Edit channel"
 									>
 										<i class="fas fa-edit"></i>
-									</button>
+									</a>
 									<form method="post" action={ templ.SafeURL(fmt.Sprintf("/admin/notifications/channels/%s/delete", ch.Name)) } class="inline">
 										<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 										<button
@@ -154,17 +264,24 @@ templ NotificationChannels(data NotificationChannelsData) {
 			</div>
 
 			<!-- Channel Type Cards (Quick Add) -->
-			<div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-				@channelTypeCard("email", "Email", "Send to one or more email addresses")
-				@channelTypeCard("slack", "Slack", "Post to a Slack channel via webhook")
-				@channelTypeCard("discord", "Discord", "Post to a Discord channel via webhook")
-				@channelTypeCard("telegram", "Telegram", "Send to a Telegram chat via bot")
-				@channelTypeCard("webhook", "Webhook", "POST to any HTTP endpoint")
+			<div>
+				<h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Quick Add</h3>
+				<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+					@channelTypeCard("email", "Email (SMTP)", "Send via SMTP server")
+					@channelTypeCard("slack", "Slack", "Post via webhook")
+					@channelTypeCard("discord", "Discord", "Post via webhook")
+					@channelTypeCard("telegram", "Telegram", "Send via bot API")
+					@channelTypeCard("webhook", "Webhook", "HTTP endpoint")
+					@channelTypeCard("gotify", "Gotify", "Self-hosted push")
+					@channelTypeCard("ntfy", "ntfy", "Push notifications")
+					@channelTypeCard("pagerduty", "PagerDuty", "Incident management")
+					@channelTypeCard("opsgenie", "Opsgenie", "Alert management")
+				</div>
 			</div>
 
-			<!-- Add Channel Modal -->
+			<!-- Add/Edit Channel Modal -->
 			<div
-				x-show="showAddModal"
+				x-show="showModal"
 				x-transition:enter="transition ease-out duration-200"
 				x-transition:enter-start="opacity-0"
 				x-transition:enter-end="opacity-100"
@@ -172,7 +289,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 				x-transition:leave-start="opacity-100"
 				x-transition:leave-end="opacity-0"
 				class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
-				@click.self="showAddModal = false"
+				@click.self="showModal = false"
 				x-cloak
 			>
 				<div
@@ -183,16 +300,17 @@ templ NotificationChannels(data NotificationChannelsData) {
 				>
 					<div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between">
 						<h3 class="text-lg font-medium text-white">
-							<i class="fas fa-plus mr-2 text-primary-400"></i>
-							Add Notification Channel
+							<i class="fas mr-2 text-primary-400" :class="editMode ? 'fa-edit' : 'fa-plus'"></i>
+							<span x-text="editMode ? 'Edit Channel' : 'Add Channel'"></span>
 						</h3>
-						<button @click="showAddModal = false" class="text-gray-400 hover:text-white">
+						<button @click="showModal = false" class="text-gray-400 hover:text-white">
 							<i class="fas fa-times"></i>
 						</button>
 					</div>
 
 					<form method="post" action="/admin/notifications/channels" class="p-6 space-y-4">
 						<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+						<input type="hidden" name="edit_mode" x-bind:value="editMode ? 'true' : 'false'"/>
 
 						<!-- Channel Type -->
 						<div>
@@ -202,14 +320,23 @@ templ NotificationChannels(data NotificationChannelsData) {
 								x-model="channelType"
 								class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5"
 								required
+								x-bind:disabled="editMode"
 							>
 								<option value="">Select a type...</option>
-								<option value="email">Email</option>
+								<option value="email">Email (SMTP)</option>
 								<option value="slack">Slack</option>
 								<option value="discord">Discord</option>
 								<option value="telegram">Telegram</option>
 								<option value="webhook">Webhook</option>
+								<option value="gotify">Gotify</option>
+								<option value="ntfy">ntfy</option>
+								<option value="pagerduty">PagerDuty</option>
+								<option value="opsgenie">Opsgenie</option>
 							</select>
+							<!-- Ensure type is submitted even when disabled -->
+							<template x-if="editMode">
+								<input type="hidden" name="type" x-bind:value="channelType"/>
+							</template>
 						</div>
 
 						<!-- Name -->
@@ -218,127 +345,229 @@ templ NotificationChannels(data NotificationChannelsData) {
 							<input
 								type="text"
 								name="name"
-								placeholder="e.g., Team Alerts"
+								x-model="channelName"
+								placeholder="e.g., team-alerts"
 								class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5"
 								required
+								x-bind:readonly="editMode"
+								maxlength="20"
 							/>
+							<p class="text-xs text-gray-600 mt-1">Max 20 characters, must be unique</p>
 						</div>
 
 						<!-- Email Settings -->
 						<template x-if="channelType === 'email'">
-							<div class="space-y-4">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">SMTP Configuration</p>
+								<div class="grid grid-cols-3 gap-3">
+									<div class="col-span-2">
+										<label class="block text-sm font-medium text-gray-400 mb-1">SMTP Host</label>
+										<input type="text" name="email_host" x-model="s.host" placeholder="smtp.example.com" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm" required/>
+									</div>
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1">Port</label>
+										<input type="number" name="email_port" x-model="s.port" placeholder="587" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
+									</div>
+								</div>
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1">Username</label>
+										<input type="text" name="email_username" x-model="s.username" placeholder="user@example.com" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
+									</div>
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1">Password</label>
+										<input type="password" name="email_password" x-model="s.password" placeholder="••••••••" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
+									</div>
+								</div>
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1">From Address</label>
+										<input type="email" name="email_from" x-model="s.from_address" placeholder="alerts@example.com" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm" required/>
+									</div>
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1">From Name</label>
+										<input type="text" name="email_from_name" x-model="s.from_name" placeholder="usulnet Alerts" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
+									</div>
+								</div>
+								<div class="flex items-center gap-6">
+									<label class="flex items-center gap-2 text-sm text-gray-300">
+										<input type="checkbox" name="email_tls" value="on" x-model="s.use_tls" class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
+										STARTTLS
+									</label>
+									<label class="flex items-center gap-2 text-sm text-gray-300">
+										<input type="checkbox" name="email_ssl" value="on" x-model="s.use_ssl" class="rounded border-dark-600 bg-dark-700 text-primary-500"/>
+										Implicit TLS (port 465)
+									</label>
+								</div>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Recipients (comma-separated)</label>
-									<input
-										type="text"
-										name="email_recipients"
-										placeholder="admin@example.com, ops@example.com"
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5"
-									/>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Recipients (comma-separated)</label>
+									<input type="text" name="email_recipients" x-model="s.to_addresses" placeholder="admin@example.com, ops@example.com" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm" required/>
 								</div>
 							</div>
 						</template>
 
 						<!-- Slack Settings -->
 						<template x-if="channelType === 'slack'">
-							<div class="space-y-4">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Slack Configuration</p>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Webhook URL</label>
-									<input
-										type="url"
-										name="slack_webhook"
-										placeholder="https://hooks.slack.com/services/..."
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5 font-mono text-sm"
-									/>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Webhook URL</label>
+									<input type="url" name="slack_webhook" x-model="s.webhook_url" placeholder="https://hooks.slack.com/services/..." class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
 								</div>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Channel (optional)</label>
-									<input
-										type="text"
-										name="slack_channel"
-										placeholder="#alerts"
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5"
-									/>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Channel (optional)</label>
+									<input type="text" name="slack_channel" x-model="s.channel" placeholder="#alerts" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
 								</div>
 							</div>
 						</template>
 
 						<!-- Discord Settings -->
 						<template x-if="channelType === 'discord'">
-							<div class="space-y-4">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Discord Configuration</p>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Webhook URL</label>
-									<input
-										type="url"
-										name="discord_webhook"
-										placeholder="https://discord.com/api/webhooks/..."
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5 font-mono text-sm"
-									/>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Webhook URL</label>
+									<input type="url" name="discord_webhook" x-model="s.webhook_url" placeholder="https://discord.com/api/webhooks/..." class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
 								</div>
 							</div>
 						</template>
 
 						<!-- Telegram Settings -->
 						<template x-if="channelType === 'telegram'">
-							<div class="space-y-4">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Telegram Configuration</p>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Bot Token</label>
-									<input
-										type="text"
-										name="telegram_token"
-										placeholder="123456:ABC-DEF..."
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5 font-mono text-sm"
-									/>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Bot Token</label>
+									<input type="text" name="telegram_token" x-model="s.bot_token" placeholder="123456:ABC-DEF..." class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
 								</div>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Chat ID</label>
-									<input
-										type="text"
-										name="telegram_chat_id"
-										placeholder="-1001234567890"
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5 font-mono"
-									/>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Chat ID</label>
+									<input type="text" name="telegram_chat_id" x-model="s.chat_ids" placeholder="-1001234567890" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
 								</div>
 							</div>
 						</template>
 
 						<!-- Webhook Settings -->
 						<template x-if="channelType === 'webhook'">
-							<div class="space-y-4">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Webhook Configuration</p>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">URL</label>
-									<input
-										type="url"
-										name="webhook_url"
-										placeholder="https://example.com/webhook"
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5 font-mono text-sm"
-									/>
+									<label class="block text-sm font-medium text-gray-400 mb-1">URL</label>
+									<input type="url" name="webhook_url" x-model="s.url" placeholder="https://example.com/webhook" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
+								</div>
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1">Method</label>
+										<select name="webhook_method" x-model="s.method" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm">
+											<option value="POST">POST</option>
+											<option value="PUT">PUT</option>
+										</select>
+									</div>
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1">Auth Type</label>
+										<select name="webhook_auth_type" x-model="s.auth_type" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm">
+											<option value="">None</option>
+											<option value="bearer">Bearer Token</option>
+											<option value="basic">Basic Auth</option>
+											<option value="hmac">HMAC Signature</option>
+										</select>
+									</div>
+								</div>
+								<template x-if="s.auth_type === 'bearer' || s.auth_type === 'hmac'">
+									<div>
+										<label class="block text-sm font-medium text-gray-400 mb-1" x-text="s.auth_type === 'hmac' ? 'HMAC Secret' : 'Bearer Token'"></label>
+										<input type="password" name="webhook_auth_token" x-model="s.auth_token" placeholder="Token or secret" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono"/>
+									</div>
+								</template>
+								<template x-if="s.auth_type === 'basic'">
+									<div class="grid grid-cols-2 gap-3">
+										<div>
+											<label class="block text-sm font-medium text-gray-400 mb-1">Username</label>
+											<input type="text" name="webhook_auth_username" x-model="s.auth_username" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
+										</div>
+										<div>
+											<label class="block text-sm font-medium text-gray-400 mb-1">Password</label>
+											<input type="password" name="webhook_auth_password" x-model="s.auth_password" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
+										</div>
+									</div>
+								</template>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Custom Headers (JSON, optional)</label>
+									<textarea name="webhook_headers" x-model="s.headers_json" placeholder='{"X-Custom": "value"}' rows="2" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono"></textarea>
+								</div>
+							</div>
+						</template>
+
+						<!-- Gotify Settings -->
+						<template x-if="channelType === 'gotify'">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Gotify Configuration</p>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Server URL</label>
+									<input type="url" name="gotify_server_url" x-model="s.server_url" placeholder="https://gotify.example.com" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
 								</div>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Method</label>
-									<select name="webhook_method" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5">
-										<option value="POST">POST</option>
-										<option value="PUT">PUT</option>
-									</select>
+									<label class="block text-sm font-medium text-gray-400 mb-1">App Token</label>
+									<input type="password" name="gotify_app_token" x-model="s.app_token" placeholder="A..." class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
+								</div>
+							</div>
+						</template>
+
+						<!-- ntfy Settings -->
+						<template x-if="channelType === 'ntfy'">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">ntfy Configuration</p>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Server URL (optional, default: ntfy.sh)</label>
+									<input type="url" name="ntfy_server_url" x-model="s.server_url" placeholder="https://ntfy.sh" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono"/>
 								</div>
 								<div>
-									<label class="block text-sm font-medium text-gray-400 mb-2">Headers (JSON, optional)</label>
-									<textarea
-										name="webhook_headers"
-										placeholder='{"Authorization": "Bearer token"}'
-										rows="2"
-										class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5 font-mono text-sm"
-									></textarea>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Topic</label>
+									<input type="text" name="ntfy_topic" x-model="s.topic" placeholder="usulnet-alerts" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm" required/>
+								</div>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Access Token (optional)</label>
+									<input type="password" name="ntfy_access_token" x-model="s.access_token" placeholder="tk_..." class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono"/>
+								</div>
+							</div>
+						</template>
+
+						<!-- PagerDuty Settings -->
+						<template x-if="channelType === 'pagerduty'">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">PagerDuty Configuration</p>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Integration/Routing Key</label>
+									<input type="password" name="pagerduty_routing_key" x-model="s.routing_key" placeholder="Events API v2 integration key" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
+								</div>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">Component (optional)</label>
+									<input type="text" name="pagerduty_component" x-model="s.component" placeholder="usulnet" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm"/>
+								</div>
+							</div>
+						</template>
+
+						<!-- Opsgenie Settings -->
+						<template x-if="channelType === 'opsgenie'">
+							<div class="space-y-4 border-t border-dark-700 pt-4">
+								<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Opsgenie Configuration</p>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">API Key (GenieKey)</label>
+									<input type="password" name="opsgenie_api_key" x-model="s.api_key" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono" required/>
+								</div>
+								<div>
+									<label class="block text-sm font-medium text-gray-400 mb-1">API Base URL (optional, for EU)</label>
+									<input type="url" name="opsgenie_api_base_url" x-model="s.api_base_url" placeholder="https://api.eu.opsgenie.com" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm font-mono"/>
 								</div>
 							</div>
 						</template>
 
 						<!-- Min Priority -->
-						<div>
+						<div class="border-t border-dark-700 pt-4">
 							<label class="block text-sm font-medium text-gray-400 mb-2">Minimum Priority</label>
-							<select name="min_priority" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5">
+							<select name="min_priority" x-model="minPriority" class="w-full bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2.5">
 								<option value="0">Low (all notifications)</option>
-								<option value="1" selected>Normal</option>
+								<option value="1">Normal</option>
 								<option value="2">High</option>
 								<option value="3">Critical only</option>
 							</select>
@@ -351,7 +580,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 								id="enabled"
 								name="enabled"
 								value="true"
-								checked
+								x-model="channelEnabled"
 								class="rounded border-dark-600 bg-dark-700 text-primary-500"
 							/>
 							<label for="enabled" class="text-sm text-gray-300">Enable this channel</label>
@@ -360,7 +589,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 						<div class="flex justify-end gap-3 pt-4">
 							<button
 								type="button"
-								@click="showAddModal = false"
+								@click="showModal = false"
 								class="px-4 py-2 text-gray-400 hover:text-white transition-colors"
 							>
 								Cancel
@@ -370,7 +599,7 @@ templ NotificationChannels(data NotificationChannelsData) {
 								class="flex items-center gap-2 bg-primary-500 hover:bg-primary-600 text-black font-medium px-4 py-2 rounded-lg transition-colors"
 							>
 								<i class="fas fa-save"></i>
-								Save Channel
+								<span x-text="editMode ? 'Update Channel' : 'Save Channel'"></span>
 							</button>
 						</div>
 					</form>
@@ -398,24 +627,39 @@ templ NotificationChannels(data NotificationChannelsData) {
 		</div>
 
 		<script>
-			function notificationChannels() {
+			function notificationChannels(initType, initName, initSettings, initPriority, initEnabled) {
 				return {
-					showAddModal: false,
-					channelType: '',
+					showModal: initType !== '',
+					editMode: initType !== '',
+					channelType: initType || '',
+					channelName: initName || '',
+					channelEnabled: initEnabled !== undefined ? initEnabled : true,
+					minPriority: initPriority || '1',
+					s: initSettings || {},
 					testResult: null,
+
+					openAdd(type) {
+						this.editMode = false;
+						this.channelType = type || '';
+						this.channelName = '';
+						this.channelEnabled = true;
+						this.minPriority = '1';
+						this.s = {};
+						this.showModal = true;
+					},
 
 					async testChannel(name) {
 						try {
-							const resp = await fetch(`/admin/notifications/channels/${encodeURIComponent(name)}/test`, {
+							const resp = await fetch('/admin/notifications/channels/' + encodeURIComponent(name) + '/test', {
 								method: 'POST',
 								headers: {
-									'X-CSRF-Token': document.querySelector('input[name="csrf_token"]')?.value || ''
+									'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
 								}
 							});
 							const data = await resp.json();
 							this.testResult = {
 								success: data.success,
-								message: data.success ? `Test sent to ${name}` : (data.error || 'Test failed')
+								message: data.success ? 'Test sent to ' + name : (data.error || 'Test failed')
 							};
 							setTimeout(() => this.testResult = null, 5000);
 						} catch (err) {
@@ -425,11 +669,6 @@ templ NotificationChannels(data NotificationChannelsData) {
 							};
 							setTimeout(() => this.testResult = null, 5000);
 						}
-					},
-
-					editChannel(name) {
-						// For now, redirect to edit page
-						window.location.href = `/admin/notifications/channels/${encodeURIComponent(name)}/edit`;
 					}
 				};
 			}
@@ -437,15 +676,63 @@ templ NotificationChannels(data NotificationChannelsData) {
 	}
 }
 
+// notifChannelsInit builds the Alpine x-data initializer with edit channel data if present.
+func notifChannelsInit(data NotificationChannelsData) string {
+	if data.EditChannel != nil {
+		ch := data.EditChannel
+		return fmt.Sprintf(`notificationChannels('%s', '%s', %s, '%s', %t)`,
+			escJS(ch.Type), escJS(ch.Name), settingsToJS(ch.Settings), ch.MinPriority, ch.Enabled)
+	}
+	return "notificationChannels('', '', {}, '1', true)"
+}
+
+// escJS escapes a string for safe embedding in JS.
+func escJS(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return s
+}
+
+// settingsToJS converts settings map to a JS object literal string.
+func settingsToJS(s map[string]interface{}) string {
+	if s == nil || len(s) == 0 {
+		return "{}"
+	}
+	var parts []string
+	for k, v := range s {
+		switch val := v.(type) {
+		case string:
+			parts = append(parts, fmt.Sprintf("'%s': '%s'", escJS(k), escJS(val)))
+		case bool:
+			if val {
+				parts = append(parts, fmt.Sprintf("'%s': true", escJS(k)))
+			} else {
+				parts = append(parts, fmt.Sprintf("'%s': false", escJS(k)))
+			}
+		case float64:
+			parts = append(parts, fmt.Sprintf("'%s': %d", escJS(k), int(val)))
+		case []interface{}:
+			var items []string
+			for _, item := range val {
+				if str, ok := item.(string); ok {
+					items = append(items, str)
+				}
+			}
+			parts = append(parts, fmt.Sprintf("'%s': '%s'", escJS(k), escJS(strings.Join(items, ", "))))
+		}
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
 templ channelTypeCard(channelType string, name string, description string) {
 	<button
-		@click={ fmt.Sprintf("channelType = '%s'; showAddModal = true", channelType) }
+		@click={ fmt.Sprintf("openAdd('%s')", channelType) }
 		class="bg-dark-800 border border-dark-700 rounded-xl p-4 text-left hover:border-primary-500/50 transition-colors group"
 	>
 		<div class={ "w-10 h-10 rounded-lg flex items-center justify-center mb-3", channelColor(channelType) }>
 			<i class={ channelIcon(channelType), "group-hover:scale-110 transition-transform" }></i>
 		</div>
-		<h4 class="font-medium text-white">{ name }</h4>
+		<h4 class="font-medium text-white text-sm">{ name }</h4>
 		<p class="text-xs text-gray-500 mt-1">{ description }</p>
 	</button>
 }

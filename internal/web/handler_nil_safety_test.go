@@ -175,14 +175,6 @@ func TestProxyExtHandlers_NilService(t *testing.T) {
 func TestAutoUpdateHandlers_NilService(t *testing.T) {
 	h := newTestHandler()
 
-	t.Run("AutoUpdatePoliciesTempl_no_panic", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		req := requestWithChi("GET", "/updates/policies", nil)
-		assertNoPanic(t, "AutoUpdatePoliciesTempl", func() {
-			h.AutoUpdatePoliciesTempl(rec, req)
-		})
-	})
-
 	t.Run("AutoUpdatePolicyCreate_redirects_on_nil", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := requestWithForm("/updates/policies", "container_id=test&container_name=test", nil)

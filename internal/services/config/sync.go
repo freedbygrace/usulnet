@@ -22,20 +22,20 @@ import (
 
 // SyncService handles configuration synchronization to containers
 type SyncService struct {
-	variableRepo *postgres.ConfigVariableRepository
-	templateRepo *postgres.ConfigTemplateRepository
-	syncRepo     *postgres.ConfigSyncRepository
-	auditRepo    *postgres.ConfigAuditRepository
+	variableRepo VariableStore
+	templateRepo TemplateStore
+	syncRepo     SyncStore
+	auditRepo    AuditStore
 	interpolator *Interpolator
 	logger       *logger.Logger
 }
 
 // NewSyncService creates a new SyncService
 func NewSyncService(
-	variableRepo *postgres.ConfigVariableRepository,
-	templateRepo *postgres.ConfigTemplateRepository,
-	syncRepo *postgres.ConfigSyncRepository,
-	auditRepo *postgres.ConfigAuditRepository,
+	variableRepo VariableStore,
+	templateRepo TemplateStore,
+	syncRepo SyncStore,
+	auditRepo AuditStore,
 	log *logger.Logger,
 ) *SyncService {
 	return &SyncService{

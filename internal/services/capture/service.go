@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,7 +58,8 @@ type Service struct {
 }
 
 // NewService creates a new capture service.
-func NewService(repo CaptureRepository, log *logger.Logger) *Service {
+// captureDir is the base directory for storing capture files.
+func NewService(repo CaptureRepository, captureDir string, log *logger.Logger) *Service {
 	// Find tcpdump binary
 	tcpdumpPath, err := exec.LookPath("tcpdump")
 	if err != nil {
@@ -66,8 +68,7 @@ func NewService(repo CaptureRepository, log *logger.Logger) *Service {
 	}
 
 	// Create capture directory
-	captureDir := "/tmp/usulnet/captures"
-	os.MkdirAll(captureDir, 0750)
+	os.MkdirAll(captureDir, 0750) //nolint:errcheck // best-effort directory creation
 
 	return &Service{
 		repo:       repo,
@@ -306,7 +307,7 @@ func (s *Service) DeleteCapture(ctx context.Context, id uuid.UUID) error {
 	// Get capture to find file path
 	capture, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get capture for delete: %w", err)
 	}
 
 	// Delete PCAP file
@@ -333,6 +334,250 @@ func (s *Service) GetPcapPath(ctx context.Context, id uuid.UUID) (string, error)
 	}
 
 	return capture.FilePath, nil
+}
+
+// AnalyzeCapture reads a completed PCAP file using tcpdump and returns
+// aggregated traffic analysis including top talkers, protocols, and connections.
+func (s *Service) AnalyzeCapture(ctx context.Context, id uuid.UUID) (*models.CaptureAnalysis, error) {
+	if s.tcpdump == "" {
+		return nil, errors.New(errors.CodeInternal, "tcpdump is not installed on this system")
+	}
+
+	capture, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if capture.Status == models.CaptureStatusRunning {
+		return nil, errors.New(errors.CodeBadRequest, "cannot analyze a running capture; stop it first")
+	}
+
+	pcapFile := filepath.Join(s.captureDir, capture.ID.String()+".pcap")
+	if _, err := os.Stat(pcapFile); os.IsNotExist(err) {
+		// Fall back to the stored file path
+		pcapFile = capture.FilePath
+		if _, err := os.Stat(pcapFile); os.IsNotExist(err) {
+			return nil, errors.NotFound("PCAP file")
+		}
+	}
+
+	// Run tcpdump with a 30-second timeout
+	analyzeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(analyzeCtx, s.tcpdump, "-r", pcapFile, "-n", "-q")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, errors.Wrap(err, errors.CodeInternal, "failed to run tcpdump analysis")
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+	// Aggregation maps
+	type ipStats struct {
+		packetsSrc int
+		packetsDst int
+	}
+	type connKey struct {
+		src      string
+		dst      string
+		protocol string
+	}
+
+	ipMap := make(map[string]*ipStats)
+	protoMap := make(map[string]int)
+	connMap := make(map[connKey]int)
+
+	var totalPackets int
+	var totalBytes int64
+	var firstTimestamp, lastTimestamp string
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		// Minimum expected: timestamp protocol src > dst: transport [bytes]
+		if len(fields) < 5 {
+			continue
+		}
+
+		totalPackets++
+
+		// Extract timestamp
+		timestamp := fields[0]
+		if firstTimestamp == "" {
+			firstTimestamp = timestamp
+		}
+		lastTimestamp = timestamp
+
+		// fields[1] is the link-layer protocol (IP, IP6, ARP, etc.)
+		linkProto := fields[1]
+
+		// Extract source address — field[2], strip trailing dot+port
+		srcRaw := fields[2]
+		srcAddr, srcFull := parseAddress(srcRaw)
+
+		// fields[3] should be ">"
+		if fields[3] != ">" {
+			continue
+		}
+
+		// Extract destination — field[4], strip trailing colon
+		dstRaw := strings.TrimSuffix(fields[4], ":")
+		dstAddr, dstFull := parseAddress(dstRaw)
+
+		// Determine transport protocol from field[5] if present, or fall back to link proto
+		transport := linkProto
+		if len(fields) > 5 {
+			tp := strings.TrimSuffix(strings.ToLower(fields[5]), ":")
+			switch tp {
+			case "tcp", "udp", "icmp", "icmp6":
+				transport = tp
+			}
+		}
+
+		// Try to extract byte count from the last numeric field
+		if len(fields) > 5 {
+			if n, e := strconv.ParseInt(fields[len(fields)-1], 10, 64); e == nil {
+				totalBytes += n
+			}
+		}
+
+		// Aggregate IP stats
+		if srcAddr != "" {
+			if _, ok := ipMap[srcAddr]; !ok {
+				ipMap[srcAddr] = &ipStats{}
+			}
+			ipMap[srcAddr].packetsSrc++
+		}
+		if dstAddr != "" {
+			if _, ok := ipMap[dstAddr]; !ok {
+				ipMap[dstAddr] = &ipStats{}
+			}
+			ipMap[dstAddr].packetsDst++
+		}
+
+		// Aggregate protocol stats
+		protoMap[transport]++
+
+		// Aggregate connection stats
+		if srcFull != "" && dstFull != "" {
+			ck := connKey{src: srcFull, dst: dstFull, protocol: transport}
+			connMap[ck]++
+		}
+	}
+
+	// Build TopTalkers — sorted by total packets descending, limit 20
+	topTalkers := make([]models.TrafficEntry, 0, len(ipMap))
+	for addr, stats := range ipMap {
+		topTalkers = append(topTalkers, models.TrafficEntry{
+			Address:    addr,
+			PacketsSrc: stats.packetsSrc,
+			PacketsDst: stats.packetsDst,
+			TotalPkts:  stats.packetsSrc + stats.packetsDst,
+		})
+	}
+	sort.Slice(topTalkers, func(i, j int) bool {
+		return topTalkers[i].TotalPkts > topTalkers[j].TotalPkts
+	})
+	if len(topTalkers) > 20 {
+		topTalkers = topTalkers[:20]
+	}
+
+	// Build Protocols — sorted by count descending, with percent
+	protocols := make([]models.ProtocolStat, 0, len(protoMap))
+	for proto, count := range protoMap {
+		pct := 0.0
+		if totalPackets > 0 {
+			pct = float64(count) / float64(totalPackets) * 100
+		}
+		protocols = append(protocols, models.ProtocolStat{
+			Protocol: proto,
+			Count:    count,
+			Percent:  pct,
+		})
+	}
+	sort.Slice(protocols, func(i, j int) bool {
+		return protocols[i].Count > protocols[j].Count
+	})
+
+	// Build Connections — sorted by packet count descending, limit 50
+	connections := make([]models.ConnectionInfo, 0, len(connMap))
+	for ck, count := range connMap {
+		connections = append(connections, models.ConnectionInfo{
+			Source:      ck.src,
+			Destination: ck.dst,
+			Protocol:    ck.protocol,
+			Packets:     count,
+		})
+	}
+	sort.Slice(connections, func(i, j int) bool {
+		return connections[i].Packets > connections[j].Packets
+	})
+	if len(connections) > 50 {
+		connections = connections[:50]
+	}
+
+	// Compute duration string from first/last timestamps
+	duration := ""
+	if firstTimestamp != "" && lastTimestamp != "" {
+		duration = firstTimestamp + " - " + lastTimestamp
+	}
+
+	analysis := &models.CaptureAnalysis{
+		TotalPackets:  totalPackets,
+		TotalBytes:    totalBytes,
+		Duration:      duration,
+		TopTalkers:    topTalkers,
+		Protocols:     protocols,
+		Connections:   connections,
+		FirstPacketAt: firstTimestamp,
+		LastPacketAt:  lastTimestamp,
+	}
+
+	s.logger.Info("capture analysis completed",
+		"id", id,
+		"total_packets", totalPackets,
+		"total_bytes", totalBytes,
+		"top_talkers", len(topTalkers),
+		"protocols", len(protocols),
+		"connections", len(connections),
+	)
+
+	return analysis, nil
+}
+
+// parseAddress extracts the IP address and the full address:port string
+// from a tcpdump address field like "192.168.1.1.443" or "10.0.0.1.52341".
+// For IPv6, the format differs (e.g., "2001:db8::1.443"), but we handle
+// the common IPv4 case where the last dot-separated component is the port.
+func parseAddress(raw string) (ip string, full string) {
+	raw = strings.TrimSuffix(raw, ":")
+	raw = strings.TrimSuffix(raw, ",")
+	if raw == "" {
+		return "", ""
+	}
+
+	// IPv4: the address looks like "A.B.C.D.port"
+	// We need to find the last dot that separates IP from port.
+	lastDot := strings.LastIndex(raw, ".")
+	if lastDot < 0 {
+		// No dot at all — treat the whole thing as an address
+		return raw, raw
+	}
+
+	possiblePort := raw[lastDot+1:]
+	possibleIP := raw[:lastDot]
+
+	// Verify the part after the last dot looks like a port number
+	if _, err := strconv.Atoi(possiblePort); err == nil && possibleIP != "" {
+		return possibleIP, possibleIP + ":" + possiblePort
+	}
+
+	// Not a port — the whole string is the address (e.g., IPv6 or protocol name)
+	return raw, raw
 }
 
 // Cleanup stops all running captures. Called during shutdown.

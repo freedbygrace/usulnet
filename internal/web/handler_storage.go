@@ -6,7 +6,6 @@ package web
 
 import (
 	"io"
-	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -294,6 +293,58 @@ func (h *Handler) StorageCreateConnection(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/storage", http.StatusSeeOther)
 }
 
+// StorageUpdateConnection handles POST /storage/{connID}/update.
+func (h *Handler) StorageUpdateConnection(w http.ResponseWriter, r *http.Request) {
+	svc := h.services.Storage()
+	if svc == nil {
+		http.Error(w, "Storage not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	connID := chi.URLParam(r, "connID")
+	userID := h.getCurrentUsername(r)
+
+	// Read form values — nil pointers mean "don't change this field"
+	var name, endpoint, region, accessKey, secretKey *string
+	var usePathStyle, useSSL, isDefault *bool
+
+	if v := r.FormValue("name"); v != "" {
+		name = &v
+	}
+	if v := r.FormValue("endpoint"); v != "" {
+		endpoint = &v
+	}
+	if v := r.FormValue("region"); v != "" {
+		region = &v
+	}
+	if v := r.FormValue("access_key"); v != "" {
+		accessKey = &v
+	}
+	if v := r.FormValue("secret_key"); v != "" {
+		secretKey = &v
+	}
+	if r.FormValue("use_path_style") != "" {
+		b := r.FormValue("use_path_style") == "on"
+		usePathStyle = &b
+	}
+	if r.FormValue("use_ssl") != "" {
+		b := r.FormValue("use_ssl") == "on"
+		useSSL = &b
+	}
+	if r.FormValue("is_default") != "" {
+		b := r.FormValue("is_default") == "on"
+		isDefault = &b
+	}
+
+	if err := svc.UpdateConnection(r.Context(), connID, name, endpoint, region, accessKey, secretKey, usePathStyle, useSSL, isDefault, userID); err != nil {
+		h.setFlash(w, r, "error", "Failed to update connection: "+err.Error())
+	} else {
+		h.setFlash(w, r, "success", "Connection updated successfully")
+	}
+
+	http.Redirect(w, r, "/storage", http.StatusSeeOther)
+}
+
 // StorageDeleteConnection handles POST /storage/{connID}/delete.
 func (h *Handler) StorageDeleteConnection(w http.ResponseWriter, r *http.Request) {
 	svc := h.services.Storage()
@@ -555,14 +606,17 @@ func (h *Handler) getCurrentUsername(r *http.Request) string {
 
 // setFlash stores a flash message in the session for the next request.
 func (h *Handler) setFlash(w http.ResponseWriter, r *http.Request, msgType, message string) {
-	session, _ := h.sessionStore.Get(r, "usulnet_session")
+	if h.sessionStore == nil {
+		return
+	}
+	session, _ := h.sessionStore.Get(r, CookieSession)
 	if session != nil {
 		session.Values["flash"] = &FlashMessage{
 			Type:    msgType,
 			Message: message,
 		}
 		if err := h.sessionStore.Save(r, w, session); err != nil {
-			slog.Warn("failed to save flash message to session", "error", err)
+			h.logger.Warn("failed to save flash message to session", "error", err)
 		}
 	}
 }

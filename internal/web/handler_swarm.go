@@ -316,15 +316,22 @@ func (h *Handler) SwarmConvertContainerTempl(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/swarm", http.StatusSeeOther)
 }
 
-// resolveHostID gets the current active host UUID from context.
+// resolveHostID gets the current active host UUID from context or query parameter.
 func (h *Handler) resolveHostID(r *http.Request) uuid.UUID {
-	// Check if there's a host_id in the context (from middleware or session)
+	// First check explicit query parameter
 	if hostIDStr := r.URL.Query().Get("host_id"); hostIDStr != "" {
 		if id, err := uuid.Parse(hostIDStr); err == nil {
 			return id
 		}
 	}
 
-	// Default to local host
+	// Check session-based active host (set by host selector in the UI)
+	if activeHostID := GetActiveHostIDFromContext(r.Context()); activeHostID != "" {
+		if id, err := uuid.Parse(activeHostID); err == nil {
+			return id
+		}
+	}
+
+	// Default to local host sentinel
 	return uuid.MustParse("00000000-0000-0000-0000-000000000001")
 }

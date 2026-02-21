@@ -16,7 +16,6 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/models"
-	configservice "github.com/fr4nsys/usulnet/internal/services/config"
 )
 
 // ============================================================================
@@ -190,15 +189,6 @@ func mergeEnv(oldEnv []string, newEnv map[string]string, removeEnv []string) []s
 	return result
 }
 
-// ============================================================================
-// Config Service Integration
-// ============================================================================
-
-// SetConfigService sets the config service for variable synchronization.
-func (s *Service) SetConfigService(configSvc *configservice.Service) {
-	s.configService = configSvc
-}
-
 // SyncConfigToContainer applies config variables to a container.
 func (s *Service) SyncConfigToContainer(ctx context.Context, hostID uuid.UUID, containerID string, variables []*models.ConfigVariable) error {
 	if len(variables) == 0 {
@@ -216,7 +206,10 @@ func (s *Service) SyncConfigToContainer(ctx context.Context, hostID uuid.UUID, c
 		PreserveNetworks: true,
 		RemoveOld:        true,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("sync config to container %s: %w", containerID, err)
+	}
+	return nil
 }
 
 // GetContainerEnv retrieves environment variables from a container.

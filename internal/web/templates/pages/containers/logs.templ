@@ -249,6 +249,8 @@ templ ContainerLogs(data ContainerLogsData) {
 					containerId: '',
 					_initialized: false,
 					_destroyed: false,
+					_reconnectAttempts: 0,
+					_maxReconnectAttempts: 5,
 					severityFilters: {
 						error: true,
 						warn: true,
@@ -344,6 +346,7 @@ templ ContainerLogs(data ContainerLogsData) {
 						this.ws = new WebSocket(url);
 
 						this.ws.onopen = () => {
+							this._reconnectAttempts = 0;
 							this.connected = true;
 							this.loading = false;
 						};
@@ -390,11 +393,14 @@ templ ContainerLogs(data ContainerLogsData) {
 							}
 						};
 
-						this.ws.onclose = () => {
+						this.ws.onclose = (e) => {
 							this.connected = false;
-							if (!this._destroyed) {
-								setTimeout(() => this.connect(), 3000);
-							}
+							if (this._destroyed) return;
+							if (e.code === 1000 || e.code === 1001) return;
+							if (this._reconnectAttempts >= this._maxReconnectAttempts) return;
+							const delay = Math.min(30000, 1000 * Math.pow(2, this._reconnectAttempts));
+							this._reconnectAttempts++;
+							setTimeout(() => this.connect(), delay);
 						};
 
 						this.ws.onerror = () => {

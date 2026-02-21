@@ -53,7 +53,7 @@ func (h *Handler) ImageDetailTempl(w http.ResponseWriter, r *http.Request) {
 	// Populate container names that use this image
 	if image.Containers > 0 {
 		if cSvc := h.services.Containers(); cSvc != nil {
-			if containers, err := cSvc.List(ctx, nil); err == nil {
+			if containers, _, err := cSvc.List(ctx, nil); err == nil {
 				for _, c := range containers {
 					match := c.Image == image.PrimaryTag
 					if !match {
@@ -121,14 +121,26 @@ func (h *Handler) VolumeDetailTempl(w http.ResponseWriter, r *http.Request) {
 		SizeHuman:  volume.SizeHuman,
 	}
 
-	// Convert UsedBy to container list with real state lookup
+	// Convert UsedBy to container list with real state lookup.
+	// volume.UsedBy contains container names, not IDs. List all containers
+	// once and match by name rather than calling Get(id) which expects an ID.
 	containerSvc := h.services.Containers()
+	var allContainers []ContainerView
+	if containerSvc != nil {
+		allContainers, _, _ = containerSvc.List(ctx, nil)
+	}
+	containerStateByName := make(map[string]string, len(allContainers))
+	for _, c := range allContainers {
+		cName := c.Name
+		if len(cName) > 0 && cName[0] == '/' {
+			cName = cName[1:]
+		}
+		containerStateByName[cName] = c.State
+	}
 	for _, containerName := range volume.UsedBy {
 		state := "attached"
-		if containerSvc != nil {
-			if c, err := containerSvc.Get(ctx, containerName); err == nil && c != nil {
-				state = c.State
-			}
+		if s, ok := containerStateByName[containerName]; ok {
+			state = s
 		}
 		volData.Containers = append(volData.Containers, volumes.VolumeContainer{
 			Name:      containerName,
@@ -270,7 +282,7 @@ func (h *Handler) getStatsData(ctx context.Context) *layouts.StatsData {
 	}
 
 	// Get container counts
-	if containers, err := h.services.Containers().List(ctx, nil); err == nil {
+	if containers, _, err := h.services.Containers().List(ctx, nil); err == nil {
 		stats.ContainersTotal = len(containers)
 		for _, c := range containers {
 			if c.State == "running" {

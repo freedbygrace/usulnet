@@ -33,9 +33,20 @@ const (
 	ResourceTypeSecurity  = "security"
 )
 
+// Repository defines the persistence interface for audit log operations.
+type Repository interface {
+	Create(ctx context.Context, input *postgres.CreateAuditLogInput) error
+	List(ctx context.Context, opts postgres.AuditLogListOptions) ([]*models.AuditLogEntry, int, error)
+	GetByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*models.AuditLogEntry, error)
+	GetByResource(ctx context.Context, resourceType, resourceID string, limit int) ([]*models.AuditLogEntry, error)
+	GetRecent(ctx context.Context, limit int) ([]*models.AuditLogEntry, error)
+	GetStats(ctx context.Context, since time.Time) (map[string]int, error)
+	DeleteOlderThan(ctx context.Context, before time.Time) (int64, error)
+}
+
 // Service handles audit logging operations
 type Service struct {
-	repo   *postgres.AuditLogRepository
+	repo   Repository
 	logger *logger.Logger
 	config Config
 }
@@ -62,7 +73,7 @@ func DefaultConfig() Config {
 }
 
 // NewService creates a new audit service
-func NewService(repo *postgres.AuditLogRepository, log *logger.Logger, config Config) *Service {
+func NewService(repo Repository, log *logger.Logger, config Config) *Service {
 	if log == nil {
 		log = logger.Nop()
 	}

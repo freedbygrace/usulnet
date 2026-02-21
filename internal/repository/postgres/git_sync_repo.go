@@ -39,7 +39,8 @@ func NewGitSyncRepository(db *DB, log *logger.Logger) *GitSyncRepository {
 }
 
 // gitSyncConfigColumns is the standard column list for git_sync_configs queries.
-const gitSyncConfigColumns = `id, connection_id, repository_id, name, sync_direction, target_path,
+const gitSyncConfigColumns = `id, connection_id, repository_id, name, repo_full_name,
+	sync_direction, target_path,
 	stack_name, file_pattern, branch, auto_commit, auto_deploy,
 	commit_message_template, conflict_strategy, is_enabled,
 	last_sync_at, last_sync_status, last_sync_error, sync_count,
@@ -49,7 +50,8 @@ const gitSyncConfigColumns = `id, connection_id, repository_id, name, sync_direc
 func scanGitSyncConfig(row pgx.Row) (*models.GitSyncConfig, error) {
 	var c models.GitSyncConfig
 	err := row.Scan(
-		&c.ID, &c.ConnectionID, &c.RepositoryID, &c.Name, &c.SyncDirection, &c.TargetPath,
+		&c.ID, &c.ConnectionID, &c.RepositoryID, &c.Name, &c.RepoFullName,
+		&c.SyncDirection, &c.TargetPath,
 		&c.StackName, &c.FilePattern, &c.Branch, &c.AutoCommit, &c.AutoDeploy,
 		&c.CommitMessageTemplate, &c.ConflictStrategy, &c.IsEnabled,
 		&c.LastSyncAt, &c.LastSyncStatus, &c.LastSyncError, &c.SyncCount,
@@ -67,7 +69,8 @@ func scanGitSyncConfigRows(rows pgx.Rows) ([]*models.GitSyncConfig, error) {
 	for rows.Next() {
 		var c models.GitSyncConfig
 		err := rows.Scan(
-			&c.ID, &c.ConnectionID, &c.RepositoryID, &c.Name, &c.SyncDirection, &c.TargetPath,
+			&c.ID, &c.ConnectionID, &c.RepositoryID, &c.Name, &c.RepoFullName,
+			&c.SyncDirection, &c.TargetPath,
 			&c.StackName, &c.FilePattern, &c.Branch, &c.AutoCommit, &c.AutoDeploy,
 			&c.CommitMessageTemplate, &c.ConflictStrategy, &c.IsEnabled,
 			&c.LastSyncAt, &c.LastSyncStatus, &c.LastSyncError, &c.SyncCount,
@@ -89,15 +92,18 @@ func (r *GitSyncRepository) CreateConfig(ctx context.Context, c *models.GitSyncC
 
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO git_sync_configs (
-			id, connection_id, repository_id, name, sync_direction, target_path,
+			id, connection_id, repository_id, name, repo_full_name,
+			sync_direction, target_path,
 			stack_name, file_pattern, branch, auto_commit, auto_deploy,
 			commit_message_template, conflict_strategy, is_enabled, created_by
 		) VALUES (
-			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10, $11,
-			$12, $13, $14, $15
+			$1, $2, $3, $4, $5,
+			$6, $7,
+			$8, $9, $10, $11, $12,
+			$13, $14, $15, $16
 		)`,
-		c.ID, c.ConnectionID, c.RepositoryID, c.Name, c.SyncDirection, c.TargetPath,
+		c.ID, c.ConnectionID, c.RepositoryID, c.Name, c.RepoFullName,
+		c.SyncDirection, c.TargetPath,
 		c.StackName, c.FilePattern, c.Branch, c.AutoCommit, c.AutoDeploy,
 		c.CommitMessageTemplate, c.ConflictStrategy, c.IsEnabled, c.CreatedBy,
 	)
@@ -414,8 +420,8 @@ func NewEphemeralEnvironmentRepository(db *DB, log *logger.Logger) *EphemeralEnv
 }
 
 // ephemeralEnvColumns is the standard column list for ephemeral_environments queries.
-const ephemeralEnvColumns = `id, name, connection_id, repository_id, branch, commit_sha,
-	stack_name, compose_file, environment, port_mappings,
+const ephemeralEnvColumns = `id, name, connection_id, repository_id, branch, repo_full_name,
+	commit_sha, stack_name, compose_file, environment, port_mappings,
 	status, url, ttl_minutes, auto_destroy,
 	expires_at, started_at, stopped_at, error_message,
 	resource_limits, labels, created_by, created_at, updated_at`
@@ -424,8 +430,8 @@ const ephemeralEnvColumns = `id, name, connection_id, repository_id, branch, com
 func scanEphemeralEnv(row pgx.Row) (*models.EphemeralEnvironment, error) {
 	var e models.EphemeralEnvironment
 	err := row.Scan(
-		&e.ID, &e.Name, &e.ConnectionID, &e.RepositoryID, &e.Branch, &e.CommitSHA,
-		&e.StackName, &e.ComposeFile, &e.Environment, &e.PortMappings,
+		&e.ID, &e.Name, &e.ConnectionID, &e.RepositoryID, &e.Branch, &e.RepoFullName,
+		&e.CommitSHA, &e.StackName, &e.ComposeFile, &e.Environment, &e.PortMappings,
 		&e.Status, &e.URL, &e.TTLMinutes, &e.AutoDestroy,
 		&e.ExpiresAt, &e.StartedAt, &e.StoppedAt, &e.ErrorMessage,
 		&e.ResourceLimits, &e.Labels, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt,
@@ -442,8 +448,8 @@ func scanEphemeralEnvRows(rows pgx.Rows) ([]*models.EphemeralEnvironment, error)
 	for rows.Next() {
 		var e models.EphemeralEnvironment
 		err := rows.Scan(
-			&e.ID, &e.Name, &e.ConnectionID, &e.RepositoryID, &e.Branch, &e.CommitSHA,
-			&e.StackName, &e.ComposeFile, &e.Environment, &e.PortMappings,
+			&e.ID, &e.Name, &e.ConnectionID, &e.RepositoryID, &e.Branch, &e.RepoFullName,
+			&e.CommitSHA, &e.StackName, &e.ComposeFile, &e.Environment, &e.PortMappings,
 			&e.Status, &e.URL, &e.TTLMinutes, &e.AutoDestroy,
 			&e.ExpiresAt, &e.StartedAt, &e.StoppedAt, &e.ErrorMessage,
 			&e.ResourceLimits, &e.Labels, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt,
@@ -464,18 +470,18 @@ func (r *EphemeralEnvironmentRepository) Create(ctx context.Context, e *models.E
 
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO ephemeral_environments (
-			id, name, connection_id, repository_id, branch, commit_sha,
-			stack_name, compose_file, environment, port_mappings,
+			id, name, connection_id, repository_id, branch, repo_full_name,
+			commit_sha, stack_name, compose_file, environment, port_mappings,
 			status, url, ttl_minutes, auto_destroy,
 			expires_at, error_message, resource_limits, labels, created_by
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10,
-			$11, $12, $13, $14,
-			$15, $16, $17, $18, $19
+			$7, $8, $9, $10, $11,
+			$12, $13, $14, $15,
+			$16, $17, $18, $19, $20
 		)`,
-		e.ID, e.Name, e.ConnectionID, e.RepositoryID, e.Branch, e.CommitSHA,
-		e.StackName, e.ComposeFile, e.Environment, e.PortMappings,
+		e.ID, e.Name, e.ConnectionID, e.RepositoryID, e.Branch, e.RepoFullName,
+		e.CommitSHA, e.StackName, e.ComposeFile, e.Environment, e.PortMappings,
 		e.Status, e.URL, e.TTLMinutes, e.AutoDestroy,
 		e.ExpiresAt, e.ErrorMessage, e.ResourceLimits, e.Labels, e.CreatedBy,
 	)
@@ -586,6 +592,21 @@ func (r *EphemeralEnvironmentRepository) UpdateStatus(ctx context.Context, id uu
 	result, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to update ephemeral environment status")
+	}
+	if result.RowsAffected() == 0 {
+		return errors.NotFound("ephemeral environment")
+	}
+	return nil
+}
+
+// UpdateTTL persists the new TTL and expiry time for an ephemeral environment.
+func (r *EphemeralEnvironmentRepository) UpdateTTL(ctx context.Context, id uuid.UUID, ttlMinutes int, expiresAt time.Time) error {
+	result, err := r.db.Exec(ctx, `
+		UPDATE ephemeral_environments
+		SET ttl_minutes = $1, expires_at = $2, updated_at = NOW()
+		WHERE id = $3`, ttlMinutes, expiresAt, id)
+	if err != nil {
+		return errors.Wrap(err, errors.CodeDatabaseError, "failed to update ephemeral environment TTL")
 	}
 	if result.RowsAffected() == 0 {
 		return errors.NotFound("ephemeral environment")
@@ -1400,6 +1421,12 @@ func (r *ManifestBuilderRepository) SeedBuiltinComponents(ctx context.Context) e
 			return fmt.Errorf("failed to marshal depends_on for %s: %w", comp.Name, err)
 		}
 
+		var healthCheckStr *string
+		if healthCheckJSON != nil {
+			s := string(healthCheckJSON)
+			healthCheckStr = &s
+		}
+
 		_, err = tx.Exec(ctx, `
 			INSERT INTO manifest_builder_components (
 				id, name, description, category, icon,
@@ -1412,7 +1439,7 @@ func (r *ManifestBuilderRepository) SeedBuiltinComponents(ctx context.Context) e
 				WHERE name = $2 AND is_builtin = true
 			)`,
 			uuid.New(), comp.Name, comp.Description, comp.Category, comp.Icon,
-			defaultConfigJSON, portsJSON, volumesJSON, envJSON, healthCheckJSON, dependsOnJSON,
+			string(defaultConfigJSON), string(portsJSON), string(volumesJSON), string(envJSON), healthCheckStr, string(dependsOnJSON),
 		)
 		if err != nil {
 			return errors.Wrap(err, errors.CodeDatabaseError,

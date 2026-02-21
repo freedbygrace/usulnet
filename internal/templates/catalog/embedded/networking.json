@@ -1,0 +1,67 @@
+{
+  "templates": [
+    {
+      "name": "Nginx",
+      "description": "High-performance HTTP server and reverse proxy",
+      "image": "nginx:alpine",
+      "ports": ["80/tcp", "443/tcp"],
+      "volumes": [{"container": "/etc/nginx/conf.d"}, {"container": "/usr/share/nginx/html"}]
+    },
+    {
+      "name": "Caddy",
+      "description": "Fast web server with automatic HTTPS",
+      "image": "caddy:2-alpine",
+      "ports": ["80/tcp", "443/tcp"],
+      "volumes": [{"container": "/data"}, {"container": "/config"}, {"container": "/etc/caddy"}]
+    },
+    {
+      "name": "Traefik",
+      "description": "Cloud-native reverse proxy and load balancer",
+      "image": "traefik:v3",
+      "ports": ["80/tcp", "443/tcp", "8080/tcp"],
+      "volumes": [{"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"}],
+      "command": "--api.insecure=true --providers.docker"
+    },
+    {
+      "name": "Pi-hole",
+      "description": "Network-wide ad blocker and DNS sinkhole",
+      "image": "pihole/pihole:latest",
+      "ports": ["53/tcp", "53/udp", "80/tcp"],
+      "volumes": [{"container": "/etc/pihole"}, {"container": "/etc/dnsmasq.d"}],
+      "env": [
+        {"name": "WEBPASSWORD", "label": "Web password", "required": true, "type": "password"},
+        {"name": "TZ", "label": "Timezone", "default": "UTC"}
+      ]
+    },
+    {
+      "name": "AdGuard Home",
+      "description": "Network-wide ad and tracker blocking DNS server",
+      "image": "adguard/adguardhome:latest",
+      "ports": ["53/tcp", "53/udp", "3000/tcp", "80/tcp"],
+      "volumes": [{"container": "/opt/adguardhome/work"}, {"container": "/opt/adguardhome/conf"}]
+    },
+    {
+      "name": "WireGuard",
+      "description": "Fast, modern VPN tunnel",
+      "image": "linuxserver/wireguard:latest",
+      "ports": ["51820/udp"],
+      "volumes": [{"container": "/config"}, {"container": "/lib/modules", "bind": "/lib/modules"}],
+      "env": [
+        {"name": "PUID", "label": "User ID", "default": "1000"},
+        {"name": "PGID", "label": "Group ID", "default": "1000"},
+        {"name": "TZ", "label": "Timezone", "default": "UTC"},
+        {"name": "SERVERURL", "label": "Server URL (public IP or domain)"},
+        {"name": "PEERS", "label": "Number of peers", "default": "1"}
+      ],
+      "note": "Requires NET_ADMIN and SYS_MODULE capabilities"
+    },
+    {
+      "name": "Nginx Proxy Manager",
+      "description": "Easy-to-use reverse proxy with Let's Encrypt",
+      "image": "jc21/nginx-proxy-manager:latest",
+      "ports": ["80/tcp", "443/tcp", "81/tcp"],
+      "volumes": [{"container": "/data"}, {"container": "/etc/letsencrypt"}],
+      "note": "Default login: admin@example.com / changeme"
+    }
+  ]
+}

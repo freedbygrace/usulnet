@@ -121,17 +121,22 @@ server:
 
 # Database (PostgreSQL)
 database:
-  url: "postgres://usulnet:${DB_PASSWORD}@postgres:5432/usulnet?sslmode=disable"
+  # sslmode=require: encrypted by default (postgres self-generates a cert).
+  # Change to verify-full and mount your CA cert for full certificate verification.
+  url: "postgres://usulnet:${DB_PASSWORD}@postgres:5432/usulnet?sslmode=require"
   max_open_conns: 25
   max_idle_conns: 10
   conn_max_lifetime: "30m"
   conn_max_idle_time: "5m"
 
-# Redis (caching and sessions)
+# Redis (caching and sessions) — TLS encrypted by default
 redis:
-  url: "redis://redis:6379"
-  password: ""
-  db: 0
+  url: "rediss://redis:6379"
+  # tls_enabled: true           # Auto-enabled when using rediss:// URL scheme
+  # tls_skip_verify: true       # Skip CA verification (default for self-signed)
+  # tls_ca_file: ""             # CA certificate for server verification
+  # tls_cert_file: ""           # Client certificate (optional, for mTLS)
+  # tls_key_file: ""            # Client private key (optional, for mTLS)
 
 # NATS (messaging)
 nats:

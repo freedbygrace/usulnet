@@ -4,14 +4,13 @@
 
 // Package proxy provides the reverse proxy management service.
 // It stores configuration in PostgreSQL (source of truth) and pushes
-// the full configuration to Caddy's admin API on each change.
+// the full configuration to the active backend (nginx or Caddy) on each change.
 package proxy
 
 import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -22,35 +21,36 @@ import (
 
 // Config holds service configuration.
 type Config struct {
-	// CaddyAdminURL is the base URL of Caddy's admin API.
-	CaddyAdminURL string
 	// ACMEEmail is the email used for Let's Encrypt registration.
 	ACMEEmail string
-	// ListenHTTP is the Caddy listen address for HTTP (default ":80").
+	// ListenHTTP is the listen address for HTTP (default ":80").
 	ListenHTTP string
-	// ListenHTTPS is the Caddy listen address for HTTPS (default ":443").
+	// ListenHTTPS is the listen address for HTTPS (default ":443").
 	ListenHTTPS string
 	// DefaultHostID is the usulnet host ID used when not multi-host.
 	DefaultHostID uuid.UUID
+
+	// CaddyAdminURL is the base URL of Caddy's admin API (Caddy backend only).
+	CaddyAdminURL string
 }
 
 // Service manages reverse proxy configuration.
 type Service struct {
-	hosts    HostRepository
-	headers  HeaderRepository
-	certs    CertificateRepository
-	dns      DNSProviderRepository
-	audit    AuditLogRepository
-	caddy    *caddy.Client
-	enc      Encryptor
-	cfg      Config
-	logger   *logger.Logger
+	hosts   HostRepository
+	headers HeaderRepository
+	certs   CertificateRepository
+	dns     DNSProviderRepository
+	audit   AuditLogRepository
+	backend SyncBackend
+	enc     Encryptor
+	cfg     Config
+	logger  *logger.Logger
 
 	// Sync mutex to prevent concurrent config pushes
 	syncMu sync.Mutex
 }
 
-// NewService creates a new proxy service.
+// NewService creates a new proxy service with the given backend.
 func NewService(
 	hosts HostRepository,
 	headers HeaderRepository,
@@ -58,32 +58,33 @@ func NewService(
 	dns DNSProviderRepository,
 	audit AuditLogRepository,
 	enc Encryptor,
+	backend SyncBackend,
 	cfg Config,
 	log *logger.Logger,
 ) *Service {
-	caddyCfg := caddy.Config{
-		AdminURL: cfg.CaddyAdminURL,
-		Timeout:  10 * time.Second,
-	}
-
 	return &Service{
 		hosts:   hosts,
 		headers: headers,
 		certs:   certs,
 		dns:     dns,
 		audit:   audit,
-		caddy:   caddy.NewClient(caddyCfg),
+		backend: backend,
 		enc:     enc,
 		cfg:     cfg,
 		logger:  log.Named("proxy"),
 	}
 }
 
+// Backend returns the active sync backend.
+func (s *Service) Backend() SyncBackend {
+	return s.backend
+}
+
 // ============================================================================
 // Proxy Host CRUD
 // ============================================================================
 
-// CreateHost creates a new proxy host and syncs to Caddy.
+// CreateHost creates a new proxy host and syncs the configuration.
 func (s *Service) CreateHost(ctx context.Context, input *models.CreateProxyHostInput, userID *uuid.UUID) (*models.ProxyHost, error) {
 	h := &models.ProxyHost{
 		ID:                  uuid.New(),
@@ -119,9 +120,8 @@ func (s *Service) CreateHost(ctx context.Context, input *models.CreateProxyHostI
 
 	s.auditLog(ctx, h.HostID, userID, "create", "proxy_host", h.ID, h.Name, "")
 
-	// Sync to Caddy
-	if err := s.SyncToCaddy(ctx); err != nil {
-		s.logger.Error("Failed to sync to Caddy after create", "host_id", h.ID, "error", err)
+	if err := s.Sync(ctx); err != nil {
+		s.logger.Error("Failed to sync after create", "host_id", h.ID, "error", err)
 		_ = s.hosts.UpdateStatus(ctx, h.ID, models.ProxyHostStatusError, err.Error())
 		return h, nil // Return host even if sync fails
 	}
@@ -135,7 +135,7 @@ func (s *Service) CreateHost(ctx context.Context, input *models.CreateProxyHostI
 func (s *Service) GetHost(ctx context.Context, id uuid.UUID) (*models.ProxyHost, error) {
 	h, err := s.hosts.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get proxy host %s: %w", id, err)
 	}
 
 	headers, err := s.headers.ListByHost(ctx, id)
@@ -153,11 +153,11 @@ func (s *Service) ListHosts(ctx context.Context) ([]*models.ProxyHost, error) {
 	return s.hosts.List(ctx, s.cfg.DefaultHostID, false)
 }
 
-// UpdateHost updates a proxy host and syncs to Caddy.
+// UpdateHost updates a proxy host and syncs the configuration.
 func (s *Service) UpdateHost(ctx context.Context, id uuid.UUID, input *models.UpdateProxyHostInput, userID *uuid.UUID) (*models.ProxyHost, error) {
 	h, err := s.hosts.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get proxy host for update %s: %w", id, err)
 	}
 
 	// Apply partial update
@@ -224,8 +224,8 @@ func (s *Service) UpdateHost(ctx context.Context, id uuid.UUID, input *models.Up
 
 	s.auditLog(ctx, h.HostID, userID, "update", "proxy_host", h.ID, h.Name, "")
 
-	if err := s.SyncToCaddy(ctx); err != nil {
-		s.logger.Error("Failed to sync to Caddy after update", "host_id", h.ID, "error", err)
+	if err := s.Sync(ctx); err != nil {
+		s.logger.Error("Failed to sync after update", "host_id", h.ID, "error", err)
 		_ = s.hosts.UpdateStatus(ctx, h.ID, models.ProxyHostStatusError, err.Error())
 	} else {
 		_ = s.hosts.UpdateStatus(ctx, h.ID, models.ProxyHostStatusActive, "")
@@ -234,11 +234,11 @@ func (s *Service) UpdateHost(ctx context.Context, id uuid.UUID, input *models.Up
 	return h, nil
 }
 
-// DeleteHost removes a proxy host and syncs to Caddy.
+// DeleteHost removes a proxy host and syncs the configuration.
 func (s *Service) DeleteHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error {
 	h, err := s.hosts.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get proxy host for delete %s: %w", id, err)
 	}
 
 	// Delete headers first (FK cascade should handle this, but be explicit)
@@ -252,9 +252,8 @@ func (s *Service) DeleteHost(ctx context.Context, id uuid.UUID, userID *uuid.UUI
 
 	s.auditLog(ctx, h.HostID, userID, "delete", "proxy_host", h.ID, h.Name, "")
 
-	if err := s.SyncToCaddy(ctx); err != nil {
-		s.logger.Error("Failed to sync to Caddy after delete", "error", err)
-		// Don't fail the delete if Caddy sync fails
+	if err := s.Sync(ctx); err != nil {
+		s.logger.Error("Failed to sync after delete", "error", err)
 	}
 
 	return nil
@@ -263,23 +262,27 @@ func (s *Service) DeleteHost(ctx context.Context, id uuid.UUID, userID *uuid.UUI
 // EnableHost enables a proxy host.
 func (s *Service) EnableHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error {
 	enabled := true
-	_, err := s.UpdateHost(ctx, id, &models.UpdateProxyHostInput{Enabled: &enabled}, userID)
-	return err
+	if _, err := s.UpdateHost(ctx, id, &models.UpdateProxyHostInput{Enabled: &enabled}, userID); err != nil {
+		return fmt.Errorf("enable proxy host %s: %w", id, err)
+	}
+	return nil
 }
 
 // DisableHost disables a proxy host.
 func (s *Service) DisableHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error {
 	disabled := false
-	_, err := s.UpdateHost(ctx, id, &models.UpdateProxyHostInput{Enabled: &disabled}, userID)
-	return err
+	if _, err := s.UpdateHost(ctx, id, &models.UpdateProxyHostInput{Enabled: &disabled}, userID); err != nil {
+		return fmt.Errorf("disable proxy host %s: %w", id, err)
+	}
+	return nil
 }
 
 // SetCustomHeaders replaces all custom headers for a proxy host and syncs.
 func (s *Service) SetCustomHeaders(ctx context.Context, proxyHostID uuid.UUID, headers []models.ProxyHeader) error {
 	if err := s.headers.ReplaceForHost(ctx, proxyHostID, headers); err != nil {
-		return err
+		return fmt.Errorf("replace custom headers for proxy host %s: %w", proxyHostID, err)
 	}
-	return s.SyncToCaddy(ctx)
+	return s.Sync(ctx)
 }
 
 // ============================================================================
@@ -311,7 +314,7 @@ func (s *Service) UploadCertificate(ctx context.Context, name string, domains []
 	}
 
 	if err := s.certs.Create(ctx, c); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store certificate: %w", err)
 	}
 
 	s.auditLog(ctx, c.HostID, userID, "create", "certificate", c.ID, c.Name, "")
@@ -322,13 +325,23 @@ func (s *Service) UploadCertificate(ctx context.Context, name string, domains []
 func (s *Service) DeleteCertificate(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error {
 	c, err := s.certs.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get certificate %s: %w", id, err)
 	}
 	if err := s.certs.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("delete certificate %s: %w", id, err)
 	}
 	s.auditLog(ctx, c.HostID, userID, "delete", "certificate", c.ID, c.Name, "")
 	return nil
+}
+
+// RequestLECertificate requests a Let's Encrypt certificate via the active backend.
+func (s *Service) RequestLECertificate(ctx context.Context, domains []string, email string) (certPEM, keyPEM string, err error) {
+	return s.backend.RequestCertificate(ctx, domains, email)
+}
+
+// RenewLECertificate renews a Let's Encrypt certificate via the active backend.
+func (s *Service) RenewLECertificate(ctx context.Context, domains []string, email string) (certPEM, keyPEM string, err error) {
+	return s.backend.RenewCertificate(ctx, domains, email)
 }
 
 // ============================================================================
@@ -339,7 +352,7 @@ func (s *Service) DeleteCertificate(ctx context.Context, id uuid.UUID, userID *u
 func (s *Service) ListDNSProviders(ctx context.Context) ([]*models.ProxyDNSProvider, error) {
 	providers, err := s.dns.List(ctx, s.cfg.DefaultHostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list DNS providers: %w", err)
 	}
 	// Mask API tokens for display
 	for _, p := range providers {
@@ -373,7 +386,7 @@ func (s *Service) CreateDNSProvider(ctx context.Context, name, provider, apiToke
 	}
 
 	if err := s.dns.Create(ctx, p); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store DNS provider: %w", err)
 	}
 
 	s.auditLog(ctx, p.HostID, userID, "create", "dns_provider", p.ID, p.Name, "")
@@ -387,26 +400,25 @@ func (s *Service) CreateDNSProvider(ctx context.Context, name, provider, apiToke
 func (s *Service) DeleteDNSProvider(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error {
 	p, err := s.dns.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get DNS provider %s: %w", id, err)
 	}
 	if err := s.dns.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("delete DNS provider %s: %w", id, err)
 	}
 	s.auditLog(ctx, p.HostID, userID, "delete", "dns_provider", p.ID, p.Name, "")
 	return nil
 }
 
 // ============================================================================
-// Caddy Sync
+// Backend Sync
 // ============================================================================
 
-// buildConfig loads all proxy data from the database and builds the Caddy config.
-// This is an internal helper without locking—callers must handle synchronization.
-func (s *Service) buildConfig(ctx context.Context) (*caddy.CaddyConfig, []*models.ProxyHost, error) {
+// loadSyncData loads all proxy data from the database into a SyncData struct.
+func (s *Service) loadSyncData(ctx context.Context) (*SyncData, error) {
 	// 1. Load all enabled hosts
 	hosts, err := s.hosts.ListAll(ctx, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list proxy hosts: %w", err)
+		return nil, fmt.Errorf("list proxy hosts: %w", err)
 	}
 
 	// 2. Load custom headers for each host
@@ -455,59 +467,68 @@ func (s *Service) buildConfig(ctx context.Context) (*caddy.CaddyConfig, []*model
 		}
 	}
 
-	// 5. Build Caddy config
-	config := caddy.BuildConfig(hosts, dnsProviders, customCerts, s.cfg.ACMEEmail, s.cfg.ListenHTTP, s.cfg.ListenHTTPS)
-	return config, hosts, nil
+	return &SyncData{
+		Hosts:        hosts,
+		DNSProviders: dnsProviders,
+		CustomCerts:  customCerts,
+		ACMEEmail:    s.cfg.ACMEEmail,
+		ListenHTTP:   s.cfg.ListenHTTP,
+		ListenHTTPS:  s.cfg.ListenHTTPS,
+	}, nil
 }
 
-// BuildCurrentConfig builds the current Caddy configuration from the database
-// without pushing it. This allows callers (e.g. the Caddy adapter) to extend
-// the config with additional routes (redirections, streams, etc.) before pushing.
-func (s *Service) BuildCurrentConfig(ctx context.Context) (*caddy.CaddyConfig, error) {
-	config, _, err := s.buildConfig(ctx)
-	return config, err
-}
-
-// LoadCaddyConfig atomically pushes a complete Caddy configuration via the admin API.
-// This is intended for callers that build extended configs with additional features.
-func (s *Service) LoadCaddyConfig(ctx context.Context, config *caddy.CaddyConfig) error {
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
-	return s.caddy.Load(ctx, config)
-}
-
-// SyncToCaddy generates the full Caddy configuration from DB and pushes it.
-// This is the core operation: DB → JSON config → POST /load.
-func (s *Service) SyncToCaddy(ctx context.Context) error {
+// Sync loads all proxy data from the database and pushes it to the active backend.
+func (s *Service) Sync(ctx context.Context) error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
-	config, hosts, err := s.buildConfig(ctx)
+	data, err := s.loadSyncData(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("load proxy sync data: %w", err)
 	}
 
-	if err := s.caddy.Load(ctx, config); err != nil {
-		return fmt.Errorf("caddy load: %w", err)
+	if err := s.backend.Sync(ctx, data); err != nil {
+		return fmt.Errorf("proxy sync (%s): %w", s.backend.Mode(), err)
 	}
 
-	s.logger.Info("Synced proxy configuration to Caddy", "host_count", len(hosts))
+	s.logger.Info("Synced proxy configuration", "backend", s.backend.Mode(), "host_count", len(data.Hosts))
 
-	for _, h := range hosts {
+	for _, h := range data.Hosts {
 		_ = s.hosts.UpdateStatus(ctx, h.ID, models.ProxyHostStatusActive, "")
 	}
 
 	return nil
 }
 
-// CaddyHealthy checks if Caddy's admin API is reachable.
-func (s *Service) CaddyHealthy(ctx context.Context) (bool, error) {
-	return s.caddy.Healthy(ctx)
+// SyncToCaddy is a backwards-compatible alias for Sync.
+// Deprecated: Use Sync instead.
+func (s *Service) SyncToCaddy(ctx context.Context) error {
+	return s.Sync(ctx)
 }
 
-// UpstreamStatus returns the current health of all Caddy upstreams.
-func (s *Service) UpstreamStatus(ctx context.Context) ([]caddy.UpstreamStatus, error) {
-	return s.caddy.UpstreamStatus(ctx)
+// BackendHealthy checks if the backend process is reachable.
+func (s *Service) BackendHealthy(ctx context.Context) (bool, error) {
+	return s.backend.Healthy(ctx)
+}
+
+// CaddyHealthy is a backwards-compatible alias for BackendHealthy.
+// Deprecated: Use BackendHealthy instead.
+func (s *Service) CaddyHealthy(ctx context.Context) (bool, error) {
+	return s.BackendHealthy(ctx)
+}
+
+// UpstreamStatus returns the health status of configured upstreams.
+func (s *Service) UpstreamStatus(ctx context.Context) (interface{}, error) {
+	if backend, ok := s.backend.(*CaddyBackend); ok {
+		return backend.client.UpstreamStatus(ctx)
+	}
+
+	return []caddy.UpstreamStatus{}, nil
+}
+
+// BackendMode returns the active backend mode ("caddy" or "nginx").
+func (s *Service) BackendMode() string {
+	return s.backend.Mode()
 }
 
 // ============================================================================
@@ -534,7 +555,7 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 	// Check if we already have a proxy for this container
 	existing, err := s.hosts.GetByContainerID(ctx, containerID)
 	if err != nil {
-		return err
+		return fmt.Errorf("lookup proxy host by container %s: %w", containerID, err)
 	}
 
 	port := 80
@@ -567,7 +588,10 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 			SSLMode:         &sslMode,
 			EnableWebSocket: &websocket,
 		}, nil)
-		return err
+		if err != nil {
+			return fmt.Errorf("auto-proxy update for container %s: %w", containerID, err)
+		}
+		return nil
 	}
 
 	// Create new
@@ -586,8 +610,11 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 		ContainerID:       containerID,
 		ContainerName:     containerName,
 	}, nil)
+	if err != nil {
+		return fmt.Errorf("auto-proxy create for container %s: %w", containerID, err)
+	}
 
-	return err
+	return nil
 }
 
 // ============================================================================

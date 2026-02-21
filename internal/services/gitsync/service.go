@@ -82,19 +82,20 @@ func DefaultConfig() Config {
 
 // CreateSyncInput holds the input for creating a new sync configuration.
 type CreateSyncInput struct {
-	ConnectionID          uuid.UUID
-	RepositoryID          uuid.UUID
-	Name                  string
-	SyncDirection         models.SyncDirection
-	TargetPath            string
-	StackName             string
-	FilePattern           string
-	Branch                string
-	AutoCommit            bool
-	AutoDeploy            bool
-	CommitMessageTemplate string
-	ConflictStrategy      models.ConflictStrategy
-	CreatedBy             *uuid.UUID
+	ConnectionID          uuid.UUID                `json:"connection_id"`
+	RepositoryID          uuid.UUID                `json:"repository_id"`
+	RepoFullName          string                   `json:"repo_full_name"`
+	Name                  string                   `json:"name"`
+	SyncDirection         models.SyncDirection     `json:"sync_direction"`
+	TargetPath            string                   `json:"target_path"`
+	StackName             string                   `json:"stack_name"`
+	FilePattern           string                   `json:"file_pattern"`
+	Branch                string                   `json:"branch"`
+	AutoCommit            bool                     `json:"auto_commit"`
+	AutoDeploy            bool                     `json:"auto_deploy"`
+	CommitMessageTemplate string                   `json:"commit_message_template"`
+	ConflictStrategy      models.ConflictStrategy  `json:"conflict_strategy"`
+	CreatedBy             *uuid.UUID               `json:"created_by,omitempty"`
 }
 
 // UpdateSyncInput holds editable fields for updating a sync configuration.
@@ -167,6 +168,9 @@ func (s *Service) CreateSyncConfig(ctx context.Context, input CreateSyncInput) (
 	if input.RepositoryID == uuid.Nil {
 		return nil, errors.New(errors.CodeBadRequest, "repository_id is required")
 	}
+	if input.RepoFullName == "" {
+		return nil, errors.New(errors.CodeBadRequest, "repo_full_name is required (e.g. org/repo)")
+	}
 
 	// Validate sync direction.
 	switch input.SyncDirection {
@@ -198,6 +202,7 @@ func (s *Service) CreateSyncConfig(ctx context.Context, input CreateSyncInput) (
 		ID:                    uuid.New(),
 		ConnectionID:          input.ConnectionID,
 		RepositoryID:          input.RepositoryID,
+		RepoFullName:          input.RepoFullName,
 		Name:                  input.Name,
 		SyncDirection:         input.SyncDirection,
 		TargetPath:            input.TargetPath,
@@ -243,7 +248,7 @@ func (s *Service) ListConfigs(ctx context.Context) ([]*models.GitSyncConfig, err
 func (s *Service) UpdateConfig(ctx context.Context, id uuid.UUID, input UpdateSyncInput) error {
 	cfg, err := s.repo.GetConfig(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get sync config for update: %w", err)
 	}
 
 	if input.Name != nil {
@@ -300,7 +305,7 @@ func (s *Service) UpdateConfig(ctx context.Context, id uuid.UUID, input UpdateSy
 func (s *Service) DeleteConfig(ctx context.Context, id uuid.UUID) error {
 	if err := s.repo.DeleteConfig(ctx, id); err != nil {
 		s.logger.Error("failed to delete sync config", "id", id, "error", err)
-		return err
+		return fmt.Errorf("delete sync config %s: %w", id, err)
 	}
 	s.logger.Info("sync config deleted", "id", id)
 	return nil
@@ -348,7 +353,7 @@ func (s *Service) SyncToGit(ctx context.Context, configID uuid.UUID, gitProvider
 
 	// Get current file content from Git (may not exist yet).
 	var existingSHA string
-	gitFile, err := gitProvider.GetFileContent(ctx, cfg.Name, filePath, cfg.Branch)
+	gitFile, err := gitProvider.GetFileContent(ctx, cfg.RepoFullName, filePath, cfg.Branch)
 	if err == nil && gitFile != nil {
 		existingSHA = gitFile.SHA
 		// Compare contents: if unchanged, skip.
@@ -365,7 +370,7 @@ func (s *Service) SyncToGit(ctx context.Context, configID uuid.UUID, gitProvider
 	commitMsg := buildCommitMessage(cfg.CommitMessageTemplate, cfg.StackName)
 
 	// Push updated content to Git.
-	if err := gitProvider.CreateOrUpdateFile(ctx, cfg.Name, filePath, []byte(uiContent), commitMsg, cfg.Branch, existingSHA); err != nil {
+	if err := gitProvider.CreateOrUpdateFile(ctx, cfg.RepoFullName, filePath, []byte(uiContent), commitMsg, cfg.Branch, existingSHA); err != nil {
 		s.recordSyncFailure(ctx, cfg, models.SyncDirectionToGit, fmt.Sprintf("failed to push file to git: %v", err))
 		result.Status = "error"
 		result.Message = fmt.Sprintf("failed to push file to git: %v", err)
@@ -376,7 +381,7 @@ func (s *Service) SyncToGit(ctx context.Context, configID uuid.UUID, gitProvider
 
 	// Attempt to get the latest commit SHA after push.
 	var commitSHA string
-	latestCommit, err := gitProvider.GetLatestCommit(ctx, cfg.Name, cfg.Branch)
+	latestCommit, err := gitProvider.GetLatestCommit(ctx, cfg.RepoFullName, cfg.Branch)
 	if err == nil && latestCommit != nil {
 		commitSHA = latestCommit.SHA
 	}
@@ -432,7 +437,7 @@ func (s *Service) SyncFromGit(ctx context.Context, configID uuid.UUID, gitProvid
 	filePath := buildFilePath(cfg.TargetPath, cfg.FilePattern)
 
 	// Get file content from Git.
-	gitFile, err := gitProvider.GetFileContent(ctx, cfg.Name, filePath, cfg.Branch)
+	gitFile, err := gitProvider.GetFileContent(ctx, cfg.RepoFullName, filePath, cfg.Branch)
 	if err != nil {
 		s.recordSyncFailure(ctx, cfg, models.SyncDirectionFromGit, fmt.Sprintf("failed to get file from git: %v", err))
 		result.Status = "error"
@@ -534,7 +539,7 @@ func (s *Service) SyncBidirectional(ctx context.Context, configID uuid.UUID, git
 	filePath := buildFilePath(cfg.TargetPath, cfg.FilePattern)
 
 	// Get Git content.
-	gitFile, gitErr := gitProvider.GetFileContent(ctx, cfg.Name, filePath, cfg.Branch)
+	gitFile, gitErr := gitProvider.GetFileContent(ctx, cfg.RepoFullName, filePath, cfg.Branch)
 	var gitContent string
 	var gitSHA string
 	if gitErr == nil && gitFile != nil {
@@ -805,7 +810,7 @@ func (s *Service) applyToGit(ctx context.Context, cfg *models.GitSyncConfig, uiC
 
 	commitMsg := buildCommitMessage(cfg.CommitMessageTemplate, cfg.StackName)
 
-	if err := gitProvider.CreateOrUpdateFile(ctx, cfg.Name, filePath, []byte(uiContent), commitMsg, cfg.Branch, existingSHA); err != nil {
+	if err := gitProvider.CreateOrUpdateFile(ctx, cfg.RepoFullName, filePath, []byte(uiContent), commitMsg, cfg.Branch, existingSHA); err != nil {
 		s.recordSyncFailure(ctx, cfg, models.SyncDirectionBidirectional, fmt.Sprintf("failed to push file to git: %v", err))
 		result.Status = "error"
 		result.Message = fmt.Sprintf("failed to push UI content to Git: %v", err)
@@ -815,7 +820,7 @@ func (s *Service) applyToGit(ctx context.Context, cfg *models.GitSyncConfig, uiC
 	}
 
 	var commitSHA string
-	latestCommit, err := gitProvider.GetLatestCommit(ctx, cfg.Name, cfg.Branch)
+	latestCommit, err := gitProvider.GetLatestCommit(ctx, cfg.RepoFullName, cfg.Branch)
 	if err == nil && latestCommit != nil {
 		commitSHA = latestCommit.SHA
 	}
@@ -863,7 +868,7 @@ func (s *Service) recordSyncFailure(ctx context.Context, cfg *models.GitSyncConf
 		ID:           uuid.New(),
 		ConfigID:     cfg.ID,
 		Direction:    direction,
-		EventType:    models.SyncEventFileUpdated,
+		EventType:    models.SyncEventSyncFailed,
 		Status:       "failed",
 		ErrorMessage: errMsg,
 		CreatedAt:    time.Now(),

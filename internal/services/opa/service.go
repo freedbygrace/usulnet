@@ -147,6 +147,7 @@ func (s *Service) EvaluateContainer(ctx context.Context, containerData map[strin
 	return s.evaluateByCategories(ctx, containerData, "container", []string{
 		models.OPACategoryAdmission,
 		models.OPACategoryRuntime,
+		models.OPACategoryNetwork,
 		models.OPACategoryGeneral,
 	})
 }

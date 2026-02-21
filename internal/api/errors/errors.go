@@ -8,7 +8,10 @@ package errors
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	pkgerrors "github.com/fr4nsys/usulnet/internal/pkg/errors"
 )
 
 // ErrorCode represents a machine-readable error code.
@@ -61,6 +64,9 @@ const (
 	ErrCodeLicenseExpired   ErrorCode = "LICENSE_EXPIRED"
 	ErrCodeLicenseInvalid   ErrorCode = "LICENSE_INVALID"
 	ErrCodeFeatureDisabled  ErrorCode = "FEATURE_DISABLED"
+
+	// Not implemented
+	ErrCodeNotImplemented   ErrorCode = "NOT_IMPLEMENTED"
 )
 
 // APIError represents a standardized API error response.
@@ -338,6 +344,14 @@ func Timeout(message string) *APIError {
 	return NewError(http.StatusGatewayTimeout, ErrCodeTimeout, message)
 }
 
+// NotImplemented returns a 501 Not Implemented error.
+func NotImplemented(message string) *APIError {
+	if message == "" {
+		message = "This endpoint is not yet implemented"
+	}
+	return NewError(http.StatusNotImplemented, ErrCodeNotImplemented, message)
+}
+
 // ============================================================================
 // Conversion from pkg/errors
 // ============================================================================
@@ -345,43 +359,29 @@ func Timeout(message string) *APIError {
 // FromAppError converts an AppError from pkg/errors to an APIError.
 // This is used to bridge internal errors to HTTP responses.
 func FromAppError(err error) *APIError {
-	// Try to extract AppError type
-	type appError interface {
-		Error() string
-		Unwrap() error
-	}
-	type withCode interface {
-		appError
-		GetCode() string
-		GetHTTPStatus() int
-		GetDetails() map[string]interface{}
-	}
+	// Extract *pkgerrors.AppError from the error chain.
+	var appErr *pkgerrors.AppError
+	if errors.As(err, &appErr) {
+		code := ErrorCode(appErr.Code)
+		if code == "" {
+			code = ErrCodeInternal
+		}
 
-	// Check if it's our custom error type
-	if ae, ok := err.(interface {
-		Error() string
-	}); ok {
-		// Try to get code and status via reflection-like interface checking
-		var code ErrorCode = ErrCodeInternal
-		status := http.StatusInternalServerError
-		message := ae.Error()
+		status := appErr.HTTPStatus
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+
+		// Use the Message field for a clean message rather than Error()
+		// which includes the code prefix and wrapped error.
+		message := appErr.Message
+		if message == "" {
+			message = err.Error()
+		}
+
 		var details any
-
-		// Try to get the code field
-		if coder, ok := err.(interface{ Code() string }); ok {
-			code = ErrorCode(coder.Code())
-		}
-
-		// Try to get HTTP status
-		if stater, ok := err.(interface{ HTTPStatus() int }); ok {
-			if s := stater.HTTPStatus(); s != 0 {
-				status = s
-			}
-		}
-
-		// Try to get details
-		if detailer, ok := err.(interface{ Details() map[string]interface{} }); ok {
-			details = detailer.Details()
+		if len(appErr.Details) > 0 {
+			details = appErr.Details
 		}
 
 		return &APIError{
@@ -392,8 +392,43 @@ func FromAppError(err error) *APIError {
 		}
 	}
 
-	// Fallback for plain errors
+	// Fallback: use sentinel error mapping from pkg/errors.
+	status := pkgerrors.HTTPStatusCode(err)
+	if status != http.StatusInternalServerError {
+		code := httpStatusToErrorCode(status)
+		return &APIError{
+			Status:  status,
+			Code:    code,
+			Message: err.Error(),
+		}
+	}
+
+	// Plain error — return as internal.
 	return Internal(err.Error())
+}
+
+// httpStatusToErrorCode maps an HTTP status to an appropriate error code.
+func httpStatusToErrorCode(status int) ErrorCode {
+	switch status {
+	case http.StatusBadRequest:
+		return ErrCodeInvalidInput
+	case http.StatusUnauthorized:
+		return ErrCodeUnauthorized
+	case http.StatusForbidden:
+		return ErrCodeForbidden
+	case http.StatusNotFound:
+		return ErrCodeNotFound
+	case http.StatusConflict:
+		return ErrCodeConflict
+	case http.StatusTooManyRequests:
+		return ErrCodeRateLimited
+	case http.StatusGatewayTimeout:
+		return ErrCodeTimeout
+	case http.StatusServiceUnavailable:
+		return ErrCodeServiceUnavailable
+	default:
+		return ErrCodeInternal
+	}
 }
 
 // FromError converts any error to an APIError.

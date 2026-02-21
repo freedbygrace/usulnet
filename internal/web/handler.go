@@ -35,6 +35,12 @@ import (
 	imagesignsvc "github.com/fr4nsys/usulnet/internal/services/imagesign"
 	logaggsvc "github.com/fr4nsys/usulnet/internal/services/logagg"
 	opasvc "github.com/fr4nsys/usulnet/internal/services/opa"
+	changessvc "github.com/fr4nsys/usulnet/internal/services/changes"
+	costoptsvc "github.com/fr4nsys/usulnet/internal/services/costopt"
+	driftsvc "github.com/fr4nsys/usulnet/internal/services/drift"
+	dashboardsvc "github.com/fr4nsys/usulnet/internal/services/dashboard"
+	registrysvc "github.com/fr4nsys/usulnet/internal/services/registry"
+	recordingsvc "github.com/fr4nsys/usulnet/internal/services/recording"
 	runtimesvc "github.com/fr4nsys/usulnet/internal/services/runtime"
 	swarmsvc "github.com/fr4nsys/usulnet/internal/services/swarm"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages"
@@ -69,7 +75,7 @@ type Services interface {
 
 // Service interfaces (defined here for compilation, actual implementations in services package)
 type ContainerService interface {
-	List(ctx context.Context, filters map[string]string) ([]ContainerView, error)
+	List(ctx context.Context, filters map[string]string) ([]ContainerView, int64, error)
 	Get(ctx context.Context, id string) (*ContainerView, error)
 	Create(ctx context.Context, input *ContainerCreateInput) (string, error)
 	Start(ctx context.Context, id string) error
@@ -130,17 +136,19 @@ type ImageService interface {
 	Remove(ctx context.Context, id string, force bool) error
 	Prune(ctx context.Context) (int64, error)
 	Pull(ctx context.Context, reference string) error
+	PullWithAuth(ctx context.Context, reference string, auth *models.RegistryAuthConfig) error
 }
 
 // VolumeFileEntry represents a file/directory inside a volume for browsing.
 type VolumeFileEntry struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	IsDir     bool   `json:"is_dir"`
-	Size      int64  `json:"size"`
-	SizeHuman string `json:"size_human"`
-	Mode      string `json:"mode"`
-	ModTime   string `json:"mod_time"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	IsDir      bool   `json:"is_dir"`
+	Size       int64  `json:"size"`
+	SizeHuman  string `json:"size_human"`
+	Mode       string `json:"mode"`
+	ModTime    string `json:"mod_time"`
+	ModTimeAgo string `json:"mod_time_ago"`
 }
 
 type VolumeService interface {
@@ -170,6 +178,7 @@ type StackService interface {
 	GetServices(ctx context.Context, name string) ([]StackServiceView, error)
 	GetComposeConfig(ctx context.Context, name string) (string, error)
 	Deploy(ctx context.Context, name, composeFile string) error
+	DeployStream(ctx context.Context, name, composeFile string, logCh chan<- string) (string, error)
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error
 	Restart(ctx context.Context, name string) error
@@ -411,6 +420,7 @@ type TeamService interface {
 	GrantAccess(ctx context.Context, teamID uuid.UUID, resourceType models.ResourceType, resourceID string, level models.AccessLevel, grantedBy uuid.UUID) error
 	RevokeAccess(ctx context.Context, teamID uuid.UUID, resourceType models.ResourceType, resourceID string) error
 	RevokeAccessByID(ctx context.Context, permID uuid.UUID) error
+	RevokeAccessByIDForTeam(ctx context.Context, permID, teamID uuid.UUID) error
 	ListPermissions(ctx context.Context, teamID uuid.UUID) ([]*models.ResourcePermission, error)
 	TeamsExist(ctx context.Context) (bool, error)
 	TeamCount(ctx context.Context) (int, error)
@@ -568,6 +578,12 @@ type MetricsServiceFull interface {
 	GetPrometheusMetrics(ctx context.Context) (string, error)
 }
 
+// NotificationSender abstracts the notification service for sending messages
+// from web handlers (runbooks, alerts, etc.) without importing the full service.
+type NotificationSender interface {
+	SendRunbookNotification(ctx context.Context, runbookName, stepName, channel, message string) error
+}
+
 // LicenseProviderWeb provides license state to web handlers.
 type LicenseProviderWeb interface {
 	GetInfo() *license.Info
@@ -581,6 +597,9 @@ type LicenseProviderWeb interface {
 type Handler struct {
 	services       Services
 	version        string
+	commit         string
+	buildTime      string
+	mode           string
 	sessionStore   SessionStore
 	totpSigningKey []byte
 	// Optional profile repositories (set via SetXxxRepo methods)
@@ -624,15 +643,39 @@ type Handler struct {
 	imageSignSvc           *imagesignsvc.Service
 	runtimeSecSvc          *runtimesvc.Service
 	// Phase 3: Market Expansion - GitOps
+	gitSvcFull    *gitsvc.Service
 	gitSyncSvc    *gitsyncsvc.Service
 	ephemeralSvc  *ephemeralsvc.Service
 	manifestSvc   *manifestsvc.Service
+	// Phase 3 Enterprise: Change Management Audit Trail
+	changesSvc *changessvc.Service
+	// Phase 3 Enterprise: Drift Detection
+	driftSvc *driftsvc.Service
+	// Cost/Resource Optimization
+	costOptSvc *costoptsvc.Service
+	// Phase 4: Custom dashboards
+	dashboardSvc *dashboardsvc.Service
+	// Phase 7.2: Session recording replay
+	recordingSvc *recordingsvc.Service
+	// Phase 6: Registry browsing
+	registryBrowseSvc *registrysvc.Service
+	// Notification service for dispatching alerts from runbooks, etc.
+	notificationSvc NotificationSender
 	// Host terminal config (centralized from app config)
 	hostTerminalConfig HostTerminalConfig
 	// Guacd config for web-based RDP sessions
 	guacdConfig GuacdConfig
+	// dataDir is the base data directory for file storage (log uploads, etc.)
+	dataDir string
 	// BaseURL is the external server URL for absolute link generation
 	baseURL string
+	// About page / system probes
+	db              DatabaseProber
+	redisProber     RedisProber
+	natsProber      NATSProber
+	redisURL        string
+	dbSSLMode       string
+	backupEncryptor BackupEncryptor
 }
 
 // HandlerDeps holds all dependencies for Handler constructor injection.
@@ -640,6 +683,9 @@ type Handler struct {
 type HandlerDeps struct {
 	Services       Services
 	Version        string
+	Commit         string
+	BuildTime      string
+	Mode           string
 	SessionStore   SessionStore
 	TOTPSigningKey []byte
 	BaseURL        string
@@ -685,9 +731,24 @@ type HandlerDeps struct {
 	ImageSignSvc           *imagesignsvc.Service
 	RuntimeSecSvc          *runtimesvc.Service
 	// Phase 3: GitOps
+	GitSvcFull   *gitsvc.Service
 	GitSyncSvc   *gitsyncsvc.Service
 	EphemeralSvc *ephemeralsvc.Service
 	ManifestSvc  *manifestsvc.Service
+	// Phase 3 Enterprise: Change Management Audit Trail
+	ChangesSvc *changessvc.Service
+	// Phase 3 Enterprise: Drift Detection
+	DriftSvc *driftsvc.Service
+	// Cost/Resource Optimization
+	CostOptSvc *costoptsvc.Service
+	// Phase 4: Custom dashboards
+	DashboardSvc *dashboardsvc.Service
+	// Phase 7.2: Session recording replay
+	RecordingSvc *recordingsvc.Service
+	// Phase 6: Registry browsing
+	RegistryBrowseSvc *registrysvc.Service
+	// Notification sender for runbooks/alerts
+	NotificationSvc NotificationSender
 	// Host terminal config
 	TerminalEnabled bool
 	TerminalUser    string
@@ -696,6 +757,15 @@ type HandlerDeps struct {
 	GuacdEnabled bool
 	GuacdHost    string
 	GuacdPort    int
+	// About page / system probes (nil-safe)
+	DB              DatabaseProber
+	RedisProber     RedisProber
+	NATSProber      NATSProber
+	RedisURL        string
+	DBSSLMode       string
+	BackupEncryptor BackupEncryptor
+	// DataDir is the base data directory for file storage (defaults to storage.path)
+	DataDir string
 }
 
 // NewTemplHandler creates a new web handler with all dependencies injected via HandlerDeps.
@@ -703,6 +773,9 @@ func NewTemplHandler(deps HandlerDeps) *Handler {
 	return &Handler{
 		services:               deps.Services,
 		version:                deps.Version,
+		commit:                 deps.Commit,
+		buildTime:              deps.BuildTime,
+		mode:                   deps.Mode,
 		sessionStore:           deps.SessionStore,
 		totpSigningKey:         deps.TOTPSigningKey,
 		baseURL:                deps.BaseURL,
@@ -744,15 +817,30 @@ func NewTemplHandler(deps HandlerDeps) *Handler {
 		logAggSvc:              deps.LogAggSvc,
 		imageSignSvc:           deps.ImageSignSvc,
 		runtimeSecSvc:          deps.RuntimeSecSvc,
+		gitSvcFull:             deps.GitSvcFull,
 		gitSyncSvc:             deps.GitSyncSvc,
 		ephemeralSvc:           deps.EphemeralSvc,
 		manifestSvc:            deps.ManifestSvc,
+		changesSvc:             deps.ChangesSvc,
+		driftSvc:               deps.DriftSvc,
+		costOptSvc:             deps.CostOptSvc,
+		dashboardSvc:           deps.DashboardSvc,
+		recordingSvc:           deps.RecordingSvc,
+		registryBrowseSvc:      deps.RegistryBrowseSvc,
+		notificationSvc:        deps.NotificationSvc,
 		hostTerminalConfig: HostTerminalConfig{
 			Enabled: deps.TerminalEnabled,
 			User:    deps.TerminalUser,
 			Shell:   deps.TerminalShell,
 		},
-		guacdConfig: buildGuacdConfig(deps),
+		guacdConfig:     buildGuacdConfig(deps),
+		dataDir:         deps.DataDir,
+		db:              deps.DB,
+		redisProber:     deps.RedisProber,
+		natsProber:      deps.NATSProber,
+		redisURL:        deps.RedisURL,
+		dbSSLMode:       deps.DBSSLMode,
+		backupEncryptor: deps.BackupEncryptor,
 	}
 }
 
@@ -852,14 +940,37 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 2: Check if user has TOTP 2FA enabled
-	hasTOTP, _ := h.services.Users().HasTOTP(r.Context(), userCtx.ID)
-	if hasTOTP && len(h.totpSigningKey) > 0 {
-		// Generate pending token and redirect to TOTP verification
+	// Step 2: Check if user has TOTP 2FA enabled.
+	// Fail closed: if HasTOTP errors (e.g. DB timeout), block login rather than
+	// bypassing 2FA. If TOTP is enabled but the signing key is missing, also
+	// block — a misconfigured server must not silently skip the second factor.
+	hasTOTP, totpErr := h.services.Users().HasTOTP(r.Context(), userCtx.ID)
+	if totpErr != nil {
+		slog.Error("failed to check TOTP status", "user_id", userCtx.ID, "error", totpErr)
+		h.redirect(w, r, "/login?error=Authentication+service+temporarily+unavailable")
+		return
+	}
+	if hasTOTP && len(h.totpSigningKey) == 0 {
+		slog.Error("user has TOTP enabled but TOTP signing key is not configured", "user_id", userCtx.ID)
+		h.redirect(w, r, "/login?error=Two-factor+authentication+is+misconfigured.+Contact+your+administrator.")
+		return
+	}
+	if hasTOTP {
+		// Generate pending token and store in a short-lived HttpOnly cookie
+		// instead of the URL to prevent leaking via logs, Referer, and browser history.
 		token := totppkg.GeneratePendingToken(userCtx.ID, h.totpSigningKey)
-		redirectURL := "/login/totp?token=" + token
+		http.SetCookie(w, &http.Cookie{
+			Name:     "totp_pending",
+			Value:    token,
+			Path:     "/login/totp",
+			MaxAge:   300, // 5 minutes
+			HttpOnly: true,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteStrictMode,
+		})
+		redirectURL := "/login/totp"
 		if returnURL != "" {
-			redirectURL += "&return=" + returnURL
+			redirectURL += "?return=" + url.QueryEscape(returnURL)
 		}
 		h.redirect(w, r, redirectURL)
 		return
@@ -887,7 +998,7 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	RecordAccessEvent(userCtx.Username, userCtx.ID, "login", "session", session.ID, "", "Login successful", getClientIP(r), r.UserAgent(), true, "")
 
 	// Redirect to return URL or dashboard (validate to prevent open redirect)
-	if returnURL != "" && returnURL != "/login" && strings.HasPrefix(returnURL, "/") && !strings.HasPrefix(returnURL, "//") {
+	if returnURL != "" && isSafeReturnURL(returnURL) {
 		h.redirect(w, r, returnURL)
 		return
 	}
@@ -897,7 +1008,7 @@ func (h *Handler) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 // Logout handles user logout.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Get session to retrieve session ID for auth service logout
-	session, _ := h.sessionStore.Get(r, "usulnet_session")
+	session, _ := h.sessionStore.Get(r, CookieSession)
 	userName := ""
 	userID := ""
 	if session != nil {
@@ -913,7 +1024,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	RecordAccessEvent(userName, userID, "logout", "session", "", "", "User logged out", getClientIP(r), r.UserAgent(), true, "")
 
 	// Delete session cookie
-	if err := h.sessionStore.Delete(r, w, "usulnet_session"); err != nil {
+	if err := h.sessionStore.Delete(r, w, CookieSession); err != nil {
 		h.logger.Warn("failed to delete session cookie", "error", err)
 	}
 	h.redirect(w, r, "/login")
@@ -1017,12 +1128,13 @@ func (h *Handler) ContainerRemove(w http.ResponseWriter, r *http.Request) {
 	id := getIDParam(r)
 	force := r.FormValue("force") == "true"
 	if err := h.services.Containers().Remove(ctx, id, force); err != nil {
-		h.setFlash(w, r, "error", "Failed to remove container: "+err.Error())
-		http.Redirect(w, r, "/containers/"+id, http.StatusSeeOther)
+		h.htmxTrigger(w, `{"showToast":{"type":"error","message":"Failed to remove container: `+strings.ReplaceAll(err.Error(), `"`, `'`)+`"}}`)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	h.htmxTrigger(w, `{"showToast":{"type":"success","message":"Container removed"}}`)
-	h.redirect(w, r, "/containers")
+	// Empty body: HTMX will swap the row with nothing (outerHTML swap removes the row).
+	w.WriteHeader(http.StatusOK)
 }
 
 // Bulk container operations
@@ -1230,12 +1342,12 @@ func (h *Handler) ImageRemove(w http.ResponseWriter, r *http.Request) {
 	id := getIDParam(r)
 	force := r.FormValue("force") == "true"
 	if err := h.services.Images().Remove(ctx, id, force); err != nil {
-		h.setFlash(w, r, "error", "Failed to remove image: "+err.Error())
-		h.redirect(w, r, "/images")
+		h.htmxTrigger(w, `{"showToast":{"type":"error","message":"Failed to remove image: `+strings.ReplaceAll(err.Error(), `"`, `'`)+`"}}`)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
-	h.setFlash(w, r, "success", "Image removed successfully")
-	h.redirect(w, r, "/images")
+	h.htmxTrigger(w, `{"showToast":{"type":"success","message":"Image removed"}}`)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) ImagesPrune(w http.ResponseWriter, r *http.Request) {
@@ -1280,12 +1392,12 @@ func (h *Handler) VolumeRemove(w http.ResponseWriter, r *http.Request) {
 	name := getNameParam(r)
 	force := r.FormValue("force") == "true"
 	if err := h.services.Volumes().Remove(ctx, name, force); err != nil {
-		h.setFlash(w, r, "error", "Failed to remove volume: "+err.Error())
-		h.redirect(w, r, "/volumes")
+		h.htmxTrigger(w, `{"showToast":{"type":"error","message":"Failed to remove volume: `+strings.ReplaceAll(err.Error(), `"`, `'`)+`"}}`)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
-	h.setFlash(w, r, "success", "Volume removed successfully")
-	h.redirect(w, r, "/volumes")
+	h.htmxTrigger(w, `{"showToast":{"type":"success","message":"Volume removed"}}`)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) VolumesPrune(w http.ResponseWriter, r *http.Request) {
@@ -1445,6 +1557,12 @@ func (h *Handler) StackDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SSE streaming mode: browser sends X-Deploy-Stream: 1
+	if r.Header.Get("X-Deploy-Stream") == "1" {
+		h.stackDeploySSE(w, r, name, composeFile)
+		return
+	}
+
 	if err := h.services.Stacks().Deploy(ctx, name, composeFile); err != nil {
 		slog.Error("stack deploy failed", "name", name, "error", err)
 		h.setFlash(w, r, "error", "Failed to deploy stack: "+err.Error())
@@ -1453,6 +1571,59 @@ func (h *Handler) StackDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	h.setFlash(w, r, "success", "Stack '"+name+"' deployed successfully")
 	h.redirect(w, r, "/stacks/"+name)
+}
+
+// stackDeploySSE runs a streaming stack deploy and writes SSE events to the client.
+// Events:
+//
+//	event: log\ndata: <line>\n\n
+//	event: done\ndata: {"ok":true,"redirect":"/stacks/<name>"}\n\n
+//	event: done\ndata: {"ok":false,"error":"..."}\n\n
+func (h *Handler) stackDeploySSE(w http.ResponseWriter, r *http.Request, name, composeFile string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no") // Nginx: disable buffering
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ctx := r.Context()
+	logCh := make(chan string, 64)
+
+	type doneResult struct {
+		stackName string
+		err       error
+	}
+	doneCh := make(chan doneResult, 1)
+
+	go func() {
+		sn, err := h.services.Stacks().DeployStream(ctx, name, composeFile, logCh)
+		doneCh <- doneResult{stackName: sn, err: err}
+	}()
+
+	writeSSE := func(event, data string) {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+		flusher.Flush()
+	}
+
+	for line := range logCh {
+		// Escape newlines inside the data field so SSE framing stays intact.
+		escaped := strings.ReplaceAll(line, "\n", " ")
+		writeSSE("log", escaped)
+	}
+
+	res := <-doneCh
+	if res.err != nil {
+		msg, _ := json.Marshal(res.err.Error())
+		writeSSE("done", fmt.Sprintf(`{"ok":false,"error":%s}`, msg))
+		return
+	}
+	writeSSE("done", fmt.Sprintf(`{"ok":true,"redirect":"/stacks/%s"}`, url.PathEscape(res.stackName)))
 }
 
 func (h *Handler) StackStart(w http.ResponseWriter, r *http.Request) {
@@ -1561,23 +1732,45 @@ func (h *Handler) SecurityIssueResolve(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateChangelog(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
-	changelog, _ := h.services.Updates().GetChangelog(ctx, id)
 	w.Header().Set("Content-Type", "text/plain")
+	updatesSvc := h.services.Updates()
+	if updatesSvc == nil {
+		w.Write([]byte("Updates service not configured"))
+		return
+	}
+	changelog, _ := updatesSvc.GetChangelog(ctx, id)
 	w.Write([]byte(changelog))
 }
 
 func (h *Handler) UpdateBatch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	htmxRedirectUpdates := func() {
+		if r.Header.Get("HX-Request") == "true" {
+			w.Header().Set("HX-Redirect", "/updates")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		h.redirect(w, r, "/updates")
+	}
+
+	updatesSvc := h.services.Updates()
+	if updatesSvc == nil {
+		h.setFlash(w, r, "error", "Updates service is not configured")
+		htmxRedirectUpdates()
+		return
+	}
+
 	r.ParseForm()
 	containerIDs := r.Form["container_ids"]
 
 	if len(containerIDs) == 0 {
 		// If no specific containers selected, get all available updates
-		updates, err := h.services.Updates().ListAvailable(ctx)
+		updates, err := updatesSvc.ListAvailable(ctx)
 		if err != nil {
 			slog.Error("Failed to list available updates", "error", err)
 			h.setFlash(w, r, "error", "Failed to fetch available updates")
-			h.redirect(w, r, "/updates")
+			htmxRedirectUpdates()
 			return
 		}
 		for _, u := range updates {
@@ -1587,13 +1780,13 @@ func (h *Handler) UpdateBatch(w http.ResponseWriter, r *http.Request) {
 
 	if len(containerIDs) == 0 {
 		h.setFlash(w, r, "info", "No updates available")
-		h.redirect(w, r, "/updates")
+		htmxRedirectUpdates()
 		return
 	}
 
 	var succeeded, failed int
 	for _, cid := range containerIDs {
-		if err := h.services.Updates().Apply(ctx, cid, true, ""); err != nil {
+		if err := updatesSvc.Apply(ctx, cid, true, ""); err != nil {
 			slog.Error("Failed to apply update", "container", cid, "error", err)
 			failed++
 		} else {
@@ -1606,7 +1799,7 @@ func (h *Handler) UpdateBatch(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.setFlash(w, r, "success", fmt.Sprintf("Successfully updated %d containers", succeeded))
 	}
-	h.redirect(w, r, "/updates")
+	htmxRedirectUpdates()
 }
 
 // ============================================================================
@@ -1614,6 +1807,12 @@ func (h *Handler) UpdateBatch(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (h *Handler) BackupCreate(w http.ResponseWriter, r *http.Request) {
+	if h.services.Backups() == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		h.redirect(w, r, "/backups")
+		return
+	}
+
 	backupType := r.FormValue("type")
 	targetID := r.FormValue("target_id")
 	compression := r.FormValue("compression")
@@ -1683,7 +1882,13 @@ func (h *Handler) BackupCreate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) BackupDownload(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
-	reader, filename, size, err := h.services.Backups().DownloadStream(ctx, id)
+	backupsSvc := h.services.Backups()
+	if backupsSvc == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		http.Redirect(w, r, "/backups", http.StatusSeeOther)
+		return
+	}
+	reader, filename, size, err := backupsSvc.DownloadStream(ctx, id)
 	if err != nil {
 		h.setFlash(w, r, "error", "Failed to download backup: "+err.Error())
 		http.Redirect(w, r, "/backups", http.StatusSeeOther)
@@ -1702,6 +1907,11 @@ func (h *Handler) BackupDownload(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) BackupRestore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
+	if h.services.Backups() == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		h.redirect(w, r, "/backups")
+		return
+	}
 	if err := h.services.Backups().Restore(ctx, id); err != nil {
 		h.setFlash(w, r, "error", "Failed to restore backup: "+err.Error())
 	} else {
@@ -1713,6 +1923,11 @@ func (h *Handler) BackupRestore(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) BackupRemove(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
+	if h.services.Backups() == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		h.redirect(w, r, "/backups")
+		return
+	}
 	if err := h.services.Backups().Remove(ctx, id); err != nil {
 		h.setFlash(w, r, "error", "Failed to delete backup: "+err.Error())
 	} else {
@@ -1723,6 +1938,12 @@ func (h *Handler) BackupRemove(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) BackupScheduleCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	if h.services.Backups() == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		http.Redirect(w, r, "/backups/schedules", http.StatusSeeOther)
+		return
+	}
 
 	backupType := r.FormValue("type")
 	targetID := r.FormValue("target_id")
@@ -1761,10 +1982,23 @@ func (h *Handler) BackupScheduleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve human-readable target name from form or container lookup
+	targetName := r.FormValue("target_name")
+	if targetName == "" {
+		targetName = targetID // fallback to ID
+		if backupType == "container" {
+			if containerSvc := h.services.Containers(); containerSvc != nil {
+				if c, err := containerSvc.Get(ctx, targetID); err == nil && c != nil {
+					targetName = c.Name
+				}
+			}
+		}
+	}
+
 	input := BackupScheduleInput{
 		Type:          backupType,
 		TargetID:      targetID,
-		TargetName:    targetID,
+		TargetName:    targetName,
 		Schedule:      schedule,
 		Compression:   compression,
 		Encrypted:     encrypted,
@@ -1784,6 +2018,11 @@ func (h *Handler) BackupScheduleCreate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) BackupScheduleDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
+	if h.services.Backups() == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		http.Redirect(w, r, "/backups/schedules", http.StatusSeeOther)
+		return
+	}
 	if err := h.services.Backups().DeleteSchedule(ctx, id); err != nil {
 		h.setFlash(w, r, "error", "Failed to delete schedule: "+err.Error())
 	} else {
@@ -1795,6 +2034,11 @@ func (h *Handler) BackupScheduleDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) BackupScheduleRun(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
+	if h.services.Backups() == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		http.Redirect(w, r, "/backups/schedules", http.StatusSeeOther)
+		return
+	}
 	if err := h.services.Backups().RunSchedule(ctx, id); err != nil {
 		h.setFlash(w, r, "error", "Failed to run schedule: "+err.Error())
 	} else {

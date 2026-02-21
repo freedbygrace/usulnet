@@ -124,13 +124,13 @@ func (c *Client) GetConfig(ctx context.Context, path string) (json.RawMessage, e
 func (c *Client) SetConfig(ctx context.Context, path string, value interface{}) error {
 	body, err := json.Marshal(value)
 	if err != nil {
-		return err
+		return fmt.Errorf("caddy: marshal config value: %w", err)
 	}
 
 	url := c.cfg.AdminURL + "/config/" + strings.TrimLeft(path, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("caddy: create set config request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -152,7 +152,7 @@ func (c *Client) DeleteConfig(ctx context.Context, path string) error {
 	url := c.cfg.AdminURL + "/config/" + strings.TrimLeft(path, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("caddy: create delete config request: %w", err)
 	}
 
 	resp, err := c.http.Do(req)

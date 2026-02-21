@@ -86,13 +86,16 @@ func (a *caddyProxyAdapter) CreateHost(ctx context.Context, v *ProxyHostView) er
 	}
 
 	_, err := a.svc.CreateHost(ctx, input, nil)
-	return err
+	if err != nil {
+		return fmt.Errorf("createHost: create proxy host %q: %w", v.Domain, err)
+	}
+	return nil
 }
 
 func (a *caddyProxyAdapter) UpdateHost(ctx context.Context, v *ProxyHostView) error {
 	uid, err := a.resolveHostID(ctx, v.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("updateHost: resolve host id %d: %w", v.ID, err)
 	}
 
 	scheme := models.ProxyUpstreamHTTP
@@ -113,13 +116,16 @@ func (a *caddyProxyAdapter) UpdateHost(ctx context.Context, v *ProxyHostView) er
 	}
 
 	_, err = a.svc.UpdateHost(ctx, uid, input, nil)
-	return err
+	if err != nil {
+		return fmt.Errorf("updateHost: update proxy host %q: %w", v.Domain, err)
+	}
+	return nil
 }
 
 func (a *caddyProxyAdapter) RemoveHost(ctx context.Context, id int) error {
 	uid, err := a.resolveHostID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("removeHost: resolve host id %d: %w", id, err)
 	}
 	return a.svc.DeleteHost(ctx, uid, nil)
 }
@@ -127,7 +133,7 @@ func (a *caddyProxyAdapter) RemoveHost(ctx context.Context, id int) error {
 func (a *caddyProxyAdapter) EnableHost(ctx context.Context, id int) error {
 	uid, err := a.resolveHostID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("enableHost: resolve host id %d: %w", id, err)
 	}
 	return a.svc.EnableHost(ctx, uid, nil)
 }
@@ -135,13 +141,13 @@ func (a *caddyProxyAdapter) EnableHost(ctx context.Context, id int) error {
 func (a *caddyProxyAdapter) DisableHost(ctx context.Context, id int) error {
 	uid, err := a.resolveHostID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("disableHost: resolve host id %d: %w", id, err)
 	}
 	return a.svc.DisableHost(ctx, uid, nil)
 }
 
 func (a *caddyProxyAdapter) Sync(ctx context.Context) error {
-	return a.svc.SyncToCaddy(ctx)
+	return a.svc.Sync(ctx)
 }
 
 // ---- Redirections (not implemented in Caddy Phase 1) ----
@@ -241,24 +247,58 @@ func (a *caddyProxyAdapter) GetCertificate(ctx context.Context, id int) (*Certif
 }
 
 func (a *caddyProxyAdapter) RequestLECertificate(ctx context.Context, domains []string, email string, agree bool, dnsChallenge bool, dnsProvider, dnsCredentials string, propagation int) error {
-	// In Caddy mode, SSL is automatic. This is a no-op—just sync.
-	return a.svc.SyncToCaddy(ctx)
+	// Request certificate via the active backend.
+	// For Caddy, this triggers a sync (Caddy handles ACME automatically).
+	// For nginx, this runs the ACME flow and writes cert files.
+	certPEM, keyPEM, err := a.svc.RequestLECertificate(ctx, domains, email)
+	if err != nil {
+		return fmt.Errorf("requestLECertificate: request certificate for %v: %w", domains, err)
+	}
+	// If the backend returned a certificate, store it in the database
+	if certPEM != "" && keyPEM != "" {
+		_, err = a.svc.UploadCertificate(ctx, domains[0], domains, certPEM, keyPEM, "", nil)
+		if err != nil {
+			return fmt.Errorf("store LE certificate: %w", err)
+		}
+	}
+	// Sync to apply the new certificate
+	return a.svc.Sync(ctx)
 }
 
 func (a *caddyProxyAdapter) UploadCustomCertificate(ctx context.Context, niceName string, cert, key, intermediate []byte) error {
 	_, err := a.svc.UploadCertificate(ctx, niceName, nil, string(cert), string(key), string(intermediate), nil)
-	return err
+	if err != nil {
+		return fmt.Errorf("uploadCustomCertificate: upload certificate %q: %w", niceName, err)
+	}
+	return nil
 }
 
 func (a *caddyProxyAdapter) RenewCertificate(ctx context.Context, id int) error {
-	// Caddy handles renewal automatically
+	// For Caddy, auto-renewal is handled automatically.
+	// For nginx, we re-request the certificate.
+	certs, err := a.svc.ListCertificates(ctx)
+	if err != nil {
+		return fmt.Errorf("renewCertificate: list certificates: %w", err)
+	}
+	idx := id - 1
+	if idx < 0 || idx >= len(certs) {
+		return fmt.Errorf("certificate not found")
+	}
+	cert := certs[idx]
+	if cert.Provider == "custom" {
+		return fmt.Errorf("cannot auto-renew custom certificates")
+	}
+	_, _, err = a.svc.RenewLECertificate(ctx, cert.Domains, "")
+	if err != nil {
+		return fmt.Errorf("renewCertificate: renew certificate %d: %w", id, err)
+	}
 	return nil
 }
 
 func (a *caddyProxyAdapter) DeleteCertificate(ctx context.Context, id int) error {
 	certs, err := a.svc.ListCertificates(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("deleteCertificate: list certificates: %w", err)
 	}
 	idx := id - 1
 	if idx < 0 || idx >= len(certs) {
@@ -315,16 +355,17 @@ func (a *caddyProxyAdapter) ListAuditLogs(ctx context.Context, limit, offset int
 // ---- Connection management (Caddy mode: simplified) ----
 
 func (a *caddyProxyAdapter) GetConnection(ctx context.Context) (*models.NPMConnection, error) {
-	healthy, _ := a.svc.CaddyHealthy(ctx)
+	healthy, _ := a.svc.BackendHealthy(ctx)
 	status := "unhealthy"
 	if healthy {
 		status = "healthy"
 	}
 
+	mode := a.svc.BackendMode()
 	// Return a synthetic connection object for UI compatibility
 	return &models.NPMConnection{
-		ID:           "caddy",
-		BaseURL:      "caddy:2019",
+		ID:           mode,
+		BaseURL:      mode,
 		IsEnabled:    true,
 		HealthStatus: status,
 	}, nil
@@ -344,33 +385,30 @@ func (a *caddyProxyAdapter) DeleteConnection(ctx context.Context, connID string)
 }
 
 func (a *caddyProxyAdapter) IsConnected(ctx context.Context) bool {
-	healthy, _ := a.svc.CaddyHealthy(ctx)
+	healthy, _ := a.svc.BackendHealthy(ctx)
 	return healthy
 }
 
 func (a *caddyProxyAdapter) Mode() string {
-	return "caddy"
+	return a.svc.BackendMode()
 }
 
 // ---- UUID resolution ----
 
-// resolveHostID maps a legacy int ID to a UUID.
-// The int ID is the 1-based index in the ordered host list.
-// This is a transitional approach until the web layer fully uses UUIDs.
+// resolveHostID maps a legacy int ID (produced by hashUUIDToInt) back to a UUID.
+// It lists all hosts and finds the one whose hashUUIDToInt matches the given ID.
 func (a *caddyProxyAdapter) resolveHostID(ctx context.Context, id int) (uuid.UUID, error) {
 	hosts, err := a.svc.ListHosts(ctx)
 	if err != nil {
 		return uuid.Nil, err
 	}
 
-	// Try parsing as UUID string first (if templates pass uuid as param)
-	// The id parameter comes from chi URL params which are strings.
-	// But since the interface uses int, we fall back to index-based.
-	idx := id - 1
-	if idx < 0 || idx >= len(hosts) {
-		return uuid.Nil, fmt.Errorf("proxy host not found: index %d", id)
+	for _, h := range hosts {
+		if hashUUIDToInt(h.ID) == id {
+			return h.ID, nil
+		}
 	}
-	return hosts[idx].ID, nil
+	return uuid.Nil, fmt.Errorf("proxy host not found: id %d", id)
 }
 
 // proxyHostToView converts a ProxyHost model to the legacy ProxyHostView.

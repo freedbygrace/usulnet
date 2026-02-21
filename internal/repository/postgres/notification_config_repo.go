@@ -57,8 +57,8 @@ func (r *NotificationConfigRepository) SaveChannelConfig(ctx context.Context, co
 		config.Name,
 		config.Type,
 		config.Enabled,
-		settingsJSON,
-		typesJSON,
+		string(settingsJSON),
+		string(typesJSON),
 		int(config.MinPriority),
 		time.Now(),
 	)
@@ -212,21 +212,27 @@ func (r *NotificationConfigRepository) SaveRoutingRules(ctx context.Context, rul
 		categoriesJSON, _ := json.Marshal(rule.Categories)
 		channelsJSON, _ := json.Marshal(rule.Channels)
 		excludeJSON, _ := json.Marshal(rule.ExcludeChannels)
-		
+
 		var timeWindowJSON []byte
 		if rule.TimeWindow != nil {
 			timeWindowJSON, _ = json.Marshal(rule.TimeWindow)
 		}
 
+		var timeWindowStr *string
+		if timeWindowJSON != nil {
+			s := string(timeWindowJSON)
+			timeWindowStr = &s
+		}
+
 		_, err := tx.Exec(ctx, query,
 			rule.Name,
 			rule.Enabled,
-			typesJSON,
+			string(typesJSON),
 			int(rule.MinPriority),
-			categoriesJSON,
-			channelsJSON,
-			excludeJSON,
-			timeWindowJSON,
+			string(categoriesJSON),
+			string(channelsJSON),
+			string(excludeJSON),
+			timeWindowStr,
 			i, // position for ordering
 		)
 		if err != nil {

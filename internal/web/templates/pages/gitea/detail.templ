@@ -976,8 +976,8 @@ templ tier1Scripts(data RepoDetailData) {
 				
 				// Show results
 				document.getElementById('compare-results').classList.remove('hidden');
-				document.getElementById('compare-stats').innerHTML = 
-					`<span class="text-green-400">${compare.total_commits} commits</span> ahead of ${base}`;
+				document.getElementById('compare-stats').innerHTML =
+					`<span class="text-green-400">${escapeHtml(String(compare.total_commits))} commits</span> ahead of ${escapeHtml(base)}`;
 				document.getElementById('compare-diff').querySelector('pre').textContent = diff || 'No differences';
 			} catch (err) {
 				alert('Error comparing: ' + err.message);
@@ -1000,14 +1000,14 @@ templ tier1Scripts(data RepoDetailData) {
 						<div>
 							<p class="text-white font-medium">${escapeHtml(commit.commit.message)}<\/p>
 							<p class="text-sm text-gray-400 mt-2">
-								<i class="fas fa-user mr-1"><\/i>${commit.commit.author?.name || 'Unknown'}
+								<i class="fas fa-user mr-1"><\/i>${escapeHtml(commit.commit.author?.name || 'Unknown')}
 								<span class="mx-2">•<\/span>
-								<i class="fas fa-clock mr-1"><\/i>${commit.commit.author?.date || ''}
+								<i class="fas fa-clock mr-1"><\/i>${escapeHtml(commit.commit.author?.date || '')}
 							<\/p>
 						<\/div>
 						<div class="text-sm">
 							<span class="text-gray-500">SHA:<\/span>
-							<code class="text-gray-300 ml-2">${commit.sha}<\/code>
+							<code class="text-gray-300 ml-2">${escapeHtml(commit.sha)}<\/code>
 						<\/div>
 						${commit.stats ? `
 							<div class="flex gap-4 text-sm">
@@ -1039,10 +1039,9 @@ templ tier1Scripts(data RepoDetailData) {
 			}
 		};
 		
-		function escapeHtml(text) {
-			const div = document.createElement('div');
-			div.textContent = text;
-			return div.innerHTML;
+		function escapeHtml(str) {
+			if (!str) return '';
+			return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 		}
 		
 		// Close modals on Escape key
@@ -1263,7 +1262,7 @@ templ tier2Scripts(data RepoDetailData) {
 				container.innerHTML = collabs.map(c => `
 					<div class="flex items-center justify-between py-2 px-3 hover:bg-gray-700/30 rounded-lg">
 						<div class="flex items-center gap-3">
-							<img src="${c.avatar_url || '/static/img/default-avatar.png'}" 
+							<img src="${c.avatar_url && (c.avatar_url.startsWith('https://') || c.avatar_url.startsWith('http://')) ? escapeHtml(c.avatar_url) : '/static/img/default-avatar.png'}"
 								class="w-8 h-8 rounded-full" alt="${escapeHtml(c.login)}"/>
 							<div>
 								<div class="text-white text-sm">${escapeHtml(c.login)}</div>

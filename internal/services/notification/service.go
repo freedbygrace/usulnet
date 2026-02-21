@@ -48,8 +48,8 @@ type Repository interface {
 	// LogNotification stores a notification record.
 	LogNotification(ctx context.Context, log *NotificationLog) error
 	
-	// GetNotificationLogs retrieves notification history.
-	GetNotificationLogs(ctx context.Context, filter LogFilter) ([]*NotificationLog, error)
+	// GetNotificationLogs retrieves notification history with total count.
+	GetNotificationLogs(ctx context.Context, filter LogFilter) ([]*NotificationLog, int64, error)
 	
 	// GetNotificationStats returns aggregated statistics.
 	GetNotificationStats(ctx context.Context, since time.Time) (*NotificationStats, error)
@@ -325,7 +325,7 @@ func (s *Service) RegisterChannel(name string, config *channels.ChannelConfig) e
 	}
 
 	if err := s.dispatcher.RegisterChannel(name, config); err != nil {
-		return err
+		return fmt.Errorf("register notification channel %q: %w", name, err)
 	}
 
 	// Persist configuration
@@ -395,10 +395,10 @@ func (s *Service) GetStats(ctx context.Context, since time.Time) (*NotificationS
 	return s.repository.GetNotificationStats(ctx, since)
 }
 
-// GetLogs retrieves notification history.
-func (s *Service) GetLogs(ctx context.Context, filter LogFilter) ([]*NotificationLog, error) {
+// GetLogs retrieves notification history with total count.
+func (s *Service) GetLogs(ctx context.Context, filter LogFilter) ([]*NotificationLog, int64, error) {
 	if s.repository == nil {
-		return nil, fmt.Errorf("no repository configured")
+		return nil, 0, fmt.Errorf("no repository configured")
 	}
 	return s.repository.GetNotificationLogs(ctx, filter)
 }

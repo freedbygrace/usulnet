@@ -237,6 +237,12 @@ templ PacketCapture(data PacketCaptureData) {
 								</div>
 							</div>
 
+							if data.Active.Status != "running" {
+								<div class="px-4 pt-2">
+									<p class="text-xs text-gray-500">Download the PCAP and open with <a href={ templ.SafeURL("https://www.wireshark.org") } target="_blank" rel="noopener" class="text-primary-400 hover:underline">Wireshark</a> to do advanced analysis</p>
+								</div>
+							}
+
 							<!-- Capture Info -->
 							<div class="p-4 grid grid-cols-4 gap-4 border-b border-dark-600">
 								<div>
@@ -276,6 +282,122 @@ templ PacketCapture(data PacketCaptureData) {
 								}
 								<div id="capture-log" class="divide-y divide-dark-600"></div>
 							</div>
+
+							if data.Active.Status == "stopped" || data.Active.Status == "completed" {
+								<!-- Analysis Panel -->
+								<div class="p-4 border-t border-dark-600" x-data={ "{ analysis: null, loading: false, error: '', analyzeUrl: '/tools/capture/" + data.Active.ID + "/analyze' }" }>
+									<div class="flex items-center justify-between mb-3">
+										<h3 class="text-lg font-medium text-white">
+											<i class="fas fa-magnifying-glass-chart text-primary-400 mr-2"></i>PCAP Analysis
+										</h3>
+										<button
+											@click="loading = true; error = ''; fetch(analyzeUrl).then(r => r.json()).then(d => { analysis = d; loading = false; }).catch(e => { error = e.message; loading = false; })"
+											class="btn-primary text-sm"
+											:disabled="loading"
+										>
+											<i class="fas fa-magnifying-glass-chart mr-1"></i>
+											<span x-text="loading ? 'Analyzing...' : 'Analyze'"></span>
+										</button>
+									</div>
+
+									<template x-if="analysis">
+										<div class="space-y-4">
+											<!-- Summary stats -->
+											<div class="grid grid-cols-3 gap-3">
+												<div class="card p-3 text-center">
+													<p class="text-xl font-bold text-white" x-text="analysis.total_packets"></p>
+													<p class="text-xs text-gray-400">Packets</p>
+												</div>
+												<div class="card p-3 text-center">
+													<p class="text-xl font-bold text-white" x-text="analysis.total_bytes"></p>
+													<p class="text-xs text-gray-400">Bytes</p>
+												</div>
+												<div class="card p-3 text-center">
+													<p class="text-xl font-bold text-white" x-text="analysis.duration"></p>
+													<p class="text-xs text-gray-400">Duration</p>
+												</div>
+											</div>
+
+											<!-- Top Talkers -->
+											<div class="card p-4">
+												<h4 class="text-sm font-medium text-white mb-2">Top Talkers</h4>
+												<table class="w-full text-sm">
+													<thead>
+														<tr class="text-left text-gray-400 border-b border-dark-600">
+															<th class="pb-2 pr-3">IP Address</th>
+															<th class="pb-2 pr-3">Packets (src)</th>
+															<th class="pb-2 pr-3">Packets (dst)</th>
+															<th class="pb-2">Total</th>
+														</tr>
+													</thead>
+													<tbody>
+														<template x-for="t in analysis.top_talkers" :key="t.address">
+															<tr class="border-b border-dark-700">
+																<td class="py-1.5 pr-3 font-mono text-xs text-white" x-text="t.address"></td>
+																<td class="py-1.5 pr-3 text-gray-300" x-text="t.packets_src"></td>
+																<td class="py-1.5 pr-3 text-gray-300" x-text="t.packets_dst"></td>
+																<td class="py-1.5 font-medium text-white" x-text="t.total_pkts"></td>
+															</tr>
+														</template>
+													</tbody>
+												</table>
+											</div>
+
+											<!-- Protocol Breakdown -->
+											<div class="card p-4">
+												<h4 class="text-sm font-medium text-white mb-2">Protocol Breakdown</h4>
+												<table class="w-full text-sm">
+													<thead>
+														<tr class="text-left text-gray-400 border-b border-dark-600">
+															<th class="pb-2 pr-3">Protocol</th>
+															<th class="pb-2 pr-3">Count</th>
+															<th class="pb-2">%</th>
+														</tr>
+													</thead>
+													<tbody>
+														<template x-for="p in analysis.protocols" :key="p.protocol">
+															<tr class="border-b border-dark-700">
+																<td class="py-1.5 pr-3 text-white" x-text="p.protocol"></td>
+																<td class="py-1.5 pr-3 text-gray-300" x-text="p.count"></td>
+																<td class="py-1.5 text-gray-300" x-text="p.percent.toFixed(1) + '%'"></td>
+															</tr>
+														</template>
+													</tbody>
+												</table>
+											</div>
+
+											<!-- Top Connections -->
+											<div class="card p-4">
+												<h4 class="text-sm font-medium text-white mb-2">Top Connections</h4>
+												<table class="w-full text-sm">
+													<thead>
+														<tr class="text-left text-gray-400 border-b border-dark-600">
+															<th class="pb-2 pr-3">Source</th>
+															<th class="pb-2 pr-3">Destination</th>
+															<th class="pb-2 pr-3">Protocol</th>
+															<th class="pb-2">Packets</th>
+														</tr>
+													</thead>
+													<tbody>
+														<template x-for="c in analysis.connections" :key="c.source + c.destination">
+															<tr class="border-b border-dark-700">
+																<td class="py-1.5 pr-3 font-mono text-xs text-white" x-text="c.source"></td>
+																<td class="py-1.5 pr-3 font-mono text-xs text-white" x-text="c.destination"></td>
+																<td class="py-1.5 pr-3 text-gray-300" x-text="c.protocol"></td>
+																<td class="py-1.5 text-gray-300" x-text="c.packets"></td>
+															</tr>
+														</template>
+													</tbody>
+												</table>
+											</div>
+										</div>
+									</template>
+
+									<template x-if="error">
+										<div class="text-red-400 text-sm mt-2" x-text="error"></div>
+									</template>
+								</div>
+							}
 						</div>
 					} else {
 						<!-- No Active Capture -->
@@ -329,6 +451,7 @@ templ PacketCapture(data PacketCaptureData) {
 				function captureApp() {
 					return {
 						ws: null,
+						_reconnectAttempts: 0,
 						init() {
 							const el = document.getElementById('capture-live');
 							if (el && el.dataset.captureId) {
@@ -338,6 +461,9 @@ templ PacketCapture(data PacketCaptureData) {
 						connectWS(captureId) {
 							const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 							this.ws = new WebSocket(protocol + '//' + window.location.host + '/ws/capture/' + captureId);
+							this.ws.onopen = () => {
+								this._reconnectAttempts = 0;
+							};
 							this.ws.onmessage = (e) => {
 								try {
 									const msg = JSON.parse(e.data);
@@ -349,7 +475,12 @@ templ PacketCapture(data PacketCaptureData) {
 									} else if (msg.type === 'finished') {
 										const logDiv = document.getElementById('capture-log');
 										if (logDiv) {
-											logDiv.innerHTML = '<div class="p-4 text-center text-yellow-400"><i class="fas fa-check-circle mr-2"></i>' + (msg.message || 'Capture finished') + '</div>';
+											function escapeHtml(str) {
+												var div = document.createElement('div');
+												div.textContent = str;
+												return div.innerHTML;
+											}
+											logDiv.innerHTML = '<div class="p-4 text-center text-yellow-400"><i class="fas fa-check-circle mr-2"></i>' + escapeHtml(msg.message || 'Capture finished') + '</div>';
 										}
 										setTimeout(function() { location.reload(); }, 2000);
 									}
@@ -358,9 +489,14 @@ templ PacketCapture(data PacketCaptureData) {
 							this.ws.onclose = (event) => {
 								const logDiv = document.getElementById('capture-log');
 								const graceful = (event.code === 1000 || event.code === 1001);
-								if (!graceful && logDiv && !logDiv.innerHTML.includes('finished')) {
-									logDiv.innerHTML += '<div class="p-2 text-yellow-400 text-xs"><i class="fas fa-sync-alt mr-1"></i>Stream disconnected — reconnecting...</div>';
-									setTimeout(() => this.connectWS(captureId), 3000);
+								if (!graceful && logDiv && !logDiv.innerHTML.includes('finished') && this._reconnectAttempts < 5) {
+									const delay = Math.min(30000, 1000 * Math.pow(2, this._reconnectAttempts));
+									this._reconnectAttempts++;
+									const delaySec = delay * 0.001;
+									logDiv.innerHTML += '<div class="p-2 text-yellow-400 text-xs"><i class="fas fa-sync-alt mr-1"></i>Stream disconnected — reconnecting in ' + delaySec + 's... (attempt ' + this._reconnectAttempts + ' of 5)</div>';
+									setTimeout(() => this.connectWS(captureId), delay);
+								} else if (!graceful && this._reconnectAttempts >= 5 && logDiv && !logDiv.innerHTML.includes('finished')) {
+									logDiv.innerHTML += '<div class="p-2 text-red-400 text-xs"><i class="fas fa-times-circle mr-1"></i>Stream disconnected — max reconnect attempts reached.</div>';
 								} else if (logDiv && !logDiv.innerHTML.includes('finished')) {
 									logDiv.innerHTML += '<div class="p-2 text-gray-500 text-xs">Stream disconnected</div>';
 								}
@@ -384,7 +520,10 @@ templ PacketCapture(data PacketCaptureData) {
 }
 
 templ filterCard(title, filter, description string) {
-	<div class="bg-dark-700 rounded-lg p-4">
+	<div
+		class="bg-dark-700 rounded-lg p-4 cursor-pointer hover:border hover:border-primary-500 transition-colors"
+		@click={ "document.getElementById('capture-filter').value = '" + filter + "'; document.getElementById('new-capture-modal').classList.remove('hidden')" }
+	>
 		<h3 class="font-medium text-white mb-1">{ title }</h3>
 		<code class="block bg-dark-900 text-green-400 px-2 py-1 rounded text-sm font-mono mb-2">{ filter }</code>
 		<p class="text-xs text-gray-500">{ description }</p>
@@ -427,7 +566,7 @@ templ newCaptureModal(csrfToken string, interfaces []NetworkInterface) {
 
 					<div>
 						<label class="block text-sm font-medium text-gray-300 mb-2">Capture Filter (BPF)</label>
-						<input type="text" name="filter" class="input font-mono" placeholder="e.g. tcp port 80"/>
+						<input type="text" id="capture-filter" name="filter" class="input font-mono" placeholder="e.g. tcp port 80"/>
 						<p class="text-xs text-gray-500 mt-1">Leave empty to capture all traffic</p>
 					</div>
 

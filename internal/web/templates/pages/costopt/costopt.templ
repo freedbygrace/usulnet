@@ -1,0 +1,269 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2024-2026 usulnet contributors
+// https://github.com/fr4nsys/usulnet
+
+package costopt
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+type CostOptData struct {
+	PageData             layouts.PageData
+	Recommendations      []RecommendationView
+	Stats                CostOptStatsView
+	TotalRecommendations int
+	TotalPages           int
+	CurrentPage          int
+	FilterType           string
+	FilterStatus         string
+}
+
+type RecommendationView struct {
+	ID               string
+	ContainerID      string
+	ContainerName    string
+	Type             string
+	Severity         string
+	Status           string
+	CurrentValue     string
+	RecommendedValue string
+	EstimatedSavings string
+	Reason           string
+	CreatedAt        string
+	CreatedAtFull    string
+}
+
+type CostOptStatsView struct {
+	TotalRecommendations int
+	OpenRecommendations  int
+	ByType               map[string]int
+	ByStatus             map[string]int
+}
+
+templ CostOpt(data CostOptData) {
+	@layouts.Base(data.PageData) {
+		<div class="space-y-6">
+			<!-- Header -->
+			<div>
+				<h1 class="text-2xl font-display font-bold text-white">Resource Optimization</h1>
+				<p class="text-gray-400 mt-1">Rightsizing recommendations to reduce waste and improve efficiency</p>
+			</div>
+
+			<!-- Stats -->
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+				@costOptStat("Total Recommendations", fmt.Sprintf("%d", data.Stats.TotalRecommendations), "fas fa-list-check", "primary")
+				@costOptStat("Open", fmt.Sprintf("%d", data.Stats.OpenRecommendations), "fas fa-folder-open", "yellow")
+				@costOptStat("Applied", fmt.Sprintf("%d", data.Stats.ByStatus["applied"]), "fas fa-check-circle", "green")
+				@costOptStat("Dismissed", fmt.Sprintf("%d", data.Stats.ByStatus["dismissed"]), "fas fa-times-circle", "red")
+			</div>
+
+			<!-- Filters -->
+			<form method="GET" action="/resource-optimization" class="card p-4">
+				<div class="flex flex-wrap items-end gap-3">
+					<div>
+						<label class="block text-xs text-gray-400 mb-1">Type</label>
+						<select name="type" class="bg-dark-700 border border-dark-500 rounded px-3 py-1.5 text-sm text-white">
+							<option value="">All</option>
+							<option value="downsize_memory" selected?={ data.FilterType == "downsize_memory" }>Downsize Memory</option>
+							<option value="downsize_cpu" selected?={ data.FilterType == "downsize_cpu" }>Downsize CPU</option>
+							<option value="remove_idle" selected?={ data.FilterType == "remove_idle" }>Remove Idle</option>
+							<option value="add_limit" selected?={ data.FilterType == "add_limit" }>Add Limit</option>
+							<option value="remove_stopped" selected?={ data.FilterType == "remove_stopped" }>Remove Stopped</option>
+						</select>
+					</div>
+					<div>
+						<label class="block text-xs text-gray-400 mb-1">Status</label>
+						<select name="status" class="bg-dark-700 border border-dark-500 rounded px-3 py-1.5 text-sm text-white">
+							<option value="">All</option>
+							<option value="open" selected?={ data.FilterStatus == "open" }>Open</option>
+							<option value="applied" selected?={ data.FilterStatus == "applied" }>Applied</option>
+							<option value="dismissed" selected?={ data.FilterStatus == "dismissed" }>Dismissed</option>
+						</select>
+					</div>
+					<button type="submit" class="btn-primary">Apply</button>
+					<a href="/resource-optimization" class="btn-secondary">Clear</a>
+				</div>
+			</form>
+
+			<!-- Recommendations List -->
+			if len(data.Recommendations) == 0 {
+				<div class="card p-12 text-center">
+					<i class="fas fa-check-circle text-4xl text-green-400 mb-4"></i>
+					<h3 class="text-lg font-medium text-white mb-2">No Recommendations</h3>
+					<p class="text-gray-400">Resource optimization recommendations will appear here when rightsizing opportunities are found.</p>
+				</div>
+			} else {
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="text-left text-gray-400 border-b border-dark-600">
+								<th class="pb-2 pr-3">Container</th>
+								<th class="pb-2 pr-3">Type</th>
+								<th class="pb-2 pr-3">Severity</th>
+								<th class="pb-2 pr-3">Current</th>
+								<th class="pb-2 pr-3">Recommended</th>
+								<th class="pb-2 pr-3">Reason</th>
+								<th class="pb-2 pr-3">Status</th>
+								<th class="pb-2">Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, rec := range data.Recommendations {
+								<tr class="border-b border-dark-700">
+									<td class="py-2 pr-3">
+										<span class="text-white font-medium">{ rec.ContainerName }</span>
+									</td>
+									<td class="py-2 pr-3">
+										<span class={ costOptTypeBadge(rec.Type), "px-2 py-0.5 text-xs rounded" }>{ costOptTypeLabel(rec.Type) }</span>
+									</td>
+									<td class="py-2 pr-3">
+										<span class={ costOptSeverityBadge(rec.Severity), "px-2 py-0.5 text-xs rounded" }>{ rec.Severity }</span>
+									</td>
+									<td class="py-2 pr-3 font-mono text-xs text-gray-300">{ rec.CurrentValue }</td>
+									<td class="py-2 pr-3 font-mono text-xs text-green-400">{ rec.RecommendedValue }</td>
+									<td class="py-2 pr-3 text-gray-400 max-w-xs truncate">{ rec.Reason }</td>
+									<td class="py-2 pr-3">
+										<span class={ costOptStatusBadge(rec.Status), "px-2 py-0.5 text-xs rounded" }>{ rec.Status }</span>
+									</td>
+									<td class="py-2">
+										if rec.Status == "open" {
+											<div class="flex items-center gap-1">
+												<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/resource-optimization/%s/apply", rec.ID)) } class="inline">
+													<button type="submit" class="p-1.5 text-gray-400 hover:text-green-400 transition-colors" title="Apply recommendation">
+														<i class="fas fa-check text-sm"></i>
+													</button>
+												</form>
+												<form method="POST" action={ templ.SafeURL(fmt.Sprintf("/resource-optimization/%s/dismiss", rec.ID)) } class="inline">
+													<button type="submit" class="p-1.5 text-gray-400 hover:text-red-400 transition-colors" title="Dismiss recommendation">
+														<i class="fas fa-times text-sm"></i>
+													</button>
+												</form>
+											</div>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+
+			<!-- Pagination -->
+			if data.TotalPages > 1 {
+				<div class="flex items-center justify-center gap-2 mt-4">
+					if data.CurrentPage > 1 {
+						<a href={ templ.SafeURL(costOptPaginationURL(data, data.CurrentPage-1)) } class="btn-secondary text-sm">
+							<i class="fas fa-chevron-left mr-1"></i>Prev
+						</a>
+					}
+					<span class="text-sm text-gray-400">
+						Page { fmt.Sprintf("%d", data.CurrentPage) } of { fmt.Sprintf("%d", data.TotalPages) }
+					</span>
+					if data.CurrentPage < data.TotalPages {
+						<a href={ templ.SafeURL(costOptPaginationURL(data, data.CurrentPage+1)) } class="btn-secondary text-sm">
+							Next<i class="fas fa-chevron-right ml-1"></i>
+						</a>
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+templ costOptStat(label, value, icon, color string) {
+	<div class="card p-3 text-center">
+		<i class={ icon, costOptStatColor(color), "text-lg mb-1" }></i>
+		<p class="text-xl font-bold text-white">{ value }</p>
+		<p class="text-xs text-gray-400">{ label }</p>
+	</div>
+}
+
+func costOptStatColor(color string) string {
+	switch color {
+	case "primary":
+		return "text-primary-400"
+	case "red":
+		return "text-red-400"
+	case "yellow":
+		return "text-yellow-400"
+	case "blue":
+		return "text-blue-400"
+	case "green":
+		return "text-green-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func costOptTypeBadge(t string) string {
+	switch t {
+	case "downsize_memory":
+		return "bg-purple-500/20 text-purple-400"
+	case "downsize_cpu":
+		return "bg-blue-500/20 text-blue-400"
+	case "remove_idle":
+		return "bg-yellow-500/20 text-yellow-400"
+	case "add_limit":
+		return "bg-orange-500/20 text-orange-400"
+	case "remove_stopped":
+		return "bg-red-500/20 text-red-400"
+	default:
+		return "bg-gray-500/20 text-gray-400"
+	}
+}
+
+func costOptStatusBadge(status string) string {
+	switch status {
+	case "open":
+		return "bg-orange-500/20 text-orange-400"
+	case "applied":
+		return "bg-green-500/20 text-green-400"
+	case "dismissed":
+		return "bg-gray-500/20 text-gray-400"
+	default:
+		return "bg-gray-500/20 text-gray-400"
+	}
+}
+
+func costOptSeverityBadge(severity string) string {
+	switch severity {
+	case "critical":
+		return "bg-red-500/20 text-red-400"
+	case "warning":
+		return "bg-yellow-500/20 text-yellow-400"
+	case "info":
+		return "bg-blue-500/20 text-blue-400"
+	default:
+		return "bg-gray-500/20 text-gray-400"
+	}
+}
+
+func costOptTypeLabel(t string) string {
+	switch t {
+	case "downsize_memory":
+		return "Downsize Memory"
+	case "downsize_cpu":
+		return "Downsize CPU"
+	case "remove_idle":
+		return "Remove Idle"
+	case "add_limit":
+		return "Add Limit"
+	case "remove_stopped":
+		return "Remove Stopped"
+	default:
+		return t
+	}
+}
+
+func costOptPaginationURL(data CostOptData, page int) string {
+	url := fmt.Sprintf("/resource-optimization?page=%d", page)
+	if data.FilterType != "" {
+		url += fmt.Sprintf("&type=%s", data.FilterType)
+	}
+	if data.FilterStatus != "" {
+		url += fmt.Sprintf("&status=%s", data.FilterStatus)
+	}
+	return url
+}

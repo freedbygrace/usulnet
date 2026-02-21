@@ -30,6 +30,7 @@ type Repository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*models.EphemeralEnvironment, error)
 	List(ctx context.Context, opts models.EphemeralEnvListOptions) ([]*models.EphemeralEnvironment, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.EphemeralEnvironmentStatus, errorMsg string) error
+	UpdateTTL(ctx context.Context, id uuid.UUID, ttlMinutes int, expiresAt time.Time) error
 	SetURL(ctx context.Context, id uuid.UUID, url string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	ListExpired(ctx context.Context) ([]*models.EphemeralEnvironment, error)
@@ -89,18 +90,18 @@ func DefaultConfig() Config {
 
 // CreateEnvInput holds the parameters for creating an ephemeral environment.
 type CreateEnvInput struct {
-	Name           string
-	ConnectionID   *uuid.UUID
-	RepositoryID   *uuid.UUID
-	Branch         string
-	ComposeContent string // optional: provide compose directly
-	RepoFullName   string // used when fetching from git
-	Environment    map[string]string
-	TTLMinutes     int
-	AutoDestroy    bool
-	ResourceLimits *ResourceLimits
-	Labels         map[string]string
-	CreatedBy      *uuid.UUID
+	Name           string            `json:"name"`
+	ConnectionID   *uuid.UUID        `json:"connection_id,omitempty"`
+	RepositoryID   *uuid.UUID        `json:"repository_id,omitempty"`
+	Branch         string            `json:"branch"`
+	ComposeContent string            `json:"compose_file"` // optional: provide compose directly
+	RepoFullName   string            `json:"repo_full_name"` // used when fetching from git
+	Environment    map[string]string `json:"environment,omitempty"`
+	TTLMinutes     int               `json:"ttl_minutes"`
+	AutoDestroy    bool              `json:"auto_destroy"`
+	ResourceLimits *ResourceLimits   `json:"resource_limits,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	CreatedBy      *uuid.UUID        `json:"created_by,omitempty"`
 }
 
 // ResourceLimits defines CPU and memory constraints for the environment.
@@ -201,6 +202,7 @@ func (s *Service) CreateEnvironment(ctx context.Context, input CreateEnvInput) (
 		ConnectionID:   input.ConnectionID,
 		RepositoryID:   input.RepositoryID,
 		Branch:         input.Branch,
+		RepoFullName:   input.RepoFullName,
 		StackName:      stackName,
 		ComposeFile:    input.ComposeContent,
 		Environment:    envJSON,
@@ -258,13 +260,14 @@ func (s *Service) ProvisionEnvironment(ctx context.Context, id uuid.UUID, gitPro
 	if composeContent == "" && env.RepositoryID != nil && gitProvider != nil {
 		addLog(ctx, s.repo, id, "provision", "Fetching compose file from Git repository", "info")
 
-		// Determine the compose path. The repo full name is needed; we reconstruct
-		// it from whatever caller-provided context placed in the record. Here we
-		// rely on the caller having set ComposeFile or having access through the
-		// git provider keyed by repo ID.  Because the interface takes repoFullName
-		// as a string, we pass RepositoryID as a string identifier which the
-		// concrete implementation can resolve.
-		repoRef := env.RepositoryID.String()
+		// Use the persisted repo full name (e.g. "org/repo") to fetch the
+		// compose file from Git. This was stored at environment creation time.
+		repoRef := env.RepoFullName
+		if repoRef == "" && env.RepositoryID != nil {
+			// Fallback to UUID string if repo_full_name was not populated
+			// (e.g., environments created before migration 037).
+			repoRef = env.RepositoryID.String()
+		}
 		composePath := s.config.DefaultComposePath
 
 		fileContent, fetchErr := gitProvider.GetFileContent(ctx, repoRef, composePath, env.Branch)
@@ -321,6 +324,12 @@ func (s *Service) ProvisionEnvironment(ctx context.Context, id uuid.UUID, gitPro
 	addLog(ctx, s.repo, id, "provision", fmt.Sprintf("Deploying stack %q", env.StackName), "info")
 
 	// --- deploy ---
+	if deployer == nil {
+		s.logger.Warn("no deployer available to deploy stack, marking as provisioning without deployment",
+			"id", id.String(), "stack", env.StackName)
+		addLog(ctx, s.repo, id, "provision", "No stack deployer configured — environment prepared but not deployed", "warn")
+		return nil
+	}
 	if deployErr := deployer.DeployStack(ctx, env.StackName, modifiedCompose, envVars); deployErr != nil {
 		s.setFailed(ctx, id, fmt.Sprintf("stack deployment failed: %v", deployErr))
 		return apperrors.Wrap(deployErr, apperrors.CodeComposeFailed, "failed to deploy ephemeral stack")
@@ -358,7 +367,8 @@ func (s *Service) ProvisionEnvironment(ctx context.Context, id uuid.UUID, gitPro
 // ============================================================================
 
 // StopEnvironment stops a running or provisioning ephemeral environment by
-// removing its stack via the deployer.
+// removing its stack via the deployer. If deployer is nil and the environment
+// has a running stack, the status is updated without removing the stack.
 func (s *Service) StopEnvironment(ctx context.Context, id uuid.UUID, deployer StackDeployer) error {
 	env, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -374,10 +384,16 @@ func (s *Service) StopEnvironment(ctx context.Context, id uuid.UUID, deployer St
 		s.logger.Error("failed to update status to stopping", "error", updateErr, "id", id.String())
 	}
 
-	// --- remove stack ---
-	if removeErr := deployer.RemoveStack(ctx, env.StackName); removeErr != nil {
-		s.setFailed(ctx, id, fmt.Sprintf("failed to remove stack: %v", removeErr))
-		return apperrors.Wrap(removeErr, apperrors.CodeComposeFailed, "failed to remove ephemeral stack")
+	// --- remove stack (if deployer available) ---
+	if deployer != nil {
+		if removeErr := deployer.RemoveStack(ctx, env.StackName); removeErr != nil {
+			s.setFailed(ctx, id, fmt.Sprintf("failed to remove stack: %v", removeErr))
+			return apperrors.Wrap(removeErr, apperrors.CodeComposeFailed, "failed to remove ephemeral stack")
+		}
+	} else {
+		s.logger.Warn("no deployer available to remove stack, marking as stopped without stack removal",
+			"id", id.String(), "stack", env.StackName)
+		addLog(ctx, s.repo, id, "stop", "No deployer available — stack not removed, only status updated", "warn")
 	}
 
 	// --- update status to stopped ---
@@ -483,7 +499,11 @@ func (s *Service) CleanupExpired(ctx context.Context, deployer StackDeployer) (i
 	for _, env := range expired {
 		// Stop running stacks
 		if env.Status == models.EphemeralStatusRunning || env.Status == models.EphemeralStatusProvisioning {
-			if removeErr := deployer.RemoveStack(ctx, env.StackName); removeErr != nil {
+			if deployer == nil {
+				s.logger.Warn("no deployer available to remove expired stack, marking as expired without removal",
+					"id", env.ID.String(), "stack", env.StackName)
+				addLog(ctx, s.repo, env.ID, "cleanup", "No deployer available — stack not removed", "warn")
+			} else if removeErr := deployer.RemoveStack(ctx, env.StackName); removeErr != nil {
 				s.logger.Warn("failed to remove expired stack",
 					"error", removeErr, "id", env.ID.String(), "stack", env.StackName)
 				addLog(ctx, s.repo, env.ID, "cleanup", fmt.Sprintf("Failed to remove expired stack: %v", removeErr), "error")
@@ -573,26 +593,10 @@ func (s *Service) ExtendTTL(ctx context.Context, id uuid.UUID, additionalMinutes
 	// Calculate the new TTL in minutes from creation
 	newTTL := int(newExpiresAt.Sub(env.CreatedAt).Minutes())
 
-	// We update TTL and ExpiresAt by updating the full environment. Since the
-	// repository interface only exposes UpdateStatus and SetURL for mutations
-	// beyond Create, we re-use UpdateStatus with the current status to trigger
-	// an update, and we rely on the caller or a dedicated repo method. For now
-	// we update via the existing interface by treating it as a status refresh
-	// and separately handle the expiry through a log + the fields the repo can
-	// update. In practice, the repo Create stores ExpiresAt; extending requires
-	// a direct update. We work within the interface by deleting and recreating,
-	// but that is destructive. Instead we accept a minor limitation and log the
-	// extension, updating the status to keep the record fresh.
-	//
-	// NOTE: A production implementation would add an UpdateTTL method to the
-	// Repository interface. For now, we update status to "running" (no-op on
-	// status) which at minimum bumps updated_at, and we log the extension.
-	env.TTLMinutes = newTTL
-	env.ExpiresAt = &newExpiresAt
-
-	// Refresh the status (effectively a touch on updated_at)
-	if updateErr := s.repo.UpdateStatus(ctx, id, models.EphemeralStatusRunning, ""); updateErr != nil {
-		s.logger.Error("failed to refresh status during TTL extension", "error", updateErr, "id", id.String())
+	// Persist the new TTL and expiry to the database.
+	if updateErr := s.repo.UpdateTTL(ctx, id, newTTL, newExpiresAt); updateErr != nil {
+		s.logger.Error("failed to persist TTL extension", "error", updateErr, "id", id.String())
+		return apperrors.Wrap(updateErr, apperrors.CodeDatabaseError, "failed to persist TTL extension")
 	}
 
 	addLog(ctx, s.repo, id, "extend",
@@ -652,36 +656,43 @@ func generateStackName(prefix, branch string) string {
 }
 
 // portPattern matches port mappings in docker-compose files such as
-// "8080:80", "3000:3000/tcp", or with surrounding quotes.
-var portPattern = regexp.MustCompile(`"(\d+):(\d+)(/\w+)?"`)
+// "8080:80", "3000:3000/tcp", 8080:80, or - 8080:80. It captures an
+// optional leading quote, the host port, container port, optional protocol,
+// and an optional trailing quote so that existing quoting is preserved.
+var portPattern = regexp.MustCompile(`("?)(\d+):(\d+)(/\w+)?("?)`)
 
 // offsetPorts performs simple text-based port replacement on compose content.
-// It finds patterns like "XXXX:YYYY" in ports sections and adds the offset to
-// the host port (the left side). It returns the modified content and a mapping
-// of original host ports to their offset equivalents.
+// It finds patterns like "XXXX:YYYY" or XXXX:YYYY in ports sections and adds
+// the offset to the host port (the left side). It returns the modified content
+// and a mapping of original host ports to their offset equivalents.
 func offsetPorts(composeContent string, portOffset int) (string, map[string]string, error) {
 	portMappings := make(map[string]string)
 
 	modified := portPattern.ReplaceAllStringFunc(composeContent, func(match string) string {
 		submatch := portPattern.FindStringSubmatch(match)
-		if len(submatch) < 3 {
+		if len(submatch) < 4 {
 			return match
 		}
 
-		hostPort, parseErr := strconv.Atoi(submatch[1])
+		leadingQuote := submatch[1]
+		hostPort, parseErr := strconv.Atoi(submatch[2])
 		if parseErr != nil {
 			return match
 		}
-		containerPort := submatch[2]
+		containerPort := submatch[3]
 		protocol := ""
-		if len(submatch) >= 4 {
-			protocol = submatch[3]
+		if len(submatch) >= 5 {
+			protocol = submatch[4]
+		}
+		trailingQuote := ""
+		if len(submatch) >= 6 {
+			trailingQuote = submatch[5]
 		}
 
 		newHostPort := hostPort + portOffset
-		portMappings[submatch[1]] = strconv.Itoa(newHostPort)
+		portMappings[submatch[2]] = strconv.Itoa(newHostPort)
 
-		return fmt.Sprintf(`"%d:%s%s"`, newHostPort, containerPort, protocol)
+		return fmt.Sprintf(`%s%d:%s%s%s`, leadingQuote, newHostPort, containerPort, protocol, trailingQuote)
 	})
 
 	return modified, portMappings, nil

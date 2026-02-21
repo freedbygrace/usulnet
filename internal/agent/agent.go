@@ -122,7 +122,10 @@ func New(cfg Config, log *logger.Logger) (*Agent, error) {
 }
 
 // Run starts the agent and blocks until context is cancelled.
-func (a *Agent) Run(ctx context.Context) error {
+// The optional ready channel is closed once the agent has successfully connected
+// to Docker, NATS, registered with the gateway, and started background loops.
+// Pass nil if you don't need a readiness signal.
+func (a *Agent) Run(ctx context.Context, ready chan<- struct{}) error {
 	a.ctx, a.cancel = context.WithCancel(ctx)
 	a.startedAt = time.Now().UTC()
 
@@ -166,6 +169,11 @@ func (a *Agent) Run(ctx context.Context) error {
 		"heartbeat_interval", a.heartbeatInterval,
 		"inventory_interval", a.inventoryInterval,
 	)
+
+	// Signal readiness
+	if ready != nil {
+		close(ready)
+	}
 
 	// Wait for shutdown
 	<-a.ctx.Done()

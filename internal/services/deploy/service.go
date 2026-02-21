@@ -115,12 +115,20 @@ func (r *DeployResult) setComplete() {
 	r.EndedAt = &now
 }
 
+// maxDeploymentHistory is the maximum number of completed deployments to keep
+// in memory. Once exceeded, the oldest completed deployments are evicted.
+const maxDeploymentHistory = 100
+
 // Service handles agent deployments.
+//
+// NOTE: Deployment history is stored in-memory only and is lost on restart.
+// A future improvement should persist deployments to PostgreSQL for audit
+// and recovery purposes.
 type Service struct {
 	pkiManager  *crypto.PKIManager
 	logger      *logger.Logger
 
-	// Track active deployments
+	// Track active deployments (in-memory only — lost on restart)
 	mu          sync.RWMutex
 	deployments map[string]*DeployResult
 }
@@ -168,6 +176,7 @@ func (s *Service) Deploy(ctx context.Context, req DeployRequest) (string, error)
 
 	s.mu.Lock()
 	s.deployments[deployID] = result
+	s.evictOldDeployments()
 	s.mu.Unlock()
 
 	// Run deployment in background
@@ -498,6 +507,30 @@ func (s *Service) generateComposeFile(req DeployRequest, tlsEnabled bool) (strin
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// evictOldDeployments removes the oldest completed deployments when the history
+// exceeds maxDeploymentHistory. Must be called with s.mu held.
+func (s *Service) evictOldDeployments() {
+	if len(s.deployments) <= maxDeploymentHistory {
+		return
+	}
+
+	// Find completed deployments and evict the oldest
+	var oldest *DeployResult
+	var oldestKey string
+	for key, r := range s.deployments {
+		if r.Status != StatusComplete && r.Status != StatusFailed {
+			continue
+		}
+		if oldest == nil || r.StartedAt.Before(oldest.StartedAt) {
+			oldest = r
+			oldestKey = key
+		}
+	}
+	if oldestKey != "" {
+		delete(s.deployments, oldestKey)
+	}
 }
 
 // agentConfigTemplate is the YAML template for agent configuration.

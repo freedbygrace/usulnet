@@ -6,6 +6,7 @@ package update
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	dockertypes "github.com/docker/docker/api/types"
@@ -40,11 +41,11 @@ func (a *DockerClientAdapter) getClient(ctx context.Context) (dockerpkg.ClientAP
 func (a *DockerClientAdapter) ContainerInspect(ctx context.Context, containerID string) (*dockertypes.ContainerJSON, error) {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for container inspect: %w", err)
 	}
 	inspect, err := c.ContainerInspectRaw(ctx, containerID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("inspect container %s: %w", containerID, err)
 	}
 	return &inspect, nil
 }
@@ -52,7 +53,7 @@ func (a *DockerClientAdapter) ContainerInspect(ctx context.Context, containerID 
 func (a *DockerClientAdapter) ContainerStop(ctx context.Context, containerID string, timeout *int) error {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for container stop: %w", err)
 	}
 	return c.ContainerStop(ctx, containerID, timeout)
 }
@@ -60,7 +61,7 @@ func (a *DockerClientAdapter) ContainerStop(ctx context.Context, containerID str
 func (a *DockerClientAdapter) ContainerStart(ctx context.Context, containerID string) error {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for container start: %w", err)
 	}
 	return c.ContainerStart(ctx, containerID)
 }
@@ -68,7 +69,7 @@ func (a *DockerClientAdapter) ContainerStart(ctx context.Context, containerID st
 func (a *DockerClientAdapter) ContainerRemove(ctx context.Context, containerID string, force bool) error {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for container remove: %w", err)
 	}
 	return c.ContainerRemove(ctx, containerID, force, false)
 }
@@ -76,7 +77,7 @@ func (a *DockerClientAdapter) ContainerRemove(ctx context.Context, containerID s
 func (a *DockerClientAdapter) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, name string) (string, error) {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get client for container create: %w", err)
 	}
 	// Raw container creation requires a direct Docker client
 	directClient, ok := c.(*dockerpkg.Client)
@@ -89,7 +90,7 @@ func (a *DockerClientAdapter) ContainerCreate(ctx context.Context, config *conta
 	}
 	resp, err := cli.ContainerCreate(ctx, config, hostConfig, nil, nil, name)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create container %s: %w", name, err)
 	}
 	return resp.ID, nil
 }
@@ -97,7 +98,7 @@ func (a *DockerClientAdapter) ContainerCreate(ctx context.Context, config *conta
 func (a *DockerClientAdapter) ContainerRename(ctx context.Context, containerID, newName string) error {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for container rename: %w", err)
 	}
 	return c.ContainerRename(ctx, containerID, newName)
 }
@@ -105,11 +106,11 @@ func (a *DockerClientAdapter) ContainerRename(ctx context.Context, containerID, 
 func (a *DockerClientAdapter) ContainerList(ctx context.Context) ([]ContainerInfo, error) {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for container list: %w", err)
 	}
 	containers, err := c.ContainerList(ctx, dockerpkg.ContainerListOptions{All: true})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list containers: %w", err)
 	}
 	result := make([]ContainerInfo, 0, len(containers))
 	for _, ct := range containers {
@@ -132,11 +133,11 @@ func (a *DockerClientAdapter) ContainerList(ctx context.Context) ([]ContainerInf
 func (a *DockerClientAdapter) ImagePull(ctx context.Context, ref string, onProgress func(status string)) error {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for image pull: %w", err)
 	}
 	progressCh, err := c.ImagePull(ctx, ref, dockerpkg.ImagePullOptions{})
 	if err != nil {
-		return err
+		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	for p := range progressCh {
 		if onProgress != nil {
@@ -149,11 +150,11 @@ func (a *DockerClientAdapter) ImagePull(ctx context.Context, ref string, onProgr
 func (a *DockerClientAdapter) ImageInspect(ctx context.Context, imageID string) (*ImageInfo, error) {
 	c, err := a.getClient(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for image inspect: %w", err)
 	}
 	details, err := c.ImageGet(ctx, imageID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("inspect image %s: %w", imageID, err)
 	}
 	return &ImageInfo{
 		ID:          details.ID,

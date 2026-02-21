@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net"
 	"net/smtp"
 	"strings"
@@ -242,9 +243,15 @@ func (e *EmailChannel) sendMail(ctx context.Context, message []byte) error {
 	recipients = append(recipients, e.config.CCAddresses...)
 	recipients = append(recipients, e.config.BCCAddresses...)
 
+	if e.config.SkipVerify {
+		slog.Warn("SMTP TLS certificate verification is DISABLED — this is insecure outside development environments",
+			"host", e.config.Host,
+		)
+	}
+
 	tlsConfig := &tls.Config{
 		ServerName:         e.config.Host,
-		InsecureSkipVerify: e.config.SkipVerify,
+		InsecureSkipVerify: e.config.SkipVerify, //nolint:gosec // User-configurable for self-signed SMTP servers
 	}
 
 	var conn net.Conn
@@ -409,7 +416,7 @@ func (e *EmailChannel) initTemplates() error {
 	var err error
 	e.htmlTemplate, err = template.New("email").Parse(htmlTmpl)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse email HTML template: %w", err)
 	}
 
 	return nil

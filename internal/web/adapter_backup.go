@@ -89,13 +89,16 @@ func (a *backupAdapter) Restore(ctx context.Context, id string) error {
 
 	uid, err := uuid.Parse(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse backup ID for restore: %w", err)
 	}
 
 	_, err = a.svc.Restore(ctx, backupsvc.RestoreOptions{
 		BackupID: uid,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("restore backup: %w", err)
+	}
+	return nil
 }
 
 func (a *backupAdapter) Remove(ctx context.Context, id string) error {
@@ -105,7 +108,7 @@ func (a *backupAdapter) Remove(ctx context.Context, id string) error {
 
 	uid, err := uuid.Parse(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse backup ID for remove: %w", err)
 	}
 
 	return a.svc.Delete(ctx, uid)
@@ -121,17 +124,14 @@ func (a *backupAdapter) Download(ctx context.Context, id string) (string, error)
 		return "", err
 	}
 
-	info, err := a.svc.Download(ctx, uid)
+	// Get backup metadata without opening storage reader (avoids unnecessary
+	// network I/O for remote storage backends like S3/Azure)
+	backup, err := a.svc.Get(ctx, uid)
 	if err != nil {
 		return "", err
 	}
 
-	// Close reader - handler uses filename/path to serve the file directly
-	if info.Reader != nil {
-		info.Reader.Close()
-	}
-
-	return info.Filename, nil
+	return backup.Filename, nil
 }
 
 func (a *backupAdapter) DownloadStream(ctx context.Context, id string) (io.ReadCloser, string, int64, error) {
@@ -351,7 +351,7 @@ func (a *backupAdapter) DeleteSchedule(ctx context.Context, id string) error {
 
 	uid, err := uuid.Parse(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse schedule ID for delete: %w", err)
 	}
 
 	return a.svc.DeleteSchedule(ctx, uid)
@@ -364,9 +364,12 @@ func (a *backupAdapter) RunSchedule(ctx context.Context, id string) error {
 
 	uid, err := uuid.Parse(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse schedule ID for run: %w", err)
 	}
 
 	_, err = a.svc.RunSchedule(ctx, uid)
-	return err
+	if err != nil {
+		return fmt.Errorf("run backup schedule: %w", err)
+	}
+	return nil
 }

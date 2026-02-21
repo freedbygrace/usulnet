@@ -194,9 +194,10 @@ templ Base(data PageData) {
 					};
 					toast.className = (colors[type] || colors.info) + ' text-white px-4 py-3 rounded-lg shadow-lg border-l-4 flex items-center gap-3 animate-slide-in max-w-sm';
 					toast.innerHTML = '<i class="fas ' + (icons[type] || icons.info) + '"></i>' +
-						'<span class="flex-1 text-sm">' + message + '</span>' +
+						'<span class="toast-message flex-1 text-sm"></span>' +
 						'<button onclick="this.parentElement.remove()" class="text-white/70 hover:text-white ml-2">' +
 						'<i class="fas fa-times text-xs"></i></button>';
+					toast.querySelector('.toast-message').textContent = message;
 					container.appendChild(toast);
 					if (duration > 0) {
 						setTimeout(function() { if (toast.parentElement) toast.remove(); }, duration);

@@ -132,9 +132,9 @@ func TestDefaultSecurityChecks(t *testing.T) {
 		t.Fatal("DefaultSecurityChecks() returned empty")
 	}
 
-	// Should have 13 default checks
-	if len(checks) != 13 {
-		t.Errorf("DefaultSecurityChecks() count = %d, want 13", len(checks))
+	// Should have 17 default checks
+	if len(checks) != 17 {
+		t.Errorf("DefaultSecurityChecks() count = %d, want 17", len(checks))
 	}
 
 	// All checks should have required fields
@@ -176,6 +176,8 @@ func TestDefaultSecurityChecks_ContainsKnownChecks(t *testing.T) {
 		CheckNetworkMode, CheckPortExposure, CheckPortDangerous,
 		CheckSecretsInEnv, CheckImageVulnerability,
 		CheckLoggingDriver, CheckRestartPolicy,
+		CheckNamespaceSharing, CheckDockerSocket,
+		CheckLatestTag, CheckPrivilegedPorts,
 	}
 
 	for _, id := range expectedIDs {
@@ -222,6 +224,8 @@ func TestSecurityCheckIDConstants(t *testing.T) {
 		CheckNetworkMode, CheckPortExposure, CheckPortDangerous,
 		CheckSecretsInEnv, CheckImageVulnerability,
 		CheckLoggingDriver, CheckRestartPolicy,
+		CheckNamespaceSharing, CheckDockerSocket,
+		CheckLatestTag, CheckPrivilegedPorts,
 	}
 
 	seen := make(map[string]bool)

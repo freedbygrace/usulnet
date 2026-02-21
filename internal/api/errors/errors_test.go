@@ -6,10 +6,13 @@ package errors
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	pkgerrors "github.com/fr4nsys/usulnet/internal/pkg/errors"
 )
 
 // ============================================================================
@@ -394,6 +397,30 @@ func TestFeatureDisabled_HTTP403(t *testing.T) {
 }
 
 // ============================================================================
+// NotImplemented
+// ============================================================================
+
+func TestNotImplemented(t *testing.T) {
+	e := NotImplemented("")
+	if e.Status != http.StatusNotImplemented {
+		t.Errorf("Status = %d, want %d", e.Status, http.StatusNotImplemented)
+	}
+	if e.Code != ErrCodeNotImplemented {
+		t.Errorf("Code = %q, want %q", e.Code, ErrCodeNotImplemented)
+	}
+	if e.Message != "This endpoint is not yet implemented" {
+		t.Errorf("Message = %q, want default", e.Message)
+	}
+}
+
+func TestNotImplemented_CustomMessage(t *testing.T) {
+	e := NotImplemented("feature X coming soon")
+	if e.Message != "feature X coming soon" {
+		t.Errorf("Message = %q, want custom", e.Message)
+	}
+}
+
+// ============================================================================
 // FromError / FromAppError
 // ============================================================================
 
@@ -422,6 +449,221 @@ func TestFromAppError_PlainError(t *testing.T) {
 	e := FromAppError(http.ErrNoCookie)
 	if e.Status != http.StatusInternalServerError {
 		t.Errorf("Status = %d, want %d for plain error", e.Status, http.StatusInternalServerError)
+	}
+}
+
+// ============================================================================
+// FromAppError — AppError bridge (critical: was broken before fix)
+// ============================================================================
+
+func TestFromAppError_NotFound(t *testing.T) {
+	appErr := pkgerrors.NotFound("user")
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusNotFound {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusNotFound)
+	}
+	if got.Code != ErrorCode(pkgerrors.CodeNotFound) {
+		t.Errorf("Code = %q, want %q", got.Code, pkgerrors.CodeNotFound)
+	}
+	if !strings.Contains(got.Message, "user") {
+		t.Errorf("Message should contain resource name, got: %s", got.Message)
+	}
+}
+
+func TestFromAppError_AlreadyExists(t *testing.T) {
+	appErr := pkgerrors.AlreadyExists("email")
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusConflict {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusConflict)
+	}
+	if got.Code != ErrorCode(pkgerrors.CodeConflict) {
+		t.Errorf("Code = %q, want %q", got.Code, pkgerrors.CodeConflict)
+	}
+}
+
+func TestFromAppError_InvalidInput(t *testing.T) {
+	appErr := pkgerrors.InvalidInput("bad email")
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusBadRequest)
+	}
+	if got.Code != ErrorCode(pkgerrors.CodeBadRequest) {
+		t.Errorf("Code = %q, want %q", got.Code, pkgerrors.CodeBadRequest)
+	}
+}
+
+func TestFromAppError_Unauthorized(t *testing.T) {
+	appErr := pkgerrors.Unauthorized("invalid token")
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusUnauthorized)
+	}
+}
+
+func TestFromAppError_Forbidden(t *testing.T) {
+	appErr := pkgerrors.Forbidden("no access")
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusForbidden {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusForbidden)
+	}
+}
+
+func TestFromAppError_Internal(t *testing.T) {
+	appErr := pkgerrors.Internal("db down")
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusInternalServerError {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusInternalServerError)
+	}
+	if got.Code != ErrorCode(pkgerrors.CodeInternal) {
+		t.Errorf("Code = %q, want %q", got.Code, pkgerrors.CodeInternal)
+	}
+}
+
+func TestFromAppError_LimitExceeded(t *testing.T) {
+	appErr := pkgerrors.LimitExceeded("nodes", 3, 3)
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusPaymentRequired {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusPaymentRequired)
+	}
+	if got.Details == nil {
+		t.Error("Details should be populated from AppError.Details")
+	}
+}
+
+func TestFromAppError_WithDetails(t *testing.T) {
+	appErr := pkgerrors.New("CUSTOM_CODE", "custom message").
+		WithHTTPStatus(http.StatusUnprocessableEntity).
+		WithDetails(map[string]interface{}{"field": "email"})
+
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusUnprocessableEntity {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusUnprocessableEntity)
+	}
+	if got.Code != "CUSTOM_CODE" {
+		t.Errorf("Code = %q, want CUSTOM_CODE", got.Code)
+	}
+	if got.Details == nil {
+		t.Fatal("Details should not be nil")
+	}
+}
+
+func TestFromAppError_WrappedAppError(t *testing.T) {
+	appErr := pkgerrors.NotFound("container")
+	wrapped := fmt.Errorf("layer: %w", appErr)
+
+	got := FromAppError(wrapped)
+
+	if got.Status != http.StatusNotFound {
+		t.Errorf("Status = %d, want %d (should extract from error chain)", got.Status, http.StatusNotFound)
+	}
+}
+
+func TestFromAppError_EmptyCodeFallsBackToInternal(t *testing.T) {
+	// AppError with empty code
+	appErr := &pkgerrors.AppError{
+		Code:       "",
+		Message:    "something happened",
+		HTTPStatus: http.StatusBadGateway,
+	}
+
+	got := FromAppError(appErr)
+
+	if got.Code != ErrCodeInternal {
+		t.Errorf("Code = %q, want %q (fallback for empty code)", got.Code, ErrCodeInternal)
+	}
+	if got.Status != http.StatusBadGateway {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusBadGateway)
+	}
+}
+
+func TestFromAppError_ZeroHTTPStatusFallsBackTo500(t *testing.T) {
+	appErr := &pkgerrors.AppError{
+		Code:       "CUSTOM",
+		Message:    "custom",
+		HTTPStatus: 0,
+	}
+
+	got := FromAppError(appErr)
+
+	if got.Status != http.StatusInternalServerError {
+		t.Errorf("Status = %d, want %d (fallback for zero)", got.Status, http.StatusInternalServerError)
+	}
+}
+
+func TestFromAppError_SentinelNotFound(t *testing.T) {
+	// Wrapping a sentinel error (not an AppError, but recognized by HTTPStatusCode)
+	err := fmt.Errorf("repository: %w", pkgerrors.ErrNotFound)
+	got := FromAppError(err)
+
+	if got.Status != http.StatusNotFound {
+		t.Errorf("Status = %d, want %d (sentinel ErrNotFound)", got.Status, http.StatusNotFound)
+	}
+	if got.Code != ErrCodeNotFound {
+		t.Errorf("Code = %q, want %q", got.Code, ErrCodeNotFound)
+	}
+}
+
+func TestFromAppError_SentinelUnauthorized(t *testing.T) {
+	err := fmt.Errorf("auth: %w", pkgerrors.ErrUnauthorized)
+	got := FromAppError(err)
+
+	if got.Status != http.StatusUnauthorized {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusUnauthorized)
+	}
+}
+
+func TestFromAppError_SentinelConflict(t *testing.T) {
+	err := fmt.Errorf("create: %w", pkgerrors.ErrAlreadyExists)
+	got := FromAppError(err)
+
+	if got.Status != http.StatusConflict {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusConflict)
+	}
+}
+
+func TestFromError_AppError(t *testing.T) {
+	// FromError should also handle AppErrors via the bridge
+	appErr := pkgerrors.NotFound("host")
+	got := FromError(appErr)
+
+	if got.Status != http.StatusNotFound {
+		t.Errorf("Status = %d, want %d", got.Status, http.StatusNotFound)
+	}
+}
+
+// ============================================================================
+// httpStatusToErrorCode
+// ============================================================================
+
+func TestHttpStatusToErrorCode(t *testing.T) {
+	tests := []struct {
+		status int
+		want   ErrorCode
+	}{
+		{http.StatusBadRequest, ErrCodeInvalidInput},
+		{http.StatusUnauthorized, ErrCodeUnauthorized},
+		{http.StatusForbidden, ErrCodeForbidden},
+		{http.StatusNotFound, ErrCodeNotFound},
+		{http.StatusConflict, ErrCodeConflict},
+		{http.StatusTooManyRequests, ErrCodeRateLimited},
+		{http.StatusGatewayTimeout, ErrCodeTimeout},
+		{http.StatusServiceUnavailable, ErrCodeServiceUnavailable},
+		{http.StatusTeapot, ErrCodeInternal}, // unknown status
+	}
+
+	for _, tt := range tests {
+		got := httpStatusToErrorCode(tt.status)
+		if got != tt.want {
+			t.Errorf("httpStatusToErrorCode(%d) = %q, want %q", tt.status, got, tt.want)
+		}
 	}
 }
 

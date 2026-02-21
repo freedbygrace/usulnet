@@ -193,9 +193,17 @@ func (s *Service) connect(conn *models.LDAPConnection, password string) (*ldap.C
 
 	address := fmt.Sprintf("%s:%d", conn.Host, conn.Port)
 
+	if conn.SkipTLSVerify {
+		s.logger.Warn("LDAP TLS certificate verification is DISABLED for connection",
+			"connection_id", conn.ID,
+			"host", conn.Host,
+		)
+	}
+
 	if conn.UseTLS {
 		tlsConfig := &tls.Config{
-			InsecureSkipVerify: conn.SkipTLSVerify,
+			ServerName:         conn.Host,
+			InsecureSkipVerify: conn.SkipTLSVerify, //nolint:gosec // User-configurable per LDAP connection
 		}
 		l, err = ldap.DialTLS("tcp", address, tlsConfig)
 	} else {
@@ -209,7 +217,8 @@ func (s *Service) connect(conn *models.LDAPConnection, password string) (*ldap.C
 	// StartTLS if configured
 	if !conn.UseTLS && conn.StartTLS {
 		tlsConfig := &tls.Config{
-			InsecureSkipVerify: conn.SkipTLSVerify,
+			ServerName:         conn.Host,
+			InsecureSkipVerify: conn.SkipTLSVerify, //nolint:gosec // User-configurable per LDAP connection
 		}
 		if err := l.StartTLS(tlsConfig); err != nil {
 			l.Close()

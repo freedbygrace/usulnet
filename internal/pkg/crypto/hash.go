@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/subtle"
 	"encoding/hex"
 
 	"golang.org/x/crypto/bcrypt"
@@ -112,9 +113,10 @@ func HashAPIKey(apiKey string) string {
 	return SHA256String(apiKey)
 }
 
-// CheckAPIKey compares an API key with its hash
+// CheckAPIKey compares an API key with its hash using constant-time comparison.
 func CheckAPIKey(apiKey, hash string) bool {
-	return SHA256String(apiKey) == hash
+	computed := SHA256String(apiKey)
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(hash)) == 1
 }
 
 // HashToken hashes a refresh token or similar token
@@ -122,7 +124,8 @@ func HashToken(token string) string {
 	return SHA256String(token)
 }
 
-// CheckToken compares a token with its hash
+// CheckToken compares a token with its hash using constant-time comparison.
 func CheckToken(token, hash string) bool {
-	return SHA256String(token) == hash
+	computed := SHA256String(token)
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(hash)) == 1
 }

@@ -7,12 +7,14 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sys/unix"
 
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 )
@@ -207,8 +209,15 @@ func (h *SystemHandler) Liveness(w http.ResponseWriter, r *http.Request) {
 	h.OK(w, map[string]string{"status": "alive"})
 }
 
+// ReadinessResponse represents the readiness check response.
+type ReadinessResponse struct {
+	Status     string                   `json:"status"`
+	Components map[string]*HealthStatus `json:"components,omitempty"`
+}
+
 // Readiness handles GET /api/v1/system/health/ready
 // Returns 200 if the service is ready to accept traffic.
+// Checks all registered components in parallel and returns per-component detail.
 func (h *SystemHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -219,24 +228,51 @@ func (h *SystemHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.RUnlock()
 
-	// Check critical components
 	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	ready := true
+	resp := &ReadinessResponse{
+		Status:     "ready",
+		Components: make(map[string]*HealthStatus, len(checkers)),
+	}
+
+	// Run all checks in parallel.
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
 	for name, checker := range checkers {
-		status := checker(checkCtx)
-		if status != nil && status.Status == "unhealthy" {
-			h.logger.Warn("readiness check failed", "component", name, "status", status.Status)
-			ready = false
-			break
+		wg.Add(1)
+		go func(name string, checker HealthChecker) {
+			defer wg.Done()
+
+			start := time.Now()
+			status := checker(checkCtx)
+			if status == nil {
+				status = &HealthStatus{Status: "unknown"}
+			}
+			status.Latency = time.Since(start).Milliseconds()
+			status.CheckedAt = time.Now().UTC().Format(time.RFC3339)
+
+			mu.Lock()
+			resp.Components[name] = status
+			mu.Unlock()
+		}(name, checker)
+	}
+
+	wg.Wait()
+
+	// Determine overall readiness — any unhealthy component means not ready.
+	for name, status := range resp.Components {
+		if status.Status == "unhealthy" {
+			resp.Status = "not_ready"
+			h.logger.Warn("readiness check failed", "component", name, "message", status.Message)
 		}
 	}
 
-	if ready {
-		h.OK(w, map[string]string{"status": "ready"})
+	if resp.Status == "ready" {
+		h.OK(w, resp)
 	} else {
-		h.JSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+		h.JSON(w, http.StatusServiceUnavailable, resp)
 	}
 }
 
@@ -331,18 +367,48 @@ func DockerHealthChecker(pingFn func(ctx context.Context) error) HealthChecker {
 }
 
 // NATSHealthChecker creates a health checker for NATS connections.
-func NATSHealthChecker(isConnectedFn func() bool) HealthChecker {
-	return func(ctx context.Context) *HealthStatus {
-		if isConnectedFn() {
+// The healthFn should perform a real round-trip check (e.g. FlushTimeout).
+func NATSHealthChecker(healthFn func(ctx context.Context) error) HealthChecker {
+	return DatabaseHealthChecker(healthFn) // Same ping-style logic
+}
+
+// DiskSpaceHealthChecker creates a health checker that verifies available disk space.
+// It reports "unhealthy" when available space drops below minFreeBytes, and "degraded"
+// when it's below 2x that threshold.
+func DiskSpaceHealthChecker(path string, minFreeBytes uint64) HealthChecker {
+	return func(_ context.Context) *HealthStatus {
+		var stat unix.Statfs_t
+		if err := unix.Statfs(path, &stat); err != nil {
 			return &HealthStatus{
-				Status:    "healthy",
-				CheckedAt: time.Now().UTC().Format(time.RFC3339),
+				Status:  "unhealthy",
+				Message: fmt.Sprintf("failed to check disk space on %s: %v", path, err),
+			}
+		}
+
+		availBytes := stat.Bavail * uint64(stat.Bsize)
+		totalBytes := stat.Blocks * uint64(stat.Bsize)
+		usedPct := 0.0
+		if totalBytes > 0 {
+			usedPct = float64(totalBytes-availBytes) / float64(totalBytes) * 100
+		}
+
+		msg := fmt.Sprintf("%.1f%% used, %d MB available", usedPct, availBytes/(1024*1024))
+
+		if availBytes < minFreeBytes {
+			return &HealthStatus{
+				Status:  "unhealthy",
+				Message: msg,
+			}
+		}
+		if availBytes < minFreeBytes*2 {
+			return &HealthStatus{
+				Status:  "degraded",
+				Message: msg,
 			}
 		}
 		return &HealthStatus{
-			Status:    "unhealthy",
-			Message:   "not connected",
-			CheckedAt: time.Now().UTC().Format(time.RFC3339),
+			Status:  "healthy",
+			Message: msg,
 		}
 	}
 }

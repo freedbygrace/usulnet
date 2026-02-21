@@ -6,7 +6,9 @@ package redis
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -19,6 +21,7 @@ type Options struct {
 	DialTimeout  time.Duration
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+	TLSConfig    *tls.Config // TLS configuration (nil = no TLS override)
 }
 
 // DefaultOptions returns sensible default options
@@ -59,6 +62,9 @@ func New(ctx context.Context, url string, opts Options) (*Client, error) {
 	}
 	if opts.WriteTimeout > 0 {
 		options.WriteTimeout = opts.WriteTimeout
+	}
+	if opts.TLSConfig != nil {
+		options.TLSConfig = opts.TLSConfig
 	}
 
 	rdb := redis.NewClient(options)
@@ -110,6 +116,21 @@ func (c *Client) PoolStats() *redis.PoolStats {
 // Info returns Redis server info
 func (c *Client) Info(ctx context.Context, sections ...string) (string, error) {
 	return c.rdb.Info(ctx, sections...).Result()
+}
+
+// GetVersion returns the Redis server version string by parsing INFO server.
+func (c *Client) GetVersion(ctx context.Context) (string, error) {
+	info, err := c.Info(ctx, "server")
+	if err != nil {
+		return "", fmt.Errorf("redis info: %w", err)
+	}
+	for _, line := range strings.Split(info, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "redis_version:") {
+			return strings.TrimPrefix(line, "redis_version:"), nil
+		}
+	}
+	return "", nil
 }
 
 // DBSize returns the number of keys in the database

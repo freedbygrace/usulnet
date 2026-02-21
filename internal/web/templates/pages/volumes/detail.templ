@@ -122,7 +122,7 @@ templ VolumeDetail(data VolumeDetailData) {
 				case "labels":
 					@volumeLabelsTab(data.Volume)
 				case "browse":
-					@volumeBrowseTab(data.Volume)
+					@volumeBrowseTab(data.Volume, data.PageData.ActiveHostID)
 				default:
 					@volumeOverviewTab(data.Volume)
 			}
@@ -236,8 +236,8 @@ templ volumeLabelsTab(vol VolumeFull) {
 	</div>
 }
 
-templ volumeBrowseTab(vol VolumeFull) {
-	<div x-data={ fmt.Sprintf("volumeBrowser('%s')", vol.Name) }>
+templ volumeBrowseTab(vol VolumeFull, activeHostID string) {
+	<div x-data={ fmt.Sprintf("volumeBrowser('%s', '%s')", vol.Name, activeHostID) }>
 		<!-- Toolbar -->
 		<div class="flex items-center gap-4 mb-4 pb-4 border-b border-dark-600">
 			<!-- Breadcrumb Navigation -->
@@ -507,10 +507,10 @@ templ volumeBrowseTab(vol VolumeFull) {
 	</div>
 
 	<script>
-		function volumeBrowser(volumeName) {
+		function volumeBrowser(volumeName, hostID) {
 			return {
 				volumeName: volumeName,
-				hostID: '', // Will be set from API context
+				hostID: hostID || '',
 				currentPath: '/',
 				files: [],
 				loading: true,
@@ -533,11 +533,6 @@ templ volumeBrowseTab(vol VolumeFull) {
 				},
 
 				async init() {
-					// Get hostID from page context or API
-					const hostIDEl = document.querySelector('[data-host-id]');
-					if (hostIDEl) {
-						this.hostID = hostIDEl.dataset.hostId;
-					}
 					await this.loadFiles();
 				},
 

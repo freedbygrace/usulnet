@@ -382,7 +382,16 @@ func sidebarSettingsInitData(sections []SidebarSectionConfig) string {
 					method: 'PUT',
 					headers: headers,
 					body: JSON.stringify({ hidden: hidden })
-				}).then(function() { self.saved = true; setTimeout(function() { self.saved = false; }, 2000); });
+				}).then(function(resp) {
+					if (resp.ok) {
+						self.saved = true;
+						setTimeout(function() { self.saved = false; }, 2000);
+					} else {
+						console.error('Failed to save sidebar prefs:', resp.status);
+					}
+				}).catch(function(err) {
+					console.error('Network error saving sidebar prefs:', err);
+				});
 			}, 300);
 		}
 	}`, parts)

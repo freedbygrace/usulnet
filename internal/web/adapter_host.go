@@ -77,7 +77,7 @@ func (a *hostAdapter) List(ctx context.Context) ([]HostView, error) {
 			TLSEnabled:        s.TLSEnabled,
 			Containers:        s.ContainerCount,
 			ContainersRunning: s.RunningCount,
-			LastSeen:          s.CreatedAt,
+			Images:            s.ImageCount,
 		}
 		if s.DisplayName != nil {
 			v.DisplayName = *s.DisplayName
@@ -190,6 +190,21 @@ func (a *hostAdapter) Get(ctx context.Context, id string) (*HostView, error) {
 			v.LastSeenHuman = h.LastSeenAt.Format("2006-01-02 15:04")
 		}
 	}
+
+	// Enrich with Docker info (images count, kernel version) if host is online
+	if h.Status == models.HostStatusOnline {
+		info, err := a.svc.GetDockerInfo(ctx, uid)
+		if err == nil && info != nil {
+			v.Images = info.Images
+			v.KernelVersion = info.KernelVersion
+			// Fill container counts from live data if not already set
+			if v.Containers == 0 {
+				v.Containers = info.Containers
+				v.ContainersRunning = info.ContainersRunning
+			}
+		}
+	}
+
 	return v, nil
 }
 
@@ -210,7 +225,7 @@ func (a *hostAdapter) Create(ctx context.Context, hv *HostView) (string, error) 
 	}
 	host, err := a.svc.Create(ctx, input)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create host: %w", err)
 	}
 	return host.ID.String(), nil
 }
@@ -233,7 +248,10 @@ func (a *hostAdapter) Update(ctx context.Context, hv *HostView) error {
 	// Always pass TLS enabled state so it can be toggled off
 	input.TLSEnabled = &hv.TLSEnabled
 	_, err = a.svc.Update(ctx, uid, input)
-	return err
+	if err != nil {
+		return fmt.Errorf("hostAdapter.Update: update host %s: %w", hv.ID, err)
+	}
+	return nil
 }
 
 func (a *hostAdapter) Remove(ctx context.Context, id string) error {

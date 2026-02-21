@@ -6,6 +6,7 @@ package backup
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -100,24 +101,29 @@ func (rm *RetentionManager) Cleanup(ctx context.Context, policy *RetentionPolicy
 		"max_age_days", policy.MaxAgeDays,
 	)
 
-	// Get expired backups from database
+	// Get expired backup IDs from database (records are NOT yet deleted)
 	expiredIDs, err := rm.repo.DeleteExpired(ctx)
 	if err != nil {
 		rm.logger.Error("failed to get expired backups", "error", err)
 	}
 
-	// Process expired backups
+	// Process expired backups: fetch record, delete storage, then delete DB record
 	for _, id := range expiredIDs {
 		result.ProcessedCount++
 
+		// Fetch the full record (still in DB) to get the storage path
 		backup, err := rm.repo.Get(ctx, id)
 		if err != nil {
+			rm.logger.Warn("failed to get expired backup record",
+				"backup_id", id,
+				"error", err,
+			)
 			result.FailedCount++
 			result.FailedBackups = append(result.FailedBackups, id)
 			continue
 		}
 
-		// Delete from storage
+		// Delete from storage FIRST
 		if err := rm.storage.Delete(ctx, backup.Path); err != nil {
 			rm.logger.Warn("failed to delete backup file",
 				"backup_id", id,
@@ -130,7 +136,7 @@ func (rm *RetentionManager) Cleanup(ctx context.Context, policy *RetentionPolicy
 			continue
 		}
 
-		// Delete from database
+		// Delete from database AFTER storage deletion succeeds
 		if err := rm.repo.Delete(ctx, id); err != nil {
 			rm.logger.Warn("failed to delete backup record",
 				"backup_id", id,
@@ -173,7 +179,7 @@ func (rm *RetentionManager) applyRetentionPolicy(ctx context.Context, policy *Re
 
 	backups, _, err := rm.repo.List(ctx, opts)
 	if err != nil {
-		return err
+		return fmt.Errorf("list backups for retention policy: %w", err)
 	}
 
 	// Group by target

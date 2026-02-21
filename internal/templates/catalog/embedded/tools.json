@@ -1,0 +1,85 @@
+{
+  "templates": [
+    {
+      "name": "Watchtower",
+      "description": "Automatic Docker container image updates",
+      "image": "containrrr/watchtower:latest",
+      "volumes": [{"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"}],
+      "env": [
+        {"name": "WATCHTOWER_CLEANUP", "label": "Remove old images", "default": "true"},
+        {"name": "WATCHTOWER_POLL_INTERVAL", "label": "Poll interval (seconds)", "default": "86400"},
+        {"name": "WATCHTOWER_INCLUDE_STOPPED", "label": "Include stopped containers", "default": "false"}
+      ]
+    },
+    {
+      "name": "Duplicati",
+      "description": "Free backup software with encryption and deduplication",
+      "image": "linuxserver/duplicati:latest",
+      "ports": ["8200/tcp"],
+      "volumes": [
+        {"container": "/config"},
+        {"container": "/backups"},
+        {"container": "/source"}
+      ],
+      "env": [
+        {"name": "PUID", "label": "User ID", "default": "1000"},
+        {"name": "PGID", "label": "Group ID", "default": "1000"}
+      ]
+    },
+    {
+      "name": "Vaultwarden",
+      "description": "Bitwarden-compatible password manager server",
+      "image": "vaultwarden/server:latest",
+      "ports": ["80/tcp"],
+      "volumes": [{"container": "/data"}],
+      "env": [
+        {"name": "ADMIN_TOKEN", "label": "Admin token (Argon2 hash recommended)", "type": "password"},
+        {"name": "SIGNUPS_ALLOWED", "label": "Allow new signups", "default": "true"}
+      ]
+    },
+    {
+      "name": "Portainer Agent",
+      "description": "Remote management agent for Portainer/usulnet migration",
+      "image": "portainer/agent:latest",
+      "ports": ["9001/tcp"],
+      "volumes": [
+        {"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"},
+        {"container": "/var/lib/docker/volumes", "bind": "/var/lib/docker/volumes"}
+      ]
+    },
+    {
+      "name": "Heimdall",
+      "description": "Application dashboard and launcher",
+      "image": "linuxserver/heimdall:latest",
+      "ports": ["80/tcp", "443/tcp"],
+      "volumes": [{"container": "/config"}],
+      "env": [
+        {"name": "PUID", "label": "User ID", "default": "1000"},
+        {"name": "PGID", "label": "Group ID", "default": "1000"}
+      ]
+    },
+    {
+      "name": "Homarr",
+      "description": "Modern home server dashboard with Docker integration",
+      "image": "ghcr.io/ajnart/homarr:latest",
+      "ports": ["7575/tcp"],
+      "volumes": [
+        {"container": "/app/data/configs"},
+        {"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"}
+      ]
+    },
+    {
+      "name": "Diun",
+      "description": "Docker image update notifier",
+      "image": "crazymax/diun:latest",
+      "volumes": [
+        {"container": "/data"},
+        {"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"}
+      ],
+      "env": [
+        {"name": "DIUN_WATCH_SCHEDULE", "label": "Cron schedule", "default": "0 */6 * * *"},
+        {"name": "DIUN_PROVIDERS_DOCKER", "label": "Enable Docker provider", "default": "true"}
+      ]
+    }
+  ]
+}

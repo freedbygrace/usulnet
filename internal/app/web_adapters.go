@@ -9,15 +9,17 @@ import (
 	"fmt"
 	"net/http"
 
+	dockertypes "github.com/docker/docker/api/types"
 	"github.com/google/uuid"
 
+	dockerpkg "github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 	redisrepo "github.com/fr4nsys/usulnet/internal/repository/redis"
+	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
 	metricssvc "github.com/fr4nsys/usulnet/internal/services/metrics"
 	"github.com/fr4nsys/usulnet/internal/services/notification"
 	"github.com/fr4nsys/usulnet/internal/services/notification/channels"
-	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
 	"github.com/fr4nsys/usulnet/internal/web"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/profile"
 )
@@ -134,7 +136,7 @@ func (a *webSessionRepoAdapter) DeleteAllSessionsExcept(userID string, currentSe
 }
 
 func (a *webSessionRepoAdapter) GetCurrentSessionID(r *http.Request) string {
-	cookie, err := r.Cookie("usulnet_session")
+	cookie, err := r.Cookie(web.CookieSession)
 	if err != nil {
 		return ""
 	}
@@ -396,4 +398,60 @@ func (a *alertNotificationSenderAdapter) SendAlert(ctx context.Context, rule *mo
 			"severity":   string(rule.Severity),
 		},
 	})
+}
+
+// ============================================================================
+// Runbook Notification Adapter
+// Bridges the notification service to runbook "notify" steps.
+// ============================================================================
+
+type runbookNotificationAdapter struct {
+	svc *notification.Service
+}
+
+func (a *runbookNotificationAdapter) SendRunbookNotification(ctx context.Context, runbookName, stepName, channel, message string) error {
+	msg := notification.Message{
+		Type:     channels.TypeSystemInfo,
+		Title:    fmt.Sprintf("Runbook: %s", runbookName),
+		Body:     message,
+		Priority: channels.PriorityNormal,
+		Data: map[string]interface{}{
+			"runbook_name": runbookName,
+			"step_name":    stepName,
+			"source":       "runbook",
+		},
+	}
+	if channel != "" {
+		msg.Channels = []string{channel}
+	}
+	return a.svc.Send(ctx, msg)
+}
+
+// ============================================================================
+// Compliance Docker adapter (docker.Client → compliance.DockerInspector)
+// ============================================================================
+
+type complianceDockerAdapter struct {
+	client *dockerpkg.Client
+}
+
+func (a *complianceDockerAdapter) ListRunningContainers(ctx context.Context) ([]dockertypes.Container, error) {
+	containers, err := a.client.ContainerList(ctx, dockerpkg.ContainerListOptions{All: false})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]dockertypes.Container, len(containers))
+	for i, c := range containers {
+		result[i] = dockertypes.Container{
+			ID:    c.ID,
+			Names: []string{c.Name},
+			Image: c.Image,
+			State: c.State,
+		}
+	}
+	return result, nil
+}
+
+func (a *complianceDockerAdapter) InspectContainer(ctx context.Context, id string) (dockertypes.ContainerJSON, error) {
+	return a.client.ContainerInspectRaw(ctx, id)
 }

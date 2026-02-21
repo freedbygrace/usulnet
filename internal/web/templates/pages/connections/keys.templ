@@ -143,7 +143,10 @@ func formatUserAtHost(username, host string) string {
 
 script deleteKey(id, name string) {
 	if (confirm(`Delete SSH key "${name}"? This cannot be undone and may break connections using this key.`)) {
-		fetch(`/connections/keys/${id}`, { method: 'DELETE' })
+		fetch(`/connections/keys/${id}`, {
+			method: 'DELETE',
+			headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' }
+		})
 			.then(r => { if (r.ok) location.reload(); else alert('Failed to delete'); })
 			.catch(e => alert('Error: ' + e));
 	}

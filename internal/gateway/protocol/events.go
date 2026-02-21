@@ -6,7 +6,10 @@
 package protocol
 
 import (
+	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // EventType identifies the type of event from an agent.
@@ -306,6 +309,35 @@ func ShouldNotify(eventType EventType) bool {
 	default:
 		return false
 	}
+}
+
+// ============================================================================
+// Event Store Interface
+// ============================================================================
+
+// EventStore defines the interface for event persistence.
+type EventStore interface {
+	// Save persists an event
+	Save(ctx context.Context, event *Event) error
+	// GetByID retrieves an event by ID
+	GetByID(ctx context.Context, id string) (*Event, error)
+	// List retrieves events with filters
+	List(ctx context.Context, opts EventListOptions) ([]*Event, int64, error)
+	// DeleteOlderThan deletes events older than a duration
+	DeleteOlderThan(ctx context.Context, duration time.Duration) (int64, error)
+}
+
+// EventListOptions contains options for listing events.
+type EventListOptions struct {
+	HostID   *uuid.UUID
+	AgentID  string
+	Type     *EventType
+	Severity *EventSeverity
+	Since    *time.Time
+	Until    *time.Time
+	Page     int
+	PerPage  int
+	SortDesc bool
 }
 
 // Inventory types for periodic inventory sync

@@ -100,8 +100,14 @@ func NewService(
 		return nil, err
 	}
 
+	// Build restorer options
+	var restorerOpts []RestorerOption
+	if options.stackProvider != nil {
+		restorerOpts = append(restorerOpts, WithRestorerStackProvider(options.stackProvider))
+	}
+
 	// Create restorer
-	restorer, err := NewRestorer(storage, repo, volumeProvider, containerProvider, config, log)
+	restorer, err := NewRestorer(storage, repo, volumeProvider, containerProvider, config, log, restorerOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -237,40 +243,48 @@ func (s *Service) Restore(ctx context.Context, opts RestoreOptions) (*RestoreRes
 		return nil, ctx.Err()
 	}
 
-	// Get backup for event
-	backup, _ := s.repo.Get(ctx, opts.BackupID)
+	// Get backup for event context (non-fatal if unavailable)
+	backup, getErr := s.repo.Get(ctx, opts.BackupID)
 
-	// FIX: BackupID is *uuid.UUID, need to take address
 	backupID := opts.BackupID
-	s.emitEvent(Event{
+	startEvent := Event{
 		Type:      EventRestoreStarted,
 		BackupID:  &backupID,
-		HostID:    backup.HostID,
-		TargetID:  backup.TargetID,
 		Timestamp: time.Now(),
-	})
+	}
+	if getErr == nil && backup != nil {
+		startEvent.HostID = backup.HostID
+		startEvent.TargetID = backup.TargetID
+	}
+	s.emitEvent(startEvent)
 
 	result, err := s.restorer.Restore(ctx, opts)
 
 	if err != nil {
-		s.emitEvent(Event{
+		failEvent := Event{
 			Type:      EventRestoreFailed,
 			BackupID:  &backupID,
-			HostID:    backup.HostID,
-			TargetID:  backup.TargetID,
 			Message:   err.Error(),
 			Timestamp: time.Now(),
-		})
+		}
+		if backup != nil {
+			failEvent.HostID = backup.HostID
+			failEvent.TargetID = backup.TargetID
+		}
+		s.emitEvent(failEvent)
 		return nil, err
 	}
 
-	s.emitEvent(Event{
+	completeEvent := Event{
 		Type:      EventRestoreCompleted,
 		BackupID:  &backupID,
-		HostID:    backup.HostID,
 		TargetID:  result.TargetID,
 		Timestamp: time.Now(),
-	})
+	}
+	if backup != nil {
+		completeEvent.HostID = backup.HostID
+	}
+	s.emitEvent(completeEvent)
 
 	return result, nil
 }
@@ -308,7 +322,7 @@ func (s *Service) ListByTarget(ctx context.Context, hostID uuid.UUID, targetID s
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	backup, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get backup for deletion: %w", err)
 	}
 
 	// Delete from storage
@@ -347,10 +361,18 @@ func (s *Service) Cleanup(ctx context.Context, policy *RetentionPolicy) (*Cleanu
 
 	result, err := s.retention.Cleanup(ctx, policy)
 
-	s.emitEvent(Event{
-		Type:      EventCleanupCompleted,
-		Timestamp: time.Now(),
-	})
+	if err != nil {
+		s.emitEvent(Event{
+			Type:      EventCleanupFailed,
+			Message:   err.Error(),
+			Timestamp: time.Now(),
+		})
+	} else {
+		s.emitEvent(Event{
+			Type:      EventCleanupCompleted,
+			Timestamp: time.Now(),
+		})
+	}
 
 	return result, err
 }
@@ -487,6 +509,12 @@ func (s *Service) RunSchedule(ctx context.Context, scheduleID uuid.UUID) (*Creat
 		return nil, err
 	}
 
+	// Advance next_run_at BEFORE creating the backup to prevent duplicate
+	// execution. The scheduleWorker polls every minute; a slow backup would
+	// otherwise be re-triggered on each tick until UpdateScheduleLastRun runs.
+	nextRun := calculateNextRun(schedule.Schedule)
+	s.repo.UpdateScheduleLastRun(ctx, scheduleID, models.BackupStatusRunning, nextRun)
+
 	// Create backup with schedule options
 	opts := CreateOptions{
 		HostID:      schedule.HostID,
@@ -504,12 +532,11 @@ func (s *Service) RunSchedule(ctx context.Context, scheduleID uuid.UUID) (*Creat
 
 	result, err := s.Create(ctx, opts)
 
-	// Update schedule status
+	// Update final status after backup completes
 	status := models.BackupStatusCompleted
 	if err != nil {
 		status = models.BackupStatusFailed
 	}
-	nextRun := calculateNextRun(schedule.Schedule)
 	s.repo.UpdateScheduleLastRun(ctx, scheduleID, status, nextRun)
 
 	// Prune old backups if max is set
@@ -613,13 +640,18 @@ func (s *Service) runDueSchedules(ctx context.Context) {
 // calculateNextRun calculates the next run time for a cron expression
 // using the robfig/cron parser. It supports both 5-field standard cron
 // (minute hour dom month dow) and 6-field with seconds.
+//
+// Standard 5-field format is tried first because the 6-field parser
+// would silently accept 5-field expressions with incorrect semantics
+// (e.g., "0 2 * * *" would be parsed as second=0, minute=2, hour=*
+// instead of the intended minute=0, hour=2).
 func calculateNextRun(cronExpr string) *time.Time {
-	// Try 6-field format with seconds first
-	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	sched, err := parser.Parse(cronExpr)
+	// Try standard 5-field format first (most common for user-facing input)
+	sched, err := cron.ParseStandard(cronExpr)
 	if err != nil {
-		// Fall back to standard 5-field format
-		sched, err = cron.ParseStandard(cronExpr)
+		// Fall back to 6-field format with seconds
+		parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		sched, err = parser.Parse(cronExpr)
 		if err != nil {
 			return nil
 		}

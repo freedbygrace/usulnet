@@ -1,0 +1,414 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2024-2026 usulnet contributors
+// https://github.com/fr4nsys/usulnet
+
+package changes
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+type ChangesData struct {
+	PageData           layouts.PageData
+	Events             []ChangeEventView
+	Stats              ChangeStats
+	TotalEvents        int
+	TotalPages         int
+	CurrentPage        int
+	FilterResourceType string
+	FilterAction       string
+	FilterSearch       string
+	FilterUserID       string
+	FilterSince        string
+	FilterUntil        string
+}
+
+type ChangeEventView struct {
+	ID            string
+	Timestamp     string
+	TimestampFull string
+	UserName      string
+	UserID        string
+	ClientIP      string
+	ResourceType  string
+	ResourceID    string
+	ResourceName  string
+	Action        string
+	DiffSummary   string
+	RelatedTicket string
+	HasDiff       bool
+}
+
+type ChangeStats struct {
+	TotalEvents int
+	TodayEvents int
+	TopUsers    []ChangeUserStat
+	ByAction    map[string]int
+	ByResource  map[string]int
+}
+
+type ChangeUserStat struct {
+	UserName string
+	Count    int
+}
+
+templ Changes(data ChangesData) {
+	@layouts.Base(data.PageData) {
+		<div x-data="{ showDiff: false, diffData: null }" class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">Change Management</h1>
+					<p class="text-gray-400 mt-1">Structured audit trail of all infrastructure changes</p>
+				</div>
+				<a href="/changes/export/csv" class="btn-secondary flex items-center gap-2">
+					<i class="fas fa-download"></i>
+					Export CSV
+				</a>
+			</div>
+
+			<!-- Stats -->
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+				@changeStat("Total Changes (30d)", fmt.Sprintf("%d", data.Stats.TotalEvents), "fas fa-history", "primary")
+				@changeStat("Today", fmt.Sprintf("%d", data.Stats.TodayEvents), "fas fa-calendar-day", "blue")
+				@changeStat("Resource Types", fmt.Sprintf("%d", len(data.Stats.ByResource)), "fas fa-cubes", "green")
+				@changeStat("Action Types", fmt.Sprintf("%d", len(data.Stats.ByAction)), "fas fa-bolt", "orange")
+			</div>
+
+			<!-- Filters -->
+			<form method="GET" action="/changes" class="card p-4">
+				<div class="flex flex-wrap items-end gap-3">
+					<div>
+						<label class="block text-xs text-gray-400 mb-1">Resource Type</label>
+						<select name="resource_type" class="bg-dark-700 border border-dark-500 rounded px-3 py-1.5 text-sm text-white">
+							<option value="">All</option>
+							<option value="container" selected?={ data.FilterResourceType == "container" }>container</option>
+							<option value="stack" selected?={ data.FilterResourceType == "stack" }>stack</option>
+							<option value="image" selected?={ data.FilterResourceType == "image" }>image</option>
+							<option value="volume" selected?={ data.FilterResourceType == "volume" }>volume</option>
+							<option value="network" selected?={ data.FilterResourceType == "network" }>network</option>
+							<option value="proxy_rule" selected?={ data.FilterResourceType == "proxy_rule" }>proxy_rule</option>
+							<option value="secret" selected?={ data.FilterResourceType == "secret" }>secret</option>
+							<option value="user" selected?={ data.FilterResourceType == "user" }>user</option>
+							<option value="config" selected?={ data.FilterResourceType == "config" }>config</option>
+							<option value="backup" selected?={ data.FilterResourceType == "backup" }>backup</option>
+							<option value="host" selected?={ data.FilterResourceType == "host" }>host</option>
+						</select>
+					</div>
+					<div>
+						<label class="block text-xs text-gray-400 mb-1">Action</label>
+						<select name="action" class="bg-dark-700 border border-dark-500 rounded px-3 py-1.5 text-sm text-white">
+							<option value="">All</option>
+							<option value="create" selected?={ data.FilterAction == "create" }>create</option>
+							<option value="update" selected?={ data.FilterAction == "update" }>update</option>
+							<option value="delete" selected?={ data.FilterAction == "delete" }>delete</option>
+							<option value="start" selected?={ data.FilterAction == "start" }>start</option>
+							<option value="stop" selected?={ data.FilterAction == "stop" }>stop</option>
+							<option value="restart" selected?={ data.FilterAction == "restart" }>restart</option>
+							<option value="deploy" selected?={ data.FilterAction == "deploy" }>deploy</option>
+							<option value="rollback" selected?={ data.FilterAction == "rollback" }>rollback</option>
+							<option value="exec" selected?={ data.FilterAction == "exec" }>exec</option>
+							<option value="config_change" selected?={ data.FilterAction == "config_change" }>config_change</option>
+							<option value="secret_rotate" selected?={ data.FilterAction == "secret_rotate" }>secret_rotate</option>
+							<option value="permission_change" selected?={ data.FilterAction == "permission_change" }>permission_change</option>
+							<option value="proxy_update" selected?={ data.FilterAction == "proxy_update" }>proxy_update</option>
+							<option value="backup" selected?={ data.FilterAction == "backup" }>backup</option>
+							<option value="restore" selected?={ data.FilterAction == "restore" }>restore</option>
+						</select>
+					</div>
+					<div>
+						<label class="block text-xs text-gray-400 mb-1">Search</label>
+						<input type="text" name="search" value={ data.FilterSearch } placeholder="Search changes..." class="bg-dark-700 border border-dark-500 rounded px-3 py-1.5 text-sm text-white"/>
+					</div>
+					<div>
+						<label class="block text-xs text-gray-400 mb-1">Since</label>
+						<input type="date" name="since" value={ data.FilterSince } class="bg-dark-700 border border-dark-500 rounded px-3 py-1.5 text-sm text-white"/>
+					</div>
+					<div>
+						<label class="block text-xs text-gray-400 mb-1">Until</label>
+						<input type="date" name="until" value={ data.FilterUntil } class="bg-dark-700 border border-dark-500 rounded px-3 py-1.5 text-sm text-white"/>
+					</div>
+					<button type="submit" class="btn-primary">Apply</button>
+					<a href="/changes" class="btn-secondary">Clear</a>
+				</div>
+			</form>
+
+			<!-- Events Timeline -->
+			if len(data.Events) == 0 {
+				<div class="card p-12 text-center">
+					<i class="fas fa-history text-4xl text-gray-400 mb-4"></i>
+					<h3 class="text-lg font-medium text-white mb-2">No Changes Recorded</h3>
+					<p class="text-gray-400">Infrastructure changes will appear here as they occur.</p>
+				</div>
+			} else {
+				<div class="space-y-2">
+					for _, e := range data.Events {
+						@changeRow(e)
+					}
+				</div>
+			}
+
+			<!-- Pagination -->
+			if data.TotalPages > 1 {
+				<div class="flex items-center justify-center gap-2 mt-4">
+					if data.CurrentPage > 1 {
+						<a href={ templ.SafeURL(paginationURL(data, data.CurrentPage-1)) } class="btn-secondary text-sm">
+							<i class="fas fa-chevron-left mr-1"></i>Prev
+						</a>
+					}
+					<span class="text-sm text-gray-400">
+						Page { fmt.Sprintf("%d", data.CurrentPage) } of { fmt.Sprintf("%d", data.TotalPages) }
+					</span>
+					if data.CurrentPage < data.TotalPages {
+						<a href={ templ.SafeURL(paginationURL(data, data.CurrentPage+1)) } class="btn-secondary text-sm">
+							Next<i class="fas fa-chevron-right ml-1"></i>
+						</a>
+					}
+				</div>
+			}
+
+			<!-- Diff Modal -->
+			<div x-show="showDiff" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="showDiff = false; diffData = null">
+				<div class="bg-dark-800 rounded-lg shadow-xl max-w-5xl w-full mx-4 max-h-[80vh] flex flex-col">
+					<div class="flex items-center justify-between p-4 border-b border-dark-600">
+						<h3 class="text-lg font-medium text-white">Change Diff</h3>
+						<button @click="showDiff = false; diffData = null" class="text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
+					</div>
+					<div class="p-4 overflow-auto flex-1">
+						<template x-if="diffData">
+							<div>
+								<div class="flex items-center gap-3 mb-3 text-sm text-gray-400">
+									<span><i class="fas fa-user mr-1"></i><span x-text="diffData.user_name"></span></span>
+									<span><i class="fas fa-clock mr-1"></i><span x-text="diffData.timestamp"></span></span>
+									<span x-text="diffData.action" class="px-2 py-0.5 bg-dark-600 rounded text-xs"></span>
+								</div>
+								<div class="grid grid-cols-2 gap-4">
+									<div>
+										<h4 class="text-xs font-medium text-red-400 mb-1">Before</h4>
+										<pre class="bg-dark-900 rounded p-3 text-xs text-gray-300 overflow-auto max-h-96 whitespace-pre-wrap" x-text="diffData.old_state ? JSON.stringify(diffData.old_state, null, 2) : '(none)'"></pre>
+									</div>
+									<div>
+										<h4 class="text-xs font-medium text-green-400 mb-1">After</h4>
+										<pre class="bg-dark-900 rounded p-3 text-xs text-gray-300 overflow-auto max-h-96 whitespace-pre-wrap" x-text="diffData.new_state ? JSON.stringify(diffData.new_state, null, 2) : '(none)'"></pre>
+									</div>
+								</div>
+								<template x-if="diffData.diff_summary">
+									<div class="mt-3">
+										<h4 class="text-xs font-medium text-gray-400 mb-1">Summary</h4>
+										<p class="text-xs text-gray-500 font-mono" x-text="diffData.diff_summary"></p>
+									</div>
+								</template>
+							</div>
+						</template>
+						<template x-if="!diffData">
+							<div class="flex items-center justify-center py-8">
+								<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500"></div>
+							</div>
+						</template>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ changeStat(label, value, icon, color string) {
+	<div class="card p-3 text-center">
+		<i class={ icon, changeStatColor(color), "text-lg mb-1" }></i>
+		<p class="text-xl font-bold text-white">{ value }</p>
+		<p class="text-xs text-gray-400">{ label }</p>
+	</div>
+}
+
+templ changeRow(e ChangeEventView) {
+	<div class="card p-3 flex items-start gap-3">
+		<!-- Action icon -->
+		<div class={ actionIconBg(e.Action), "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" }>
+			<i class={ actionIcon(e.Action), actionIconColor(e.Action), "text-sm" }></i>
+		</div>
+		<!-- Content -->
+		<div class="flex-1 min-w-0">
+			<div class="flex items-center gap-2 flex-wrap">
+				if e.ResourceName != "" {
+					<span class="text-sm font-medium text-white">{ e.ResourceName }</span>
+				} else {
+					<span class="text-sm font-medium text-white">{ e.ResourceID }</span>
+				}
+				<!-- Action badge -->
+				<span class={ actionBadgeClass(e.Action), "px-2 py-0.5 text-xs rounded" }>{ e.Action }</span>
+				<!-- Resource type badge -->
+				<span class="px-2 py-0.5 text-xs bg-dark-600 text-gray-300 rounded">{ e.ResourceType }</span>
+				if e.RelatedTicket != "" {
+					<span class="px-2 py-0.5 text-xs bg-purple-500/20 text-purple-400 rounded"><i class="fas fa-ticket-alt mr-1"></i>{ e.RelatedTicket }</span>
+				}
+			</div>
+			if e.DiffSummary != "" {
+				<p class="text-xs text-gray-500 mt-1 font-mono">{ e.DiffSummary }</p>
+			}
+			<div class="flex items-center gap-3 mt-1 text-xs text-gray-500">
+				<span><i class="fas fa-user mr-1"></i>{ e.UserName }</span>
+				<span title={ e.TimestampFull }><i class="fas fa-clock mr-1"></i>{ e.Timestamp }</span>
+				if e.ClientIP != "" {
+					<span><i class="fas fa-globe mr-1"></i>{ e.ClientIP }</span>
+				}
+			</div>
+		</div>
+		<!-- Actions -->
+		<div class="flex items-center gap-1 flex-shrink-0">
+			if e.HasDiff {
+				<button @click={ diffClickExpr(e.ID) } class="p-1.5 text-gray-400 hover:text-primary-400 transition-colors" title="View diff">
+					<i class="fas fa-code-compare text-sm"></i>
+				</button>
+			}
+		</div>
+	</div>
+}
+
+func changeStatColor(color string) string {
+	switch color {
+	case "primary":
+		return "text-primary-400"
+	case "blue":
+		return "text-blue-400"
+	case "green":
+		return "text-green-400"
+	case "orange":
+		return "text-orange-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func actionIcon(action string) string {
+	switch action {
+	case "create":
+		return "fas fa-plus"
+	case "update":
+		return "fas fa-pen"
+	case "delete":
+		return "fas fa-trash"
+	case "start":
+		return "fas fa-play"
+	case "stop":
+		return "fas fa-stop"
+	case "restart":
+		return "fas fa-redo"
+	case "deploy":
+		return "fas fa-rocket"
+	case "rollback":
+		return "fas fa-undo"
+	case "exec":
+		return "fas fa-terminal"
+	case "config_change":
+		return "fas fa-cog"
+	case "secret_rotate":
+		return "fas fa-key"
+	case "permission_change":
+		return "fas fa-shield-alt"
+	case "proxy_update":
+		return "fas fa-exchange-alt"
+	case "backup":
+		return "fas fa-archive"
+	case "restore":
+		return "fas fa-box-open"
+	default:
+		return "fas fa-circle"
+	}
+}
+
+func actionIconBg(action string) string {
+	switch action {
+	case "create":
+		return "bg-green-500/20"
+	case "delete":
+		return "bg-red-500/20"
+	case "update", "config_change", "proxy_update":
+		return "bg-blue-500/20"
+	case "start", "restart", "deploy":
+		return "bg-primary-500/20"
+	case "stop":
+		return "bg-yellow-500/20"
+	case "rollback", "restore":
+		return "bg-orange-500/20"
+	case "exec":
+		return "bg-purple-500/20"
+	case "secret_rotate", "permission_change":
+		return "bg-cyan-500/20"
+	case "backup":
+		return "bg-gray-500/20"
+	default:
+		return "bg-gray-500/20"
+	}
+}
+
+func actionIconColor(action string) string {
+	switch action {
+	case "create":
+		return "text-green-400"
+	case "delete":
+		return "text-red-400"
+	case "update", "config_change", "proxy_update":
+		return "text-blue-400"
+	case "start", "restart", "deploy":
+		return "text-primary-400"
+	case "stop":
+		return "text-yellow-400"
+	case "rollback", "restore":
+		return "text-orange-400"
+	case "exec":
+		return "text-purple-400"
+	case "secret_rotate", "permission_change":
+		return "text-cyan-400"
+	case "backup":
+		return "text-gray-400"
+	default:
+		return "text-gray-400"
+	}
+}
+
+func actionBadgeClass(action string) string {
+	switch action {
+	case "create":
+		return "bg-green-500/20 text-green-400"
+	case "delete":
+		return "bg-red-500/20 text-red-400"
+	case "update":
+		return "bg-blue-500/20 text-blue-400"
+	case "deploy":
+		return "bg-primary-500/20 text-primary-400"
+	case "rollback":
+		return "bg-orange-500/20 text-orange-400"
+	case "exec":
+		return "bg-purple-500/20 text-purple-400"
+	default:
+		return "bg-gray-500/20 text-gray-400"
+	}
+}
+
+func diffClickExpr(id string) string {
+	return fmt.Sprintf("showDiff = true; fetch('/api/v1/changes/%s').then(r => r.json()).then(d => { diffData = d })", id)
+}
+
+func paginationURL(data ChangesData, page int) string {
+	url := fmt.Sprintf("/changes?page=%d", page)
+	if data.FilterResourceType != "" {
+		url += fmt.Sprintf("&resource_type=%s", data.FilterResourceType)
+	}
+	if data.FilterAction != "" {
+		url += fmt.Sprintf("&action=%s", data.FilterAction)
+	}
+	if data.FilterSearch != "" {
+		url += fmt.Sprintf("&search=%s", data.FilterSearch)
+	}
+	if data.FilterUserID != "" {
+		url += fmt.Sprintf("&user_id=%s", data.FilterUserID)
+	}
+	if data.FilterSince != "" {
+		url += fmt.Sprintf("&since=%s", data.FilterSince)
+	}
+	if data.FilterUntil != "" {
+		url += fmt.Sprintf("&until=%s", data.FilterUntil)
+	}
+	return url
+}

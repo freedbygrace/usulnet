@@ -60,7 +60,7 @@ func (h *Handler) NotificationChannelsTempl(w http.ResponseWriter, r *http.Reque
 	h.renderTempl(w, r, admin.NotificationChannels(data))
 }
 
-// NotificationChannelCreate creates a new notification channel.
+// NotificationChannelCreate creates or updates a notification channel.
 func (h *Handler) NotificationChannelCreate(w http.ResponseWriter, r *http.Request) {
 	if h.notificationConfigRepo == nil {
 		h.setFlash(w, r, "error", "Notification service not configured")
@@ -91,92 +91,7 @@ func (h *Handler) NotificationChannelCreate(w http.ResponseWriter, r *http.Reque
 		minPriority = channels.Priority(p)
 	}
 
-	// Build settings based on channel type
-	settings := make(map[string]interface{})
-
-	switch channelType {
-	case "email":
-		recipientsStr := strings.TrimSpace(r.FormValue("email_recipients"))
-		if recipientsStr != "" {
-			var recipients []string
-			for _, r := range strings.Split(recipientsStr, ",") {
-				if email := strings.TrimSpace(r); email != "" {
-					recipients = append(recipients, email)
-				}
-			}
-			settings["recipients"] = recipients
-		}
-
-	case "slack":
-		if webhook := strings.TrimSpace(r.FormValue("slack_webhook")); webhook != "" {
-			settings["webhook_url"] = webhook
-		}
-		if channel := strings.TrimSpace(r.FormValue("slack_channel")); channel != "" {
-			settings["channel"] = channel
-		}
-
-	case "discord":
-		if webhook := strings.TrimSpace(r.FormValue("discord_webhook")); webhook != "" {
-			settings["webhook_url"] = webhook
-		}
-
-	case "telegram":
-		if token := strings.TrimSpace(r.FormValue("telegram_token")); token != "" {
-			settings["bot_token"] = token
-		}
-		if chatID := strings.TrimSpace(r.FormValue("telegram_chat_id")); chatID != "" {
-			settings["chat_id"] = chatID
-		}
-
-	case "webhook":
-		if url := strings.TrimSpace(r.FormValue("webhook_url")); url != "" {
-			settings["url"] = url
-		}
-		if method := strings.TrimSpace(r.FormValue("webhook_method")); method != "" {
-			settings["method"] = method
-		}
-		if headersStr := strings.TrimSpace(r.FormValue("webhook_headers")); headersStr != "" {
-			var headers map[string]string
-			if err := json.Unmarshal([]byte(headersStr), &headers); err == nil {
-				settings["headers"] = headers
-			}
-		}
-
-	case "gotify":
-		if serverURL := strings.TrimSpace(r.FormValue("gotify_server_url")); serverURL != "" {
-			settings["server_url"] = serverURL
-		}
-		if appToken := strings.TrimSpace(r.FormValue("gotify_app_token")); appToken != "" {
-			settings["app_token"] = appToken
-		}
-
-	case "ntfy":
-		if serverURL := strings.TrimSpace(r.FormValue("ntfy_server_url")); serverURL != "" {
-			settings["server_url"] = serverURL
-		}
-		if topic := strings.TrimSpace(r.FormValue("ntfy_topic")); topic != "" {
-			settings["topic"] = topic
-		}
-		if accessToken := strings.TrimSpace(r.FormValue("ntfy_access_token")); accessToken != "" {
-			settings["access_token"] = accessToken
-		}
-
-	case "pagerduty":
-		if routingKey := strings.TrimSpace(r.FormValue("pagerduty_routing_key")); routingKey != "" {
-			settings["routing_key"] = routingKey
-		}
-		if component := strings.TrimSpace(r.FormValue("pagerduty_component")); component != "" {
-			settings["component"] = component
-		}
-
-	case "opsgenie":
-		if apiKey := strings.TrimSpace(r.FormValue("opsgenie_api_key")); apiKey != "" {
-			settings["api_key"] = apiKey
-		}
-		if baseURL := strings.TrimSpace(r.FormValue("opsgenie_api_base_url")); baseURL != "" {
-			settings["api_base_url"] = baseURL
-		}
-	}
+	settings := parseChannelSettings(r, channelType)
 
 	config := &channels.ChannelConfig{
 		Name:        name,
@@ -186,17 +101,110 @@ func (h *Handler) NotificationChannelCreate(w http.ResponseWriter, r *http.Reque
 		MinPriority: minPriority,
 	}
 
+	isEdit := r.FormValue("edit_mode") == "true"
+
 	if err := h.notificationConfigRepo.SaveChannelConfig(r.Context(), config); err != nil {
 		h.setFlash(w, r, "error", "Failed to save channel: "+err.Error())
 	} else {
-		h.setFlash(w, r, "success", "Channel created successfully")
+		if isEdit {
+			h.setFlash(w, r, "success", "Channel updated successfully")
+		} else {
+			h.setFlash(w, r, "success", "Channel created successfully")
+		}
 	}
 
 	http.Redirect(w, r, "/admin/notifications/channels", http.StatusSeeOther)
 }
 
+// parseChannelSettings extracts channel-specific settings from the form.
+func parseChannelSettings(r *http.Request, channelType string) map[string]interface{} {
+	settings := make(map[string]interface{})
+
+	switch channelType {
+	case "email":
+		setIfNotEmpty(settings, "host", r.FormValue("email_host"))
+		if portStr := r.FormValue("email_port"); portStr != "" {
+			if port, err := strconv.Atoi(portStr); err == nil {
+				settings["port"] = port
+			}
+		}
+		setIfNotEmpty(settings, "username", r.FormValue("email_username"))
+		setIfNotEmpty(settings, "password", r.FormValue("email_password"))
+		setIfNotEmpty(settings, "from_address", r.FormValue("email_from"))
+		setIfNotEmpty(settings, "from_name", r.FormValue("email_from_name"))
+		settings["use_tls"] = r.FormValue("email_tls") == "on" || r.FormValue("email_tls") == "true"
+		settings["use_ssl"] = r.FormValue("email_ssl") == "on" || r.FormValue("email_ssl") == "true"
+
+		recipientsStr := strings.TrimSpace(r.FormValue("email_recipients"))
+		if recipientsStr != "" {
+			var recipients []string
+			for _, addr := range strings.Split(recipientsStr, ",") {
+				if email := strings.TrimSpace(addr); email != "" {
+					recipients = append(recipients, email)
+				}
+			}
+			settings["to_addresses"] = recipients
+		}
+
+	case "slack":
+		setIfNotEmpty(settings, "webhook_url", r.FormValue("slack_webhook"))
+		setIfNotEmpty(settings, "channel", r.FormValue("slack_channel"))
+		setIfNotEmpty(settings, "username", r.FormValue("slack_username"))
+
+	case "discord":
+		setIfNotEmpty(settings, "webhook_url", r.FormValue("discord_webhook"))
+		setIfNotEmpty(settings, "username", r.FormValue("discord_username"))
+
+	case "telegram":
+		setIfNotEmpty(settings, "bot_token", r.FormValue("telegram_token"))
+		if chatID := strings.TrimSpace(r.FormValue("telegram_chat_id")); chatID != "" {
+			settings["chat_ids"] = []string{chatID}
+		}
+
+	case "webhook":
+		setIfNotEmpty(settings, "url", r.FormValue("webhook_url"))
+		setIfNotEmpty(settings, "method", r.FormValue("webhook_method"))
+		setIfNotEmpty(settings, "auth_type", r.FormValue("webhook_auth_type"))
+		setIfNotEmpty(settings, "auth_token", r.FormValue("webhook_auth_token"))
+		setIfNotEmpty(settings, "auth_username", r.FormValue("webhook_auth_username"))
+		setIfNotEmpty(settings, "auth_password", r.FormValue("webhook_auth_password"))
+		if headersStr := strings.TrimSpace(r.FormValue("webhook_headers")); headersStr != "" {
+			var headers map[string]string
+			if err := json.Unmarshal([]byte(headersStr), &headers); err == nil {
+				settings["headers"] = headers
+			}
+		}
+
+	case "gotify":
+		setIfNotEmpty(settings, "server_url", r.FormValue("gotify_server_url"))
+		setIfNotEmpty(settings, "app_token", r.FormValue("gotify_app_token"))
+
+	case "ntfy":
+		setIfNotEmpty(settings, "server_url", r.FormValue("ntfy_server_url"))
+		setIfNotEmpty(settings, "topic", r.FormValue("ntfy_topic"))
+		setIfNotEmpty(settings, "access_token", r.FormValue("ntfy_access_token"))
+
+	case "pagerduty":
+		setIfNotEmpty(settings, "routing_key", r.FormValue("pagerduty_routing_key"))
+		setIfNotEmpty(settings, "component", r.FormValue("pagerduty_component"))
+
+	case "opsgenie":
+		setIfNotEmpty(settings, "api_key", r.FormValue("opsgenie_api_key"))
+		setIfNotEmpty(settings, "api_base_url", r.FormValue("opsgenie_api_base_url"))
+	}
+
+	return settings
+}
+
+// setIfNotEmpty sets a key in the map if the value is non-empty after trimming.
+func setIfNotEmpty(m map[string]interface{}, key, value string) {
+	v := strings.TrimSpace(value)
+	if v != "" {
+		m[key] = v
+	}
+}
+
 // NotificationChannelEditTempl renders the notification channel edit page.
-// For now, redirects to the channels page with the channel pre-selected.
 func (h *Handler) NotificationChannelEditTempl(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if name == "" {

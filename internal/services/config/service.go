@@ -21,23 +21,74 @@ import (
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 )
 
+// VariableStore provides access to configuration variables.
+type VariableStore interface {
+	Create(ctx context.Context, v *models.ConfigVariable) error
+	GetByID(ctx context.Context, id uuid.UUID) (*models.ConfigVariable, error)
+	GetByName(ctx context.Context, name string, scope models.VariableScope, scopeID *string) (*models.ConfigVariable, error)
+	Update(ctx context.Context, v *models.ConfigVariable) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	List(ctx context.Context, opts models.VariableListOptions) ([]*models.ConfigVariable, int, error)
+	ListByScope(ctx context.Context, scope models.VariableScope, scopeID *string) ([]*models.ConfigVariable, error)
+	GetHistory(ctx context.Context, id uuid.UUID, limit int) ([]*models.VariableHistory, error)
+	GetHistoryVersion(ctx context.Context, id uuid.UUID, version int) (*models.VariableHistory, error)
+	ResolveForContainer(ctx context.Context, containerID string, templateName *string) ([]*models.ConfigVariable, error)
+}
+
+// TemplateStore provides access to configuration templates.
+type TemplateStore interface {
+	Create(ctx context.Context, t *models.ConfigTemplate) error
+	GetByID(ctx context.Context, id uuid.UUID) (*models.ConfigTemplate, error)
+	GetByName(ctx context.Context, name string) (*models.ConfigTemplate, error)
+	Update(ctx context.Context, t *models.ConfigTemplate) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	Exists(ctx context.Context, name string) (bool, error)
+	CopyTemplate(ctx context.Context, sourceID uuid.UUID, name string, userID *uuid.UUID) (*models.ConfigTemplate, error)
+	List(ctx context.Context, search *string, limit, offset int) ([]*models.ConfigTemplate, int, error)
+	ListAll(ctx context.Context) ([]*models.ConfigTemplate, error)
+	SetDefault(ctx context.Context, id uuid.UUID) error
+}
+
+// AuditStore provides access to configuration audit logs.
+type AuditStore interface {
+	Create(ctx context.Context, entry *postgres.AuditLogEntry) error
+	List(ctx context.Context, opts postgres.AuditListOptions) ([]*models.ConfigAuditLog, int, error)
+}
+
+// SyncStore provides access to configuration sync records.
+type SyncStore interface {
+	List(ctx context.Context, opts postgres.SyncListOptions) ([]*models.ConfigSync, int, error)
+	Create(ctx context.Context, sync *models.ConfigSync) error
+	GetByContainer(ctx context.Context, hostID uuid.UUID, containerID string) (*models.ConfigSync, error)
+	UpdateStatus(ctx context.Context, syncID uuid.UUID, status string, errorMsg *string) error
+	ListOutdated(ctx context.Context, hostID *uuid.UUID) ([]*models.ConfigSync, error)
+	GetSyncStats(ctx context.Context, hostID *uuid.UUID) (map[string]int, error)
+	DeleteByContainer(ctx context.Context, hostID uuid.UUID, containerID string) error
+}
+
+// Encryptor encrypts and decrypts stored secrets.
+type Encryptor interface {
+	EncryptString(plaintext string) (string, error)
+	DecryptString(ciphertext string) (string, error)
+}
+
 // Service provides configuration management operations
 type Service struct {
-	variableRepo *postgres.ConfigVariableRepository
-	templateRepo *postgres.ConfigTemplateRepository
-	auditRepo    *postgres.ConfigAuditRepository
-	syncRepo     *postgres.ConfigSyncRepository
-	encryptor    *crypto.AESEncryptor
+	variableRepo VariableStore
+	templateRepo TemplateStore
+	auditRepo    AuditStore
+	syncRepo     SyncStore
+	encryptor    Encryptor
 	logger       *logger.Logger
 }
 
 // NewService creates a new config service
 func NewService(
-	variableRepo *postgres.ConfigVariableRepository,
-	templateRepo *postgres.ConfigTemplateRepository,
-	auditRepo *postgres.ConfigAuditRepository,
-	syncRepo *postgres.ConfigSyncRepository,
-	encryptor *crypto.AESEncryptor,
+	variableRepo VariableStore,
+	templateRepo TemplateStore,
+	auditRepo AuditStore,
+	syncRepo SyncStore,
+	encryptor Encryptor,
 	log *logger.Logger,
 ) *Service {
 	return &Service{
@@ -231,12 +282,12 @@ func (s *Service) DeleteVariable(ctx context.Context, id uuid.UUID, userID *uuid
 	// Get variable for audit
 	v, err := s.variableRepo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete variable %s: get variable: %w", id, err)
 	}
 
 	// Delete
 	if err := s.variableRepo.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("delete variable %s: %w", id, err)
 	}
 
 	// Audit log
@@ -476,11 +527,11 @@ func (s *Service) DeleteTemplate(ctx context.Context, id uuid.UUID, userID *uuid
 
 	t, err := s.templateRepo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete template %s: get template: %w", id, err)
 	}
 
 	if err := s.templateRepo.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("delete template %s: %w", id, err)
 	}
 
 	// Audit log
@@ -503,7 +554,7 @@ func (s *Service) SetDefaultTemplate(ctx context.Context, id uuid.UUID, userID *
 	log := logger.FromContext(ctx)
 
 	if err := s.templateRepo.SetDefault(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("set default template %s: %w", id, err)
 	}
 
 	t, _ := s.templateRepo.GetByID(ctx, id)
@@ -727,13 +778,12 @@ func (s *Service) computeValue(expression string) (string, error) {
 	}
 }
 
-// generateRandomString generates a random alphanumeric string
+// generateRandomString generates a cryptographically random alphanumeric string.
 func generateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-		time.Sleep(1) // Ensure different values
+	s, err := crypto.RandomAlphanumeric(length)
+	if err != nil {
+		// Fallback should never happen — crypto/rand failure is catastrophic
+		panic(fmt.Sprintf("crypto/rand failure: %v", err))
 	}
-	return string(b)
+	return s
 }

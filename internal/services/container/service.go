@@ -22,8 +22,6 @@ import (
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
-	configservice "github.com/fr4nsys/usulnet/internal/services/config"
-	hostservice "github.com/fr4nsys/usulnet/internal/services/host"
 )
 
 // ServiceConfig contains container service configuration.
@@ -66,11 +64,10 @@ func DefaultConfig() ServiceConfig {
 
 // Service provides container management operations.
 type Service struct {
-	repo          *postgres.ContainerRepository
-	hostService   *hostservice.Service
-	config        ServiceConfig
-	logger        *logger.Logger
-	configService *configservice.Service
+	repo        ContainerRepository
+	hostService HostService
+	config      ServiceConfig
+	logger      *logger.Logger
 
 	stopCh  chan struct{}
 	stopped atomic.Bool
@@ -83,8 +80,8 @@ type Service struct {
 
 // NewService creates a new container service.
 func NewService(
-	repo *postgres.ContainerRepository,
-	hostService *hostservice.Service,
+	repo ContainerRepository,
+	hostService HostService,
 	config ServiceConfig,
 	log *logger.Logger,
 ) *Service {
@@ -202,7 +199,7 @@ func (s *Service) GetDockerClient(ctx context.Context, hostID uuid.UUID) (docker
 func (s *Service) GetLive(ctx context.Context, hostID uuid.UUID, containerID string) (*models.Container, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	inspect, err := client.ContainerGet(ctx, containerID)
@@ -287,7 +284,7 @@ func (s *Service) SyncInventory(ctx context.Context, hostID uuid.UUID, container
 func (s *Service) StartContainer(ctx context.Context, hostID uuid.UUID, containerID string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if err := client.ContainerStart(ctx, containerID); err != nil {
@@ -311,7 +308,7 @@ func (s *Service) StartContainer(ctx context.Context, hostID uuid.UUID, containe
 func (s *Service) StopContainer(ctx context.Context, hostID uuid.UUID, containerID string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	timeout := int(s.config.StopTimeout.Seconds())
@@ -336,7 +333,7 @@ func (s *Service) StopContainer(ctx context.Context, hostID uuid.UUID, container
 func (s *Service) Restart(ctx context.Context, hostID uuid.UUID, containerID string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	timeout := int(s.config.StopTimeout.Seconds())
@@ -361,7 +358,7 @@ func (s *Service) Restart(ctx context.Context, hostID uuid.UUID, containerID str
 func (s *Service) Pause(ctx context.Context, hostID uuid.UUID, containerID string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if err := client.ContainerPause(ctx, containerID); err != nil {
@@ -384,7 +381,7 @@ func (s *Service) Pause(ctx context.Context, hostID uuid.UUID, containerID strin
 func (s *Service) Unpause(ctx context.Context, hostID uuid.UUID, containerID string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if err := client.ContainerUnpause(ctx, containerID); err != nil {
@@ -407,7 +404,7 @@ func (s *Service) Unpause(ctx context.Context, hostID uuid.UUID, containerID str
 func (s *Service) Kill(ctx context.Context, hostID uuid.UUID, containerID string, signal string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if signal == "" {
@@ -431,7 +428,7 @@ func (s *Service) Kill(ctx context.Context, hostID uuid.UUID, containerID string
 func (s *Service) Rename(ctx context.Context, hostID uuid.UUID, containerID string, newName string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if err := client.ContainerRename(ctx, containerID, newName); err != nil {
@@ -451,7 +448,7 @@ func (s *Service) Rename(ctx context.Context, hostID uuid.UUID, containerID stri
 func (s *Service) Remove(ctx context.Context, hostID uuid.UUID, containerID string, force bool, removeVolumes bool) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if err := client.ContainerRemove(ctx, containerID, force, removeVolumes); err != nil {
@@ -506,7 +503,7 @@ type CreateInput struct {
 func (s *Service) Create(ctx context.Context, hostID uuid.UUID, input *CreateInput) (*models.Container, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	// Build port bindings
@@ -679,7 +676,7 @@ type RecreateOptions struct {
 func (s *Service) Recreate(ctx context.Context, hostID uuid.UUID, containerID string, opts RecreateOptions) (*models.Container, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	// Get current container info
@@ -842,7 +839,7 @@ type LogOptions struct {
 func (s *Service) GetLogs(ctx context.Context, hostID uuid.UUID, containerID string, opts LogOptions) (io.ReadCloser, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	dockerOpts := docker.LogOptions{
@@ -866,7 +863,7 @@ func (s *Service) GetLogs(ctx context.Context, hostID uuid.UUID, containerID str
 func (s *Service) GetStats(ctx context.Context, hostID uuid.UUID, containerID string) (*models.ContainerStats, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	stats, err := client.ContainerStatsOnce(ctx, containerID)
@@ -916,7 +913,7 @@ type ExecConfig struct {
 func (s *Service) ExecCreate(ctx context.Context, hostID uuid.UUID, containerID string, config ExecConfig) (string, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	execConfig := docker.ExecConfig{
@@ -947,7 +944,7 @@ func (s *Service) ExecCreate(ctx context.Context, hostID uuid.UUID, containerID 
 func (s *Service) SyncHost(ctx context.Context, hostID uuid.UUID) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	// List all containers from Docker
@@ -972,33 +969,113 @@ func (s *Service) SyncHost(ctx context.Context, hostID uuid.UUID) error {
 	// Find containers to remove from cache (no longer exist in Docker)
 	for _, id := range cachedIDs {
 		if !currentIDs[id] {
-			s.repo.Delete(ctx, id)
+			if err := s.repo.Delete(ctx, id); err != nil {
+				s.logger.Warn("failed to delete stale container from cache",
+					"container_id", id,
+					"error", err,
+				)
+			}
 		}
 	}
 
-	// Upsert all current containers
-	for _, c := range containers {
-		inspect, err := client.ContainerGet(ctx, c.ID)
-		if err != nil {
+	// Inspect all current containers in parallel (bounded concurrency) and upsert results.
+	// Parallelising the N individual inspect calls significantly reduces sync latency for
+	// hosts with many containers.
+	type inspectResult struct {
+		model *models.Container
+		id    string
+		err   error
+	}
+
+	const maxConcurrentInspects = 10
+	sem := make(chan struct{}, maxConcurrentInspects)
+	results := make([]inspectResult, len(containers))
+	var wg sync.WaitGroup
+
+	for i, c := range containers {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(idx int, ctr docker.Container) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			inspect, err := client.ContainerGet(ctx, ctr.ID)
+			if err != nil {
+				results[idx] = inspectResult{id: ctr.ID, err: err}
+				return
+			}
+			model := s.detailsToContainerModel(hostID, inspect)
+			// Guard against newer Docker API versions where the inspect response
+			// JSON field mapping may differ from what the SDK struct expects.
+			// Fall back to the ContainerList summary data (which is always populated)
+			// so that containers are not incorrectly skipped.
+			if model.Name == "" {
+				model.Name = ctr.Name
+			}
+			if model.Image == "" {
+				model.Image = ctr.Image
+			}
+			results[idx] = inspectResult{
+				id:    ctr.ID,
+				model: model,
+			}
+		}(i, c)
+	}
+	wg.Wait()
+
+	syncedCount := 0
+	failedCount := 0
+	skippedCount := 0
+	for _, r := range results {
+		if r.err != nil {
 			s.logger.Warn("failed to inspect container during sync",
-				"container_id", c.ID,
-				"error", err,
+				"container_id", r.id,
+				"error", r.err,
 			)
+			failedCount++
 			continue
 		}
-
-		model := s.detailsToContainerModel(hostID, inspect)
-		if err := s.repo.Upsert(ctx, model); err != nil {
+		// Skip internal Docker containers (BuildKit workers, containerd pause containers,
+		// etc.) that have no name and no image. These are not user-managed containers
+		// and cause UNIQUE(host_id, name) conflicts when stored with an empty name.
+		if r.model.Name == "" && r.model.Image == "" {
+			s.logger.Debug("skipping internal container with no name or image",
+				"container_id", r.id,
+			)
+			skippedCount++
+			continue
+		}
+		// Provide a display name for containers that have an image but no explicit name
+		// (e.g. containers created without --name). Using the short ID matches Docker CLI.
+		if r.model.Name == "" {
+			if len(r.id) >= 12 {
+				r.model.Name = r.id[:12]
+			} else {
+				r.model.Name = r.id
+			}
+		}
+		if err := s.repo.Upsert(ctx, r.model); err != nil {
 			s.logger.Warn("failed to upsert container during sync",
-				"container_id", c.ID,
+				"container_id", r.id,
 				"error", err,
 			)
+			failedCount++
+		} else {
+			syncedCount++
 		}
 	}
 
-	s.logger.Debug("host containers synced",
+	realContainers := len(containers) - skippedCount
+	if realContainers > 0 && syncedCount == 0 && failedCount > 0 {
+		return fmt.Errorf("sync failed: all %d container(s) could not be stored for host %s (check DB connectivity and FK constraints)", failedCount, hostID)
+	}
+
+	s.logger.Info("host containers synced",
 		"host_id", hostID,
-		"count", len(containers),
+		"synced", syncedCount,
+		"failed", failedCount,
+		"skipped", skippedCount,
+		"total", len(containers),
 	)
 
 	return nil
@@ -1333,7 +1410,7 @@ func (s *Service) cleanupWorker(ctx context.Context) {
 func (s *Service) ListByLabel(ctx context.Context, hostID uuid.UUID, key, value string) ([]*models.Container, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	filterMap := map[string][]string{
@@ -1393,7 +1470,7 @@ func (s *Service) BulkStart(ctx context.Context, hostID uuid.UUID, containerIDs 
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	for _, id := range containerIDs {
@@ -1435,7 +1512,7 @@ func (s *Service) BulkStop(ctx context.Context, hostID uuid.UUID, containerIDs [
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	timeout := int(s.config.StopTimeout.Seconds())
@@ -1478,7 +1555,7 @@ func (s *Service) BulkRestart(ctx context.Context, hostID uuid.UUID, containerID
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	timeout := int(s.config.StopTimeout.Seconds())
@@ -1521,7 +1598,7 @@ func (s *Service) BulkPause(ctx context.Context, hostID uuid.UUID, containerIDs 
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	for _, id := range containerIDs {
@@ -1562,7 +1639,7 @@ func (s *Service) BulkUnpause(ctx context.Context, hostID uuid.UUID, containerID
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	for _, id := range containerIDs {
@@ -1603,7 +1680,7 @@ func (s *Service) BulkRemove(ctx context.Context, hostID uuid.UUID, containerIDs
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	for _, id := range containerIDs {
@@ -1645,7 +1722,7 @@ func (s *Service) BulkKill(ctx context.Context, hostID uuid.UUID, containerIDs [
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if signal == "" {
@@ -1685,7 +1762,7 @@ func (s *Service) BulkKill(ctx context.Context, hostID uuid.UUID, containerIDs [
 func (s *Service) Prune(ctx context.Context, hostID uuid.UUID) (int64, uint64, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	spaceReclaimed, deletedIDs, err := client.ContainerPrune(ctx, nil)
@@ -1716,7 +1793,7 @@ func (s *Service) Prune(ctx context.Context, hostID uuid.UUID) (int64, uint64, e
 func (s *Service) CopyToContainer(ctx context.Context, hostID uuid.UUID, containerID, dstPath string, content io.Reader) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if err := client.ContainerCopyToContainer(ctx, containerID, dstPath, content); err != nil {
@@ -1737,7 +1814,7 @@ func (s *Service) CopyToContainer(ctx context.Context, hostID uuid.UUID, contain
 func (s *Service) CopyFromContainer(ctx context.Context, hostID uuid.UUID, containerID, srcPath string) (io.ReadCloser, *models.ContainerPathStat, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	reader, stat, err := client.ContainerCopyFromContainer(ctx, containerID, srcPath)
@@ -1786,7 +1863,7 @@ type ResourceUpdateInput struct {
 func (s *Service) UpdateResources(ctx context.Context, hostID uuid.UUID, containerID string, input ResourceUpdateInput) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	resources := docker.Resources{
@@ -1847,7 +1924,7 @@ type CommitResult struct {
 func (s *Service) Commit(ctx context.Context, hostID uuid.UUID, containerID string, input CommitInput) (*CommitResult, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	imageID, err := client.ContainerCommit(ctx, containerID, docker.CommitOptions{
@@ -1879,7 +1956,7 @@ func (s *Service) Commit(ctx context.Context, hostID uuid.UUID, containerID stri
 func (s *Service) Export(ctx context.Context, hostID uuid.UUID, containerID string) (io.ReadCloser, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	reader, err := client.ContainerExport(ctx, containerID)
@@ -1914,7 +1991,7 @@ type ImportResult struct {
 func (s *Service) Import(ctx context.Context, hostID uuid.UUID, tarball io.Reader, input ImportInput) (*ImportResult, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	// Create import source from the tarball
@@ -1993,7 +2070,7 @@ const maxContainerFileSize = 1024 * 1024 // 1MB max for file content
 func (s *Service) BrowseContainer(ctx context.Context, hostID uuid.UUID, containerID, path string) ([]ContainerFile, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	// Sanitize path
@@ -2116,7 +2193,7 @@ func (s *Service) parseContainerLS(output, basePath string) []ContainerFile {
 func (s *Service) ReadContainerFile(ctx context.Context, hostID uuid.UUID, containerID, path string, maxSize int64) (*ContainerFileContent, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	if maxSize <= 0 || maxSize > maxContainerFileSize {
@@ -2170,7 +2247,7 @@ func (s *Service) ReadContainerFile(ctx context.Context, hostID uuid.UUID, conta
 func (s *Service) WriteContainerFile(ctx context.Context, hostID uuid.UUID, containerID, path, content string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	// Use printf with base64 encoding to avoid shell escaping issues
@@ -2201,7 +2278,7 @@ func (s *Service) WriteContainerFile(ctx context.Context, hostID uuid.UUID, cont
 func (s *Service) DeleteContainerFile(ctx context.Context, hostID uuid.UUID, containerID, path string, recursive bool) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	cmd := "rm"
@@ -2231,7 +2308,7 @@ func (s *Service) DeleteContainerFile(ctx context.Context, hostID uuid.UUID, con
 func (s *Service) CreateContainerDirectory(ctx context.Context, hostID uuid.UUID, containerID, path string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	output, exitCode, err := client.RunShellCommand(ctx, containerID, fmt.Sprintf("mkdir -p %q", path))
@@ -2255,7 +2332,7 @@ func (s *Service) CreateContainerDirectory(ctx context.Context, hostID uuid.UUID
 func (s *Service) DownloadContainerFile(ctx context.Context, hostID uuid.UUID, containerID, path string) (io.ReadCloser, int64, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
 	// Get file size first

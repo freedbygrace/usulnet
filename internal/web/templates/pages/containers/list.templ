@@ -318,8 +318,19 @@ templ ContainersList(data ContainersListData) {
 						if (this.selected.length === 0) return;
 
 						const form = document.getElementById('bulk-action-form');
-						// Clear existing inputs
+						// Preserve CSRF token before clearing
+						const csrfInput = form.querySelector('input[name="csrf_token"]');
+						const csrfValue = csrfInput ? csrfInput.value : '';
+
+						// Clear existing dynamic inputs
 						form.innerHTML = '';
+
+						// Re-add CSRF token
+						const csrf = document.createElement('input');
+						csrf.type = 'hidden';
+						csrf.name = 'csrf_token';
+						csrf.value = csrfValue;
+						form.appendChild(csrf);
 
 						// Add container IDs
 						this.selected.forEach(id => {
@@ -480,10 +491,11 @@ templ containerRow(c Container) {
 							<i class="fas fa-chart-line w-4"></i> Stats
 						</a>
 						<hr class="my-1 border-dark-600"/>
-						<button 
+						<button
 							hx-post={ "/containers/" + c.ID + "/remove" }
 							hx-confirm="Are you sure you want to remove this container?"
-							hx-swap="none"
+							hx-target="closest tr"
+							hx-swap="outerHTML swap:200ms"
 							class="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10"
 						>
 							<i class="fas fa-trash w-4"></i> Remove

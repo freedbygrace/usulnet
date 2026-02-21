@@ -196,6 +196,8 @@ templ ContainerDetail(data ContainerDetailData) {
 			const MAX_POINTS = 180; // 6 min at 2s
 			let ws = null;
 			let charts = {};
+			let reconnectAttempts = 0;
+			const MAX_RECONNECT_ATTEMPTS = 5;
 			let prevNetRx = 0, prevNetTx = 0;
 			let prevBlkR = 0, prevBlkW = 0;
 
@@ -280,15 +282,26 @@ templ ContainerDetail(data ContainerDetailData) {
 				ws = new WebSocket(proto + '//' + location.host + '/ws/monitoring/container/' + CONTAINER_ID);
 
 				ws.onopen = () => {
+					reconnectAttempts = 0;
 					document.getElementById('ws-dot').className = 'w-2 h-2 rounded-full bg-emerald-400';
 					document.getElementById('ws-label').textContent = 'Live';
 				};
-				ws.onclose = () => {
+				ws.onclose = (e) => {
 					document.getElementById('ws-dot').className = 'w-2 h-2 rounded-full bg-red-400';
-					document.getElementById('ws-label').textContent = 'Disconnected';
-					setTimeout(connect, 3000);
+					if (e.code === 1000 || e.code === 1001) {
+						document.getElementById('ws-label').textContent = 'Disconnected';
+						return;
+					}
+					if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+						document.getElementById('ws-label').textContent = 'Connection lost';
+						return;
+					}
+					const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+					reconnectAttempts++;
+					document.getElementById('ws-label').textContent = 'Reconnecting in ' + (delay / 1000) + 's...';
+					setTimeout(connect, delay);
 				};
-				ws.onerror = () => ws.close();
+				ws.onerror = () => {};
 
 				ws.onmessage = (evt) => {
 					try {

@@ -266,7 +266,7 @@ func (a *securityAdapter) IgnoreIssue(ctx context.Context, id string) error {
 
 	issueID, err := parseIssueID(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse issue ID for ignore: %w", err)
 	}
 
 	return a.svc.UpdateIssueStatus(ctx, issueID, models.IssueStatusIgnored, nil)
@@ -279,7 +279,7 @@ func (a *securityAdapter) ResolveIssue(ctx context.Context, id string) error {
 
 	issueID, err := parseIssueID(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse issue ID for resolve: %w", err)
 	}
 
 	return a.svc.UpdateIssueStatus(ctx, issueID, models.IssueStatusResolved, nil)

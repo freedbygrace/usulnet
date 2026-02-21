@@ -151,13 +151,21 @@ type ArchiveEntry struct {
 // Stack Provider Interface
 // ============================================================================
 
-// StackProvider provides stack information for backups.
+// StackProvider provides stack information and operations for backups.
 type StackProvider interface {
 	// GetStack retrieves a stack by ID.
 	GetStack(ctx context.Context, id uuid.UUID) (*StackInfo, error)
 
 	// GetStackContainers retrieves containers belonging to a stack.
 	GetStackContainers(ctx context.Context, id uuid.UUID) ([]StackContainerInfo, error)
+
+	// DeployStack creates and deploys a stack from a compose file.
+	// Returns the new stack's UUID. If a stack with the given name already
+	// exists on the host, it updates and redeploys the existing stack.
+	DeployStack(ctx context.Context, hostID uuid.UUID, name, composeFile string, envFile *string) (uuid.UUID, error)
+
+	// StopStack stops a running stack without removing its volumes.
+	StopStack(ctx context.Context, id uuid.UUID) error
 }
 
 // StackInfo contains stack information needed for backup.
@@ -253,6 +261,7 @@ const (
 	// Cleanup events
 	EventCleanupStarted   EventType = "cleanup.started"
 	EventCleanupCompleted EventType = "cleanup.completed"
+	EventCleanupFailed    EventType = "cleanup.failed"
 )
 
 // Event represents a backup system event.

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -43,9 +44,11 @@ func (h *Handler) StacksTempl(w http.ResponseWriter, r *http.Request) {
 
 	stacksList, err := h.services.Stacks().List(ctx)
 	if err != nil {
+		h.logger.Error("failed to list stacks", "error", err)
 		h.renderTempl(w, r, stacks.List(stacks.StacksData{
 			PageData: pageData,
 			Stacks:   []stacks.StackItem{},
+			Error:    "Failed to load stacks: " + err.Error(),
 		}))
 		return
 	}
@@ -53,14 +56,15 @@ func (h *Handler) StacksTempl(w http.ResponseWriter, r *http.Request) {
 	var items []stacks.StackItem
 	for _, s := range stacksList {
 		items = append(items, stacks.StackItem{
-			Name:       s.Name,
-			Status:     s.Status,
-			Services:   s.ServiceCount,
-			Running:    s.RunningCount,
-			Path:       s.Path,
-			CreatedAt:  s.CreatedHuman,
-			UpdatedAt:  s.UpdatedHuman,
-			IsExternal: s.IsExternal,
+			Name:           s.Name,
+			Status:         s.Status,
+			Services:       s.ServiceCount,
+			Running:        s.RunningCount,
+			Path:           s.Path,
+			CreatedAt:      s.CreatedHuman,
+			UpdatedAt:      s.UpdatedHuman,
+			ContainerNames: s.ContainerNames,
+			IsExternal:     s.IsExternal,
 		})
 	}
 
@@ -76,7 +80,7 @@ func (h *Handler) StackDetailTempl(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 
 	stack, err := h.services.Stacks().Get(ctx, name)
-	if err != nil {
+	if err != nil || stack == nil {
 		h.RenderErrorTempl(w, r, http.StatusNotFound, "Stack Not Found", "The stack '"+name+"' could not be found.")
 		return
 	}
@@ -235,6 +239,49 @@ func (h *Handler) StackCatalogDeploySubmit(w http.ResponseWriter, r *http.Reques
 	composeContent := app.RenderCompose(values)
 
 	ctx := r.Context()
+
+	// SSE streaming mode: browser sends X-Deploy-Stream: 1
+	if r.Header.Get("X-Deploy-Stream") == "1" {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		logCh := make(chan string, 64)
+		type doneResult struct {
+			stackName string
+			err       error
+		}
+		doneCh := make(chan doneResult, 1)
+		go func() {
+			sn, err := h.services.Stacks().DeployStream(ctx, stackName, composeContent, logCh)
+			doneCh <- doneResult{stackName: sn, err: err}
+		}()
+
+		writeSSE := func(event, data string) {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+			flusher.Flush()
+		}
+		for line := range logCh {
+			escaped := strings.ReplaceAll(line, "\n", " ")
+			writeSSE("log", escaped)
+		}
+		res := <-doneCh
+		if res.err != nil {
+			msg, _ := json.Marshal(res.err.Error())
+			writeSSE("done", fmt.Sprintf(`{"ok":false,"error":%s}`, msg))
+		} else {
+			writeSSE("done", fmt.Sprintf(`{"ok":true,"redirect":"/stacks/%s"}`, url.PathEscape(res.stackName)))
+		}
+		return
+	}
+
 	if err := h.services.Stacks().Deploy(ctx, stackName, composeContent); err != nil {
 		slog.Error("catalog deploy failed", "app", slug, "stack", stackName, "error", err)
 		h.renderCatalogDeployError(w, r, app, "Error al desplegar: "+err.Error(), nil, values)
@@ -308,11 +355,16 @@ func (h *Handler) BackupsTempl(w http.ResponseWriter, r *http.Request) {
 	filterType := r.URL.Query().Get("type")
 	filterStatus := r.URL.Query().Get("status")
 
-	if warningMsg == "" {
+	if warningMsg == "" && h.services.Backups() != nil {
 		// Fetch backups with optional filtering
 		containerID := ""
+		var runningCount int
 		if bkps, err := h.services.Backups().List(ctx, containerID); err == nil {
 			for _, b := range bkps {
+				// Count running/pending across all backups (before any filter)
+				if b.Status == "running" || b.Status == "pending" {
+					runningCount++
+				}
 				// Apply client-side filters
 				if filterType != "" && b.Type != filterType {
 					continue
@@ -341,6 +393,7 @@ func (h *Handler) BackupsTempl(w http.ResponseWriter, r *http.Request) {
 				Total:     st.TotalBackups,
 				Completed: st.CompletedBackups,
 				Failed:    st.FailedBackups,
+				Running:   runningCount,
 				TotalSize: st.TotalSizeHuman,
 			}
 		}
@@ -373,32 +426,38 @@ func (h *Handler) BackupNewTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch containers for target selection
-	if containers, err := h.services.Containers().List(ctx, nil); err == nil {
-		for _, c := range containers {
-			data.Containers = append(data.Containers, backups.TargetOption{
-				ID:   c.ID,
-				Name: c.Name,
-			})
+	if containerSvc := h.services.Containers(); containerSvc != nil {
+		if containers, _, err := containerSvc.List(ctx, nil); err == nil {
+			for _, c := range containers {
+				data.Containers = append(data.Containers, backups.TargetOption{
+					ID:   c.ID,
+					Name: c.Name,
+				})
+			}
 		}
 	}
 
 	// Fetch volumes
-	if volumes, err := h.services.Volumes().List(ctx); err == nil {
-		for _, v := range volumes {
-			data.Volumes = append(data.Volumes, backups.TargetOption{
-				ID:   v.Name,
-				Name: v.Name,
-			})
+	if volumeSvc := h.services.Volumes(); volumeSvc != nil {
+		if volumes, err := volumeSvc.List(ctx); err == nil {
+			for _, v := range volumes {
+				data.Volumes = append(data.Volumes, backups.TargetOption{
+					ID:   v.Name,
+					Name: v.Name,
+				})
+			}
 		}
 	}
 
 	// Fetch stacks
-	if stacks, err := h.services.Stacks().List(ctx); err == nil {
-		for _, s := range stacks {
-			data.Stacks = append(data.Stacks, backups.TargetOption{
-				ID:   s.Name,
-				Name: s.Name,
-			})
+	if stackSvc := h.services.Stacks(); stackSvc != nil {
+		if stacks, err := stackSvc.List(ctx); err == nil {
+			for _, s := range stacks {
+				data.Stacks = append(data.Stacks, backups.TargetOption{
+					ID:   s.Name,
+					Name: s.Name,
+				})
+			}
 		}
 	}
 
@@ -409,7 +468,13 @@ func (h *Handler) BackupDetailTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
 
-	b, err := h.services.Backups().Get(ctx, id)
+	backupsSvc := h.services.Backups()
+	if backupsSvc == nil {
+		h.setFlash(w, r, "error", "Backup service is not configured")
+		http.Redirect(w, r, "/backups", http.StatusSeeOther)
+		return
+	}
+	b, err := backupsSvc.Get(ctx, id)
 	if err != nil || b == nil {
 		h.setFlash(w, r, "error", "Backup not found")
 		http.Redirect(w, r, "/backups", http.StatusSeeOther)
@@ -452,39 +517,47 @@ func (h *Handler) BackupSchedulesTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch schedules
-	if schedules, err := h.services.Backups().ListSchedules(ctx); err == nil {
-		for _, s := range schedules {
-			data.Schedules = append(data.Schedules, backups.ScheduleItem{
-				ID:            s.ID,
-				Type:          s.Type,
-				TargetName:    s.TargetName,
-				Schedule:      s.Schedule,
-				Compression:   s.Compression,
-				Encrypted:     s.Encrypted,
-				RetentionDays: s.RetentionDays,
-				MaxBackups:    s.MaxBackups,
-				IsEnabled:     s.IsEnabled,
-				LastRunAt:     s.LastRunAt,
-				LastRunStatus: s.LastRunStatus,
-				NextRunAt:     s.NextRunAt,
-			})
+	if backupsSvc := h.services.Backups(); backupsSvc != nil {
+		if schedules, err := backupsSvc.ListSchedules(ctx); err == nil {
+			for _, s := range schedules {
+				data.Schedules = append(data.Schedules, backups.ScheduleItem{
+					ID:            s.ID,
+					Type:          s.Type,
+					TargetName:    s.TargetName,
+					Schedule:      s.Schedule,
+					Compression:   s.Compression,
+					Encrypted:     s.Encrypted,
+					RetentionDays: s.RetentionDays,
+					MaxBackups:    s.MaxBackups,
+					IsEnabled:     s.IsEnabled,
+					LastRunAt:     s.LastRunAt,
+					LastRunStatus: s.LastRunStatus,
+					NextRunAt:     s.NextRunAt,
+				})
+			}
 		}
 	}
 
 	// Fetch target lists for the create modal
-	if containers, err := h.services.Containers().List(ctx, nil); err == nil {
-		for _, c := range containers {
-			data.Containers = append(data.Containers, backups.TargetOption{ID: c.ID, Name: c.Name})
+	if containerSvc := h.services.Containers(); containerSvc != nil {
+		if containers, _, err := containerSvc.List(ctx, nil); err == nil {
+			for _, c := range containers {
+				data.Containers = append(data.Containers, backups.TargetOption{ID: c.ID, Name: c.Name})
+			}
 		}
 	}
-	if volumes, err := h.services.Volumes().List(ctx); err == nil {
-		for _, v := range volumes {
-			data.Volumes = append(data.Volumes, backups.TargetOption{ID: v.Name, Name: v.Name})
+	if volumeSvc := h.services.Volumes(); volumeSvc != nil {
+		if volumes, err := volumeSvc.List(ctx); err == nil {
+			for _, v := range volumes {
+				data.Volumes = append(data.Volumes, backups.TargetOption{ID: v.Name, Name: v.Name})
+			}
 		}
 	}
-	if stacks, err := h.services.Stacks().List(ctx); err == nil {
-		for _, s := range stacks {
-			data.Stacks = append(data.Stacks, backups.TargetOption{ID: s.Name, Name: s.Name})
+	if stackSvc := h.services.Stacks(); stackSvc != nil {
+		if stacks, err := stackSvc.List(ctx); err == nil {
+			for _, s := range stacks {
+				data.Stacks = append(data.Stacks, backups.TargetOption{ID: s.Name, Name: s.Name})
+			}
 		}
 	}
 
@@ -693,6 +766,7 @@ func (h *Handler) HostDetailTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch host resource metrics (disk, memory usage, etc.)
+	// First try database cache, then fall back to live collection.
 	if metrics, err := h.services.Hosts().GetMetrics(ctx, idStr); err == nil && metrics != nil {
 		detail.MemUsed = metrics.MemoryUsed
 		detail.MemUsedStr = metrics.MemoryUsedStr
@@ -703,6 +777,20 @@ func (h *Handler) HostDetailTempl(w http.ResponseWriter, r *http.Request) {
 		detail.CPUPercent = metrics.CPUPercent
 		detail.NetworkRxStr = metrics.NetworkRxStr
 		detail.NetworkTxStr = metrics.NetworkTxStr
+	} else if metricsSvc := h.services.Metrics(); metricsSvc != nil {
+		// No cached metrics — collect live from Docker API + /proc
+		hostUUID, _ := uuid.Parse(idStr)
+		if live, liveErr := metricsSvc.CollectHostMetrics(ctx, hostUUID); liveErr == nil && live != nil {
+			detail.MemUsed = live.MemoryUsed
+			detail.MemUsedStr = humanSize(live.MemoryUsed)
+			detail.MemPercent = live.MemoryPercent
+			detail.DiskUsed = humanSize(live.DiskUsed)
+			detail.DiskTotal = humanSize(live.DiskTotal)
+			detail.DiskPercent = live.DiskPercent
+			detail.CPUPercent = live.CPUUsagePercent
+			detail.NetworkRxStr = humanSize(live.NetworkRxBytes)
+			detail.NetworkTxStr = humanSize(live.NetworkTxBytes)
+		}
 	}
 
 	hostData := hosts.HostDetailData{
@@ -1129,7 +1217,7 @@ func (h *Handler) PortsTempl(w http.ResponseWriter, r *http.Request) {
 		hostIP   string
 	}
 	portUsage := make(map[portBindKey][]string) // (port, protocol, hostIP) -> containerNames
-	containerList, err := h.services.Containers().List(ctx, nil)
+	containerList, _, err := h.services.Containers().List(ctx, nil)
 	if err != nil {
 		h.logger.Error("ports: failed to list containers", "error", err)
 		portError = "Could not retrieve container data: " + err.Error()
@@ -1634,10 +1722,21 @@ func (h *Handler) ImagePullSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.services.Images().Pull(r.Context(), reference); err != nil {
-		h.setFlash(w, r, "error", "Failed to pull image: "+err.Error())
+	// Resolve registry credentials for the image reference
+	auth := h.resolveRegistryAuth(r.Context(), reference)
+
+	if auth != nil {
+		if err := h.services.Images().PullWithAuth(r.Context(), reference, auth); err != nil {
+			h.setFlash(w, r, "error", "Failed to pull image: "+err.Error())
+		} else {
+			h.setFlash(w, r, "success", "Image "+reference+" pulled successfully")
+		}
 	} else {
-		h.setFlash(w, r, "success", "Image "+reference+" pulled successfully")
+		if err := h.services.Images().Pull(r.Context(), reference); err != nil {
+			h.setFlash(w, r, "error", "Failed to pull image: "+err.Error())
+		} else {
+			h.setFlash(w, r, "success", "Image "+reference+" pulled successfully")
+		}
 	}
 
 	http.Redirect(w, r, "/images", http.StatusSeeOther)
@@ -1686,16 +1785,18 @@ func (h *Handler) prepareTemplPageData(r *http.Request, title, active string) la
 	activeHostID := GetActiveHostIDFromContext(r.Context())
 	activeHostName := "Local"
 
-	if hostList, err := h.services.Hosts().List(r.Context()); err == nil {
-		for _, ho := range hostList {
-			hostItems = append(hostItems, types.HostSelectorItem{
-				ID:           ho.ID,
-				Name:         ho.Name,
-				Status:       ho.Status,
-				EndpointType: ho.EndpointType,
-			})
-			if ho.ID == activeHostID {
-				activeHostName = ho.Name
+	if hostSvc := h.services.Hosts(); hostSvc != nil {
+		if hostList, err := hostSvc.List(r.Context()); err == nil {
+			for _, ho := range hostList {
+				hostItems = append(hostItems, types.HostSelectorItem{
+					ID:           ho.ID,
+					Name:         ho.Name,
+					Status:       ho.Status,
+					EndpointType: ho.EndpointType,
+				})
+				if ho.ID == activeHostID {
+					activeHostName = ho.Name
+				}
 			}
 		}
 	}
@@ -1760,6 +1861,7 @@ func (h *Handler) prepareTemplPageData(r *http.Request, title, active string) la
 func (h *Handler) TerminalHubTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pageData := h.prepareTemplPageData(r, "Terminal Hub", "terminal")
+	pageData.FullScreen = true
 
 	var initialTabs []components.TerminalTabConfig
 
@@ -1807,7 +1909,7 @@ func (h *Handler) TerminalHubTempl(w http.ResponseWriter, r *http.Request) {
 	// If no specific container, show a placeholder tab
 	if len(initialTabs) == 0 {
 		// Get first running container
-		containerList, err := h.services.Containers().List(ctx, nil)
+		containerList, _, err := h.services.Containers().List(ctx, nil)
 		if err == nil && len(containerList) > 0 {
 			for _, c := range containerList {
 				if c.State == "running" {
@@ -1842,7 +1944,7 @@ func (h *Handler) TerminalPickerTempl(w http.ResponseWriter, r *http.Request) {
 
 	var pickerContainers []pages.TerminalPickerContainer
 
-	containerList, err := h.services.Containers().List(ctx, nil)
+	containerList, _, err := h.services.Containers().List(ctx, nil)
 	if err == nil {
 		for _, c := range containerList {
 			if c.State == "running" {

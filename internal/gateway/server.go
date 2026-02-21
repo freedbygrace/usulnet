@@ -71,6 +71,7 @@ type Server struct {
 	subscriber *inats.Subscriber
 	hostRepo   HostRepository
 	containerService *containersvc.Service
+	eventStore EventStore
 	config     ServerConfig
 	log        *logger.Logger
 
@@ -81,6 +82,12 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// SetEventStore sets the event persistence store. Optional — if nil, events
+// are logged but not persisted.
+func (s *Server) SetEventStore(store EventStore) {
+	s.eventStore = store
 }
 
 // NewServer creates a new gateway server.
@@ -164,6 +171,8 @@ func (s *Server) setupStreams() error {
 			Description: "Agent command queue",
 			Subjects:    []string{"usulnet.commands.>"},
 			MaxAge:      24 * time.Hour,
+			MaxBytes:    256 * 1024 * 1024, // 256 MB
+			MaxMsgs:     100_000,
 			Storage:     nats.FileStorage,
 		},
 		{
@@ -171,6 +180,8 @@ func (s *Server) setupStreams() error {
 			Description: "Agent events",
 			Subjects:    []string{"usulnet.agent.events.>"},
 			MaxAge:      24 * time.Hour,
+			MaxBytes:    512 * 1024 * 1024, // 512 MB
+			MaxMsgs:     500_000,
 			Storage:     nats.FileStorage,
 		},
 		{
@@ -178,6 +189,8 @@ func (s *Server) setupStreams() error {
 			Description: "Agent inventory snapshots",
 			Subjects:    []string{"usulnet.agent.inventory.>"},
 			MaxAge:      1 * time.Hour,
+			MaxBytes:    128 * 1024 * 1024, // 128 MB
+			MaxMsgs:     10_000,
 			Storage:     nats.FileStorage,
 		},
 	}
@@ -366,19 +379,27 @@ func (s *Server) handleEvent(msg *nats.Msg) error {
 
 	// Persist event if needed
 	if protocol.ShouldPersist(event.Type) {
-		// Sprint 2: Persist to event repository (requires event store table + repo)
-		s.log.Info("Agent event received (persistence pending)",
+		if s.eventStore != nil {
+			if err := s.eventStore.Save(s.ctx, &event); err != nil {
+				s.log.Error("Failed to persist agent event",
+					"event_id", event.ID,
+					"type", event.Type,
+					"error", err,
+				)
+			}
+		}
+		s.log.Info("Agent event received",
 			"event_id", event.ID,
 			"type", event.Type,
 			"agent_id", event.AgentID,
 			"severity", event.Severity,
 			"message", event.Message,
+			"persisted", s.eventStore != nil,
 		)
 	}
 
 	// Check if notification needed
 	if protocol.ShouldNotify(event.Type) {
-		// Sprint 2: Route to notification service for alerting
 		s.log.Warn("Agent event requires notification (alerting pending)",
 			"event_id", event.ID,
 			"type", event.Type,

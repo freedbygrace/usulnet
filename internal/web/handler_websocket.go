@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -30,16 +29,7 @@ var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true // No origin = same-origin request (e.g., from terminal tools)
-		}
-		// Validate origin matches the request host
-		u, err := url.Parse(origin)
-		if err != nil {
-			return false
-		}
-		return u.Host == r.Host
+		return isAllowedWebSocketOrigin(r)
 	},
 	HandshakeTimeout: 10 * time.Second,
 }
@@ -447,6 +437,8 @@ func (h *Handler) WSContainerExec(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer wg.Done()
 		defer cleanup()
+
+		conn.SetReadLimit(64 * 1024) // 64KB max per message — sufficient for terminal input + resize commands
 
 		for {
 			conn.SetReadDeadline(time.Now().Add(5 * time.Minute))

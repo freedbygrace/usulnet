@@ -653,6 +653,7 @@ templ searchTab(data LogManagementData) {
 						a.href = url;
 						a.download = 'log-search-results.json';
 						a.click();
+						URL.revokeObjectURL(url);
 					}
 				};
 			}

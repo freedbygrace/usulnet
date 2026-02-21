@@ -96,7 +96,10 @@ func (a *storageAdapter) UpdateConnection(ctx context.Context, connID string, na
 		IsDefault:    isDefault,
 	}
 	_, err = a.svc.UpdateConnection(ctx, id, input, userID)
-	return err
+	if err != nil {
+		return fmt.Errorf("storageAdapter.UpdateConnection: update connection %s: %w", connID, err)
+	}
+	return nil
 }
 
 func (a *storageAdapter) DeleteConnection(ctx context.Context, connID, userID string) error {

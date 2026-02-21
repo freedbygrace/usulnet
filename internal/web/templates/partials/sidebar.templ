@@ -39,8 +39,12 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 					@navItem("Dashboard", "fa-th-large", "/", active == "dashboard", 0)
 					@navItem("Infrastructure", "fa-globe", "/overview", active == "overview", 0)
 					@navItem("Nodes", "fa-server", "/nodes", active == "nodes", 0)
-					if !prefs.IsHidden("swarm") {
-						@navItem("Swarm", "fa-network-wired", "/swarm", active == "swarm", 0)
+					if isEditionAvailable(edition, "biz") {
+						if !prefs.IsHidden("swarm") {
+							@navItem("Swarm", "fa-network-wired", "/swarm", active == "swarm", 0)
+						}
+					} else {
+						@navItemLocked("Swarm", "fa-network-wired", "biz")
 					}
 				</div>
 			</div>
@@ -67,8 +71,12 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 			@sidebarSection("operations", "Operations", prefs) {
 				@navItemDanger("Security", "fa-shield-alt", "/security", active == "security", getBadge(stats, "security"))
 				@navItem("Vulnerabilities", "fa-bug", "/vulnerabilities", active == "vulnerabilities", 0)
-				if !prefs.IsHidden("compliance") {
-					@navItem("Compliance", "fa-check-double", "/compliance", active == "compliance", 0)
+				if isEditionAvailable(edition, "ee") {
+					if !prefs.IsHidden("compliance") {
+						@navItem("Compliance", "fa-check-double", "/compliance", active == "compliance", 0)
+					}
+				} else {
+					@navItemLocked("Compliance", "fa-check-double", "ee")
 				}
 				@navItemPrimary("Updates", "fa-sync-alt", "/updates", active == "updates", getBadge(stats, "updates"))
 				@navItem("Backups", "fa-archive", "/backups", active == "backups", 0)
@@ -105,12 +113,11 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 
 			<!-- Tools (collapsible, default collapsed) -->
 			@sidebarSection("tools", "Tools", prefs) {
+				@navItem("Dev Tools", "fa-toolbox", "/tools", active == "tools", 0)
+				@navItem("Calendar", "fa-calendar-alt", "/calendar", active == "calendar", 0)
 				@navItem("Terminal Hub", "fa-terminal", "/terminal", active == "terminal", 0)
 				@navItem("Editor", "fa-edit", "/editor", active == "editor", 0)
 				@navItem("Cheat Sheet", "fa-book", "/tools/cheatsheet", active == "cheatsheet", 0)
-				if !prefs.IsHidden("ansible") {
-					@navItem("Ansible", "fa-cogs", "/tools/ansible", active == "ansible", 0)
-				}
 				if !prefs.IsHidden("capture") {
 					@navItem("Packet Capture", "fa-satellite-dish", "/tools/capture", active == "capture", 0)
 				}
@@ -124,8 +131,12 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 				if !prefs.IsHidden("repositories") {
 					@navItem("Repositories", "fa-code-branch", "/integrations/gitea", active == "gitea", 0)
 				}
-				if !prefs.IsHidden("gitops") {
-					@navItem("GitOps", "fa-code-branch", "/gitops", active == "gitops", 0)
+				if isEditionAvailable(edition, "biz") {
+					if !prefs.IsHidden("gitops") {
+						@navItem("GitOps", "fa-code-branch", "/gitops", active == "gitops", 0)
+					}
+				} else {
+					@navItemLocked("GitOps", "fa-code-branch", "biz")
 				}
 				@navItem("Storage", "fa-database", "/storage", active == "storage", 0)
 				@navItem("Notifications", "fa-bell", "/notifications", active == "notifications", 0)
@@ -141,13 +152,77 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 					@navItem("Health", "fa-heartbeat", "/health-dashboard", active == "health", 0)
 				}
 				@navItem("Logs", "fa-file-alt", "/logs", active == "logs", 0)
-				if !prefs.IsHidden("log-management") {
-					@navItem("Log Analysis", "fa-search-plus", "/logs/management", active == "log-management", 0)
+				if isEditionAvailable(edition, "ee") {
+					if !prefs.IsHidden("log-management") {
+						@navItem("Log Analysis", "fa-search-plus", "/logs/management", active == "log-management", 0)
+					}
+				} else {
+					@navItemLocked("Log Analysis", "fa-search-plus", "ee")
 				}
 				@navItem("Events", "fa-stream", "/events", active == "events", 0)
 				@navItem("Topology", "fa-project-diagram", "/topology", active == "topology", 0)
 				if !prefs.IsHidden("dependencies") {
 					@navItem("Dependencies", "fa-sitemap", "/dependencies", active == "dependencies", 0)
+				}
+			}
+
+			<!-- Enterprise Features -->
+			@sidebarSection("enterprise", "Enterprise", prefs) {
+				if isEditionAvailable(edition, "ee") {
+					@navItem("OPA Policies", "fa-gavel", "/opa-policies", active == "opa-policies", 0)
+				} else {
+					@navItemLocked("OPA Policies", "fa-gavel", "ee")
+				}
+				if isEditionAvailable(edition, "ee") {
+					@navItem("Runtime Security", "fa-shield-virus", "/runtime-security", active == "runtime-security", 0)
+				} else {
+					@navItemLocked("Runtime Security", "fa-shield-virus", "ee")
+				}
+				if isEditionAvailable(edition, "ee") {
+					@navItem("Image Signing", "fa-file-signature", "/image-signing", active == "image-signing", 0)
+				} else {
+					@navItemLocked("Image Signing", "fa-file-signature", "ee")
+				}
+				if isEditionAvailable(edition, "ee") {
+					@navItem("Dashboards", "fa-tachometer-alt", "/custom-dashboards", active == "custom-dashboards", 0)
+				} else {
+					@navItemLocked("Dashboards", "fa-tachometer-alt", "ee")
+				}
+				if isEditionAvailable(edition, "ee") {
+					@navItem("Ephemeral Envs", "fa-clock", "/ephemeral-environments", active == "ephemeral-envs", 0)
+				} else {
+					@navItemLocked("Ephemeral Envs", "fa-clock", "ee")
+				}
+				if isEditionAvailable(edition, "ee") {
+					@navItem("Manifest Builder", "fa-puzzle-piece", "/manifest-builder", active == "manifest-builder", 0)
+				} else {
+					@navItemLocked("Manifest Builder", "fa-puzzle-piece", "ee")
+				}
+				if isEditionAvailable(edition, "biz") {
+					@navItem("Git Sync", "fa-sync", "/git-sync", active == "git-sync", 0)
+				} else {
+					@navItemLocked("Git Sync", "fa-sync", "biz")
+				}
+				if isEditionAvailable(edition, "ee") {
+					if !prefs.IsHidden("changes") {
+						@navItem("Change Audit", "fa-history", "/changes", active == "changes", 0)
+					}
+				} else {
+					@navItemLocked("Change Audit", "fa-history", "ee")
+				}
+				if isEditionAvailable(edition, "ee") {
+					if !prefs.IsHidden("drift") {
+						@navItem("Drift Detection", "fa-random", "/drift", active == "drift", 0)
+					}
+				} else {
+					@navItemLocked("Drift Detection", "fa-random", "ee")
+				}
+				if isEditionAvailable(edition, "ee") {
+					if !prefs.IsHidden("resource-optimization") {
+						@navItem("Resource Optim.", "fa-compress-arrows-alt", "/resource-optimization", active == "resource-optimization", 0)
+					}
+				} else {
+					@navItemLocked("Resource Optim.", "fa-compress-arrows-alt", "ee")
 				}
 			}
 
@@ -159,11 +234,19 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 						@navItem("Teams", "fa-users-cog", "/teams", active == "teams", 0)
 						@navItem("Users", "fa-users", "/users", active == "users", 0)
 						@navItem("Roles", "fa-user-shield", "/admin/roles", active == "roles", 0)
-						if !prefs.IsHidden("oauth") {
-							@navItem("OAuth", "fa-sign-in-alt", "/admin/oauth", active == "oauth-providers", 0)
+						if isEditionAvailable(edition, "biz") {
+							if !prefs.IsHidden("oauth") {
+								@navItem("OAuth", "fa-sign-in-alt", "/admin/oauth", active == "oauth-providers", 0)
+							}
+						} else {
+							@navItemLocked("OAuth", "fa-sign-in-alt", "biz")
 						}
-						if !prefs.IsHidden("ldap-providers") {
-							@navItem("LDAP", "fa-address-book", "/admin/ldap", active == "ldap-providers", 0)
+						if isEditionAvailable(edition, "biz") {
+							if !prefs.IsHidden("ldap-providers") {
+								@navItem("LDAP", "fa-address-book", "/admin/ldap", active == "ldap-providers", 0)
+							}
+						} else {
+							@navItemLocked("LDAP", "fa-address-book", "biz")
 						}
 						if !prefs.IsHidden("channels") {
 							@navItem("Channels", "fa-paper-plane", "/admin/notifications/channels", active == "notification-channels", 0)
@@ -184,6 +267,7 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 						}
 						@navItem("Jobs", "fa-tasks", "/jobs", active == "jobs", 0)
 						@navItem("License", "fa-key", "/license", active == "license", 0)
+						@navItem("About", "fa-info-circle", "/about", active == "about", 0)
 					</div>
 				</div>
 			}
@@ -214,7 +298,8 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 					<p class="text-sm font-medium text-white truncate">{ getUserName(user) }</p>
 					<p class="text-xs text-gray-500 truncate">{ getUserRole(user) }</p>
 				</div>
-				<form method="POST" action="/logout" style="display:inline">
+				<form method="POST" action="/logout" style="display:inline" onsubmit="this.elements.csrf_token.value = document.querySelector('meta[name=csrf-token]')?.content || ''">
+					<input type="hidden" name="csrf_token" value=""/>
 					<button type="submit" class="p-2 text-gray-400 hover:text-red-400 transition-colors" title="Logout">
 						<i class="fas fa-sign-out-alt"></i>
 					</button>
@@ -339,7 +424,49 @@ templ navItemPrimary(label, icon, url string, isActive bool, badge int) {
 	</a>
 }
 
+// navItemLocked renders a non-clickable nav item with an edition badge.
+// Used for features that require a higher edition than the user has.
+templ navItemLocked(label, icon string, requiredEdition string) {
+	<div
+		class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-500/60 cursor-default"
+		title={ requiredEditionLabel(requiredEdition) + " feature" }
+	>
+		<i class={ "fas " + icon + " w-5 text-center text-sm opacity-40" }></i>
+		<span class="text-sm font-medium">{ label }</span>
+		if requiredEdition == "biz" {
+			<span class="ml-auto text-[9px] font-semibold tracking-wide bg-blue-500/10 text-blue-400/60 px-1.5 py-0.5 rounded">Business</span>
+		} else {
+			<span class="ml-auto text-[9px] font-semibold tracking-wide bg-purple-500/10 text-purple-400/60 px-1.5 py-0.5 rounded">Enterprise</span>
+		}
+	</div>
+}
+
 // Helper functions
+
+// isEditionAvailable returns true if the current edition includes the required tier.
+func isEditionAvailable(currentEdition, requiredEdition string) bool {
+	switch requiredEdition {
+	case "biz":
+		return currentEdition == "biz" || currentEdition == "ee"
+	case "ee":
+		return currentEdition == "ee"
+	default:
+		return true
+	}
+}
+
+// requiredEditionLabel returns the human-readable name for an edition code.
+func requiredEditionLabel(edition string) string {
+	switch edition {
+	case "biz":
+		return "Business"
+	case "ee":
+		return "Enterprise"
+	default:
+		return "Community"
+	}
+}
+
 func getBadge(stats *types.StatsData, key string) int {
 	if stats == nil {
 		return 0

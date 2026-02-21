@@ -454,7 +454,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear session and redirect to login
-	_ = h.sessionStore.Delete(r, w, "usulnet_session")
+	_ = h.sessionStore.Delete(r, w, CookieSession)
 	h.redirect(w, r, "/login")
 }
 

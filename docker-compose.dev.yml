@@ -27,8 +27,9 @@ services:
       - SYS_ADMIN     # Required to enter host namespaces
     environment:
       - USULNET_MODE=standalone
-      - USULNET_DATABASE_URL=postgres://usulnet:usulnet_dev@postgres:5432/usulnet?sslmode=disable
-      - USULNET_REDIS_URL=redis://redis:6379
+      # sslmode=require: encrypts the connection without CA cert verification (dev only)
+      - USULNET_DATABASE_URL=postgres://usulnet:usulnet_dev@postgres:5432/usulnet?sslmode=require
+      - USULNET_REDIS_URL=rediss://redis:6379
       - USULNET_NATS_URL=nats://nats:4222
       # Host Terminal
       - HOST_TERMINAL_ENABLED=true
@@ -96,6 +97,29 @@ services:
     image: postgres:16-alpine
     container_name: usulnet-postgres
     restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        # Install openssl to generate a self-signed TLS cert (Alpine cache makes
+        # subsequent starts fast). No external certs or init containers needed.
+        apk add --no-cache openssl >/dev/null 2>&1
+
+        mkdir -p /tmp/pg-certs
+        openssl req -new -x509 -days 3650 -nodes \
+          -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+          -subj "/CN=postgres/O=usulnet-dev" \
+          -keyout /tmp/pg-certs/server.key \
+          -out /tmp/pg-certs/server.crt 2>/dev/null
+        chown 70:70 /tmp/pg-certs/server.key /tmp/pg-certs/server.crt
+        chmod 600 /tmp/pg-certs/server.key
+        chmod 644 /tmp/pg-certs/server.crt
+
+        exec docker-entrypoint.sh postgres \
+          -c ssl=on \
+          -c ssl_cert_file=/tmp/pg-certs/server.crt \
+          -c ssl_key_file=/tmp/pg-certs/server.key
     environment:
       POSTGRES_USER: usulnet
       POSTGRES_PASSWORD: usulnet_dev
@@ -116,12 +140,33 @@ services:
     image: redis:8-alpine
     container_name: usulnet-redis
     restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        apk add --no-cache openssl >/dev/null 2>&1
+        mkdir -p /tmp/redis-certs
+        openssl req -new -x509 -days 3650 -nodes \
+          -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+          -subj "/CN=redis/O=usulnet" \
+          -keyout /tmp/redis-certs/server.key \
+          -out /tmp/redis-certs/server.crt 2>/dev/null
+        chmod 600 /tmp/redis-certs/server.key
+        chmod 644 /tmp/redis-certs/server.crt
+        exec redis-server \
+          --tls-port 6379 \
+          --port 0 \
+          --tls-cert-file /tmp/redis-certs/server.crt \
+          --tls-key-file /tmp/redis-certs/server.key \
+          --tls-auth-clients no \
+          --appendonly yes
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--tls", "--insecure", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5

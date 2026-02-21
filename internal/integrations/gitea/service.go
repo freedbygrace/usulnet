@@ -24,13 +24,25 @@ import (
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 )
 
+// AutoDeployMatcher can find matching auto-deploy rules for a push event.
+type AutoDeployMatcher interface {
+	MatchRules(ctx context.Context, sourceType, sourceRepo string, branch *string) ([]*models.AutoDeployRule, error)
+}
+
+// JobEnqueuer can enqueue background jobs.
+type JobEnqueuer interface {
+	EnqueueJob(ctx context.Context, input models.CreateJobInput) (*models.Job, error)
+}
+
 // Service provides Gitea integration functionality.
 type Service struct {
-	connRepo    *postgres.GiteaConnectionRepository
-	repoRepo    *postgres.GiteaRepositoryRepository
-	webhookRepo *postgres.GiteaWebhookRepository
-	encryptor   *crypto.AESEncryptor
-	logger      *logger.Logger
+	connRepo       *postgres.GiteaConnectionRepository
+	repoRepo       *postgres.GiteaRepositoryRepository
+	webhookRepo    *postgres.GiteaWebhookRepository
+	encryptor      *crypto.AESEncryptor
+	logger         *logger.Logger
+	autoDeployRepo AutoDeployMatcher
+	jobEnqueuer    JobEnqueuer
 }
 
 // NewService creates a new Gitea integration service.
@@ -51,6 +63,12 @@ func NewService(
 		encryptor:   encryptor,
 		logger:      log.Named("gitea"),
 	}
+}
+
+// SetAutoDeployDeps sets optional auto-deploy dependencies on the service.
+func (s *Service) SetAutoDeployDeps(repo AutoDeployMatcher, enqueuer JobEnqueuer) {
+	s.autoDeployRepo = repo
+	s.jobEnqueuer = enqueuer
 }
 
 // ============================================================================
@@ -462,13 +480,22 @@ func (s *Service) processWebhookEvent(ctx context.Context, evt *models.GiteaWebh
 
 	switch evt.EventType {
 	case models.GiteaEventPush:
-		// On push, update last_commit info for the repo
+		// On push, update last_commit info for the repo and check auto-deploy rules
 		if evt.RepositoryID != nil {
 			result = "success"
 			var pushPayload WebhookPushPayload
 			if err := json.Unmarshal(evt.Payload, &pushPayload); err == nil && pushPayload.After != "" {
-				// Could update last_commit_sha here if needed
 				s.logger.Debug("push event processed", "repo_id", evt.RepositoryID, "after", pushPayload.After)
+
+				// Extract branch from ref (e.g. "refs/heads/main" → "main")
+				var branch *string
+				if strings.HasPrefix(pushPayload.Ref, "refs/heads/") {
+					b := strings.TrimPrefix(pushPayload.Ref, "refs/heads/")
+					branch = &b
+				}
+
+				// Match auto-deploy rules
+				s.triggerAutoDeploy(ctx, "gitea", pushPayload.Repository.FullName, branch, pushPayload.After, evt.Payload)
 			}
 		} else {
 			result = "skipped"
@@ -484,6 +511,76 @@ func (s *Service) processWebhookEvent(ctx context.Context, evt *models.GiteaWebh
 
 	if err := s.webhookRepo.MarkProcessed(ctx, evt.ID, result, processError); err != nil {
 		s.logger.Error("failed to mark webhook processed", "id", evt.ID, "error", err)
+	}
+}
+
+// ============================================================================
+// Auto-Deploy
+// ============================================================================
+
+// triggerAutoDeploy checks auto-deploy rules and enqueues jobs for matching ones.
+func (s *Service) triggerAutoDeploy(ctx context.Context, sourceType, sourceRepo string, branch *string, commitSHA string, payload []byte) {
+	if s.autoDeployRepo == nil || s.jobEnqueuer == nil {
+		return
+	}
+
+	rules, err := s.autoDeployRepo.MatchRules(ctx, sourceType, sourceRepo, branch)
+	if err != nil {
+		s.logger.Error("failed to match auto-deploy rules",
+			"source_type", sourceType,
+			"source_repo", sourceRepo,
+			"error", err,
+		)
+		return
+	}
+
+	if len(rules) == 0 {
+		return
+	}
+
+	s.logger.Info("auto-deploy rules matched",
+		"source_repo", sourceRepo,
+		"matched", len(rules),
+	)
+
+	branchStr := ""
+	if branch != nil {
+		branchStr = *branch
+	}
+
+	for _, rule := range rules {
+		ruleIDStr := rule.ID.String()
+		adPayload := models.AutoDeployPayload{
+			RuleID:     rule.ID,
+			SourceType: sourceType,
+			SourceRepo: sourceRepo,
+			Branch:     branchStr,
+			CommitSHA:  commitSHA,
+			Payload:    payload,
+		}
+
+		input := models.CreateJobInput{
+			Type:        models.JobTypeAutoDeploy,
+			TargetID:    &ruleIDStr,
+			TargetName:  &rule.Name,
+			Payload:     adPayload,
+			Priority:    models.JobPriorityHigh,
+			MaxAttempts: 2,
+		}
+
+		if _, err := s.jobEnqueuer.EnqueueJob(ctx, input); err != nil {
+			s.logger.Error("failed to enqueue auto-deploy job",
+				"rule_id", rule.ID,
+				"rule_name", rule.Name,
+				"error", err,
+			)
+		} else {
+			s.logger.Info("auto-deploy job enqueued",
+				"rule_id", rule.ID,
+				"rule_name", rule.Name,
+				"action", rule.Action,
+			)
+		}
 	}
 }
 

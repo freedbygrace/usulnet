@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -102,6 +103,9 @@ func (h *Handler) WebhooksTempl(w http.ResponseWriter, r *http.Request) {
 				if rule.TargetStackID != nil {
 					item.TargetStack = *rule.TargetStackID
 				}
+				if rule.TargetService != nil {
+					item.TargetService = *rule.TargetService
+				}
 				if rule.LastTriggeredAt != nil {
 					item.LastTriggered = rule.LastTriggeredAt.Format("2006-01-02 15:04")
 				}
@@ -147,22 +151,37 @@ func (h *Handler) WebhookCreate(w http.ResponseWriter, r *http.Request) {
 		events[i] = strings.TrimSpace(events[i])
 	}
 
+	retryCount := 3
+	if rc := r.FormValue("retry_count"); rc != "" {
+		if v, err := strconv.Atoi(rc); err == nil && v >= 0 && v <= 10 {
+			retryCount = v
+		}
+	}
+	timeoutSecs := 10
+	if ts := r.FormValue("timeout_secs"); ts != "" {
+		if v, err := strconv.Atoi(ts); err == nil && v >= 1 && v <= 60 {
+			timeoutSecs = v
+		}
+	}
+
 	wh := &models.OutgoingWebhook{
 		Name:        name,
 		URL:         webhookURL,
 		Events:      events,
-		IsEnabled:   r.FormValue("is_enabled") == "on",
-		RetryCount:  3,
-		TimeoutSecs: 10,
+		IsEnabled:   r.FormValue("is_enabled") == "on" || r.FormValue("is_enabled") == "true",
+		RetryCount:  retryCount,
+		TimeoutSecs: timeoutSecs,
 	}
 
 	if secret := r.FormValue("secret"); secret != "" {
 		wh.Secret = &secret
 	}
 
-	// Custom headers as JSON
 	if headersStr := r.FormValue("headers"); headersStr != "" {
-		wh.Headers = json.RawMessage(headersStr)
+		var check map[string]string
+		if json.Unmarshal([]byte(headersStr), &check) == nil {
+			wh.Headers = json.RawMessage(headersStr)
+		}
 	}
 
 	if user := GetUserFromContext(r.Context()); user != nil {
@@ -179,6 +198,91 @@ func (h *Handler) WebhookCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.setFlash(w, r, "success", "Webhook created successfully")
+	h.redirect(w, r, "/webhooks")
+}
+
+// WebhookUpdate handles updating an existing outgoing webhook.
+func (h *Handler) WebhookUpdate(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		h.redirect(w, r, "/webhooks")
+		return
+	}
+
+	if h.webhookRepo == nil {
+		h.setFlash(w, r, "error", "Webhook service not configured")
+		h.redirect(w, r, "/webhooks")
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		h.setFlash(w, r, "error", "Invalid form data")
+		h.redirect(w, r, "/webhooks")
+		return
+	}
+
+	// Fetch existing to preserve fields not in the form
+	existing, err := h.webhookRepo.GetByID(r.Context(), id)
+	if err != nil {
+		h.setFlash(w, r, "error", "Webhook not found")
+		h.redirect(w, r, "/webhooks")
+		return
+	}
+
+	name := r.FormValue("name")
+	webhookURL := r.FormValue("url")
+	if name == "" || webhookURL == "" {
+		h.setFlash(w, r, "error", "Name and URL are required")
+		h.redirect(w, r, "/webhooks")
+		return
+	}
+
+	events := strings.Split(r.FormValue("events"), ",")
+	for i := range events {
+		events[i] = strings.TrimSpace(events[i])
+	}
+
+	retryCount := existing.RetryCount
+	if rc := r.FormValue("retry_count"); rc != "" {
+		if v, err := strconv.Atoi(rc); err == nil && v >= 0 && v <= 10 {
+			retryCount = v
+		}
+	}
+	timeoutSecs := existing.TimeoutSecs
+	if ts := r.FormValue("timeout_secs"); ts != "" {
+		if v, err := strconv.Atoi(ts); err == nil && v >= 1 && v <= 60 {
+			timeoutSecs = v
+		}
+	}
+
+	existing.Name = name
+	existing.URL = webhookURL
+	existing.Events = events
+	existing.IsEnabled = r.FormValue("is_enabled") == "on" || r.FormValue("is_enabled") == "true"
+	existing.RetryCount = retryCount
+	existing.TimeoutSecs = timeoutSecs
+
+	// Update secret only if provided
+	if secret := r.FormValue("secret"); secret != "" {
+		existing.Secret = &secret
+	}
+
+	if headersStr := r.FormValue("headers"); headersStr != "" {
+		var check map[string]string
+		if json.Unmarshal([]byte(headersStr), &check) == nil {
+			existing.Headers = json.RawMessage(headersStr)
+		}
+	}
+
+	if err := h.webhookRepo.Update(r.Context(), existing); err != nil {
+		slog.Error("Failed to update webhook", "id", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to update webhook: "+err.Error())
+		h.redirect(w, r, "/webhooks")
+		return
+	}
+
+	h.setFlash(w, r, "success", "Webhook updated successfully")
 	h.redirect(w, r, "/webhooks")
 }
 
@@ -231,7 +335,7 @@ func (h *Handler) AutoDeployCreate(w http.ResponseWriter, r *http.Request) {
 		SourceType: r.FormValue("source_type"),
 		SourceRepo: sourceRepo,
 		Action:     r.FormValue("action"),
-		IsEnabled:  r.FormValue("is_enabled") == "on",
+		IsEnabled:  r.FormValue("is_enabled") == "on" || r.FormValue("is_enabled") == "true",
 	}
 
 	if branch := r.FormValue("source_branch"); branch != "" {

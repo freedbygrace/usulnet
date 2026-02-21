@@ -60,8 +60,8 @@ func (r *NotificationLogRepository) LogNotification(ctx context.Context, log *no
 		int(log.Priority),
 		log.Title,
 		log.Body,
-		channelsJSON,
-		resultsJSON,
+		string(channelsJSON),
+		string(resultsJSON),
 		log.Throttled,
 		log.SuccessCount,
 		log.FailedCount,
@@ -75,14 +75,10 @@ func (r *NotificationLogRepository) LogNotification(ctx context.Context, log *no
 	return nil
 }
 
-// GetNotificationLogs retrieves notification history with filtering.
-func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, filter notification.LogFilter) ([]*notification.NotificationLog, error) {
-	// Build dynamic query
-	query := `
-		SELECT id, type, priority, title, body, channels, results, throttled, success_count, failed_count, created_at
-		FROM notification_logs
-		WHERE 1=1
-	`
+// GetNotificationLogs retrieves notification history with filtering and total count.
+func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, filter notification.LogFilter) ([]*notification.NotificationLog, int64, error) {
+	// Build WHERE clause
+	whereClause := "WHERE 1=1"
 	args := []interface{}{}
 	argNum := 1
 
@@ -92,7 +88,7 @@ func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, fil
 		for i, t := range filter.Types {
 			types[i] = string(t)
 		}
-		query += fmt.Sprintf(" AND type = ANY($%d)", argNum)
+		whereClause += fmt.Sprintf(" AND type = ANY($%d)", argNum)
 		args = append(args, types)
 		argNum++
 	}
@@ -102,45 +98,53 @@ func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, fil
 		for i, p := range filter.Priorities {
 			priorities[i] = int(p)
 		}
-		query += fmt.Sprintf(" AND priority = ANY($%d)", argNum)
+		whereClause += fmt.Sprintf(" AND priority = ANY($%d)", argNum)
 		args = append(args, priorities)
 		argNum++
 	}
 
 	if filter.Since != nil {
-		query += fmt.Sprintf(" AND created_at >= $%d", argNum)
+		whereClause += fmt.Sprintf(" AND created_at >= $%d", argNum)
 		args = append(args, *filter.Since)
 		argNum++
 	}
 
 	if filter.Until != nil {
-		query += fmt.Sprintf(" AND created_at <= $%d", argNum)
+		whereClause += fmt.Sprintf(" AND created_at <= $%d", argNum)
 		args = append(args, *filter.Until)
 		argNum++
 	}
 
 	if filter.OnlyFailed {
-		query += " AND failed_count > 0"
+		whereClause += " AND failed_count > 0"
 	}
 
 	// Channel filter (uses JSONB containment)
 	if len(filter.Channels) > 0 {
 		for _, ch := range filter.Channels {
-			query += fmt.Sprintf(" AND channels @> $%d::jsonb", argNum)
+			whereClause += fmt.Sprintf(" AND channels @> $%d::jsonb", argNum)
 			args = append(args, fmt.Sprintf(`["%s"]`, ch))
 			argNum++
 		}
 	}
 
-	// Order and pagination
-	query += " ORDER BY created_at DESC"
+	// Count total matching records
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM notification_logs %s", whereClause)
+	var total int64
+	if err := r.db.Pool().QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "failed to count notification logs")
+	}
+
+	// Build data query with ordering and pagination
+	query := fmt.Sprintf(
+		"SELECT id, type, priority, title, body, channels, results, throttled, success_count, failed_count, created_at FROM notification_logs %s ORDER BY created_at DESC",
+		whereClause)
 
 	if filter.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", argNum)
 		args = append(args, filter.Limit)
 		argNum++
 	} else {
-		// Default limit
 		query += fmt.Sprintf(" LIMIT $%d", argNum)
 		args = append(args, 100)
 		argNum++
@@ -153,7 +157,7 @@ func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, fil
 
 	rows, err := r.db.Pool().Query(ctx, query, args...)
 	if err != nil {
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to query notification logs")
+		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "failed to query notification logs")
 	}
 	defer rows.Close()
 
@@ -180,7 +184,7 @@ func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, fil
 			&log.FailedCount,
 			&log.CreatedAt,
 		); err != nil {
-			return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to scan notification log")
+			return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "failed to scan notification log")
 		}
 
 		log.Type = channels.NotificationType(typeStr)
@@ -188,13 +192,13 @@ func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, fil
 
 		if len(channelsJSON) > 0 {
 			if err := json.Unmarshal(channelsJSON, &log.Channels); err != nil {
-				return nil, errors.Wrap(err, errors.CodeInternal, "failed to unmarshal channels")
+				return nil, 0, errors.Wrap(err, errors.CodeInternal, "failed to unmarshal channels")
 			}
 		}
 
 		if len(resultsJSON) > 0 {
 			if err := json.Unmarshal(resultsJSON, &log.Results); err != nil {
-				return nil, errors.Wrap(err, errors.CodeInternal, "failed to unmarshal results")
+				return nil, 0, errors.Wrap(err, errors.CodeInternal, "failed to unmarshal results")
 			}
 		}
 
@@ -202,10 +206,10 @@ func (r *NotificationLogRepository) GetNotificationLogs(ctx context.Context, fil
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "row iteration error")
+		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "row iteration error")
 	}
 
-	return logs, nil
+	return logs, total, nil
 }
 
 // GetNotificationStats returns aggregated statistics.
@@ -294,10 +298,11 @@ func (r *NotificationLogRepository) GetNotificationStats(ctx context.Context, si
 
 // GetRecentFailures retrieves recent failed notifications.
 func (r *NotificationLogRepository) GetRecentFailures(ctx context.Context, limit int) ([]*notification.NotificationLog, error) {
-	return r.GetNotificationLogs(ctx, notification.LogFilter{
+	logs, _, err := r.GetNotificationLogs(ctx, notification.LogFilter{
 		OnlyFailed: true,
 		Limit:      limit,
 	})
+	return logs, err
 }
 
 // DeleteOldLogs removes logs older than the specified duration.

@@ -302,7 +302,7 @@ func TestGenerateCompose(t *testing.T) {
 			Name:  "web",
 			Image: "nginx",
 			Tag:   "alpine",
-			Ports: []models.PortMapping{
+			Ports: []models.GitOpsPortMapping{
 				{Host: 8080, Container: 80, Protocol: "tcp"},
 			},
 			Environment: map[string]string{"ENV": "prod"},
@@ -342,8 +342,8 @@ func TestGenerateCompose_PortConflicts(t *testing.T) {
 	svc, _ := newService()
 
 	services := []models.ManifestServiceBlock{
-		{Name: "svc1", Image: "img1", Ports: []models.PortMapping{{Host: 8080, Container: 80}}},
-		{Name: "svc2", Image: "img2", Ports: []models.PortMapping{{Host: 8080, Container: 3000}}},
+		{Name: "svc1", Image: "img1", Ports: []models.GitOpsPortMapping{{Host: 8080, Container: 80}}},
+		{Name: "svc2", Image: "img2", Ports: []models.GitOpsPortMapping{{Host: 8080, Container: 3000}}},
 	}
 
 	_, errs := svc.GenerateCompose(services, json.RawMessage(`{}`), json.RawMessage(`{}`), "3.8")

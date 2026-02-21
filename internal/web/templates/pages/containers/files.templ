@@ -658,7 +658,7 @@ templ containerBrowser(data ContainerFilesData) {
 					try {
 						const response = await fetch(`/containers/${this.containerID}/files/api/file${this.viewingFile.path}`, {
 							method: 'PUT',
-							headers: { 'Content-Type': 'application/json' },
+						headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' },
 							body: JSON.stringify({ content: content })
 						});
 						if (!response.ok) throw new Error(await response.text());
@@ -687,7 +687,8 @@ templ containerBrowser(data ContainerFilesData) {
 					const file = this.deleteConfirm;
 					try {
 						const response = await fetch(`/containers/${this.containerID}/files/api/file${file.path}?recursive=${file.is_dir}`, {
-							method: 'DELETE'
+						method: 'DELETE',
+						headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' }
 						});
 						if (!response.ok) throw new Error(await response.text());
 						this.deleteConfirm = null;
@@ -705,7 +706,8 @@ templ containerBrowser(data ContainerFilesData) {
 						path += this.newFolderName;
 
 						const response = await fetch(`/containers/${this.containerID}/files/api/mkdir${path}`, {
-							method: 'POST'
+						method: 'POST',
+						headers: { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '' }
 						});
 						if (!response.ok) throw new Error(await response.text());
 						this.showNewFolderModal = false;

@@ -94,6 +94,9 @@ templ JobList(data JobListData) {
 					</h1>
 					<p class="text-gray-400 mt-1">Background tasks and scheduled operations</p>
 				</div>
+				<a href="/jobs/scheduled" class="bg-dark-700 hover:bg-dark-600 text-gray-300 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+					<i class="fas fa-calendar-alt mr-1"></i> Scheduled Jobs
+				</a>
 			</div>
 
 			<!-- Stats Cards -->
@@ -123,11 +126,21 @@ templ JobList(data JobListData) {
 						<label class="block text-xs text-gray-500 mb-1">Type</label>
 						<select name="type" class="bg-dark-700 border border-dark-600 rounded-lg text-white px-3 py-2 text-sm">
 							<option value="">All Types</option>
-							<option value="container_update" selected?={ data.Filters.Type == "container_update" }>Container Update</option>
 							<option value="security_scan" selected?={ data.Filters.Type == "security_scan" }>Security Scan</option>
-							<option value="backup" selected?={ data.Filters.Type == "backup" }>Backup</option>
-							<option value="image_pull" selected?={ data.Filters.Type == "image_pull" }>Image Pull</option>
-							<option value="stack_deploy" selected?={ data.Filters.Type == "stack_deploy" }>Stack Deploy</option>
+							<option value="update_check" selected?={ data.Filters.Type == "update_check" }>Update Check</option>
+							<option value="container_update" selected?={ data.Filters.Type == "container_update" }>Container Update</option>
+							<option value="backup_create" selected?={ data.Filters.Type == "backup_create" }>Backup Create</option>
+							<option value="backup_restore" selected?={ data.Filters.Type == "backup_restore" }>Backup Restore</option>
+							<option value="image_prune" selected?={ data.Filters.Type == "image_prune" }>Image Prune</option>
+							<option value="volume_prune" selected?={ data.Filters.Type == "volume_prune" }>Volume Prune</option>
+							<option value="network_prune" selected?={ data.Filters.Type == "network_prune" }>Network Prune</option>
+							<option value="host_inventory" selected?={ data.Filters.Type == "host_inventory" }>Host Inventory</option>
+							<option value="metrics_collection" selected?={ data.Filters.Type == "metrics_collection" }>Metrics Collection</option>
+							<option value="cleanup" selected?={ data.Filters.Type == "cleanup" }>Cleanup</option>
+							<option value="retention" selected?={ data.Filters.Type == "retention" }>Retention</option>
+							<option value="webhook_dispatch" selected?={ data.Filters.Type == "webhook_dispatch" }>Webhook Dispatch</option>
+							<option value="runbook_execute" selected?={ data.Filters.Type == "runbook_execute" }>Runbook Execute</option>
+							<option value="auto_deploy" selected?={ data.Filters.Type == "auto_deploy" }>Auto Deploy</option>
 						</select>
 					</div>
 					<div class="flex items-end">

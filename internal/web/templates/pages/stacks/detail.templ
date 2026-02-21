@@ -55,10 +55,10 @@ templ Detail(data StackDetailData) {
 					</div>
 				</div>
 				<div class="flex items-center gap-2">
-					<button hx-post={ "/stacks/" + data.Stack.Name + "/stop" } hx-swap="none" class="btn-secondary">
+					<button hx-post={ "/stacks/" + data.Stack.Name + "/stop" } hx-swap="none" hx-headers={ fmt.Sprintf(`{"X-CSRF-Token":"%s"}`, data.PageData.CSRFToken) } hx-on::after-request="setTimeout(()=>location.reload(),500)" class="btn-secondary">
 						<i class="fas fa-stop mr-2"></i>Stop
 					</button>
-					<button hx-post={ "/stacks/" + data.Stack.Name + "/restart" } hx-swap="none" class="btn-secondary">
+					<button hx-post={ "/stacks/" + data.Stack.Name + "/restart" } hx-swap="none" hx-headers={ fmt.Sprintf(`{"X-CSRF-Token":"%s"}`, data.PageData.CSRFToken) } hx-on::after-request="setTimeout(()=>location.reload(),500)" class="btn-secondary">
 						<i class="fas fa-redo mr-2"></i>Restart
 					</button>
 					<a href={ templ.SafeURL("/stacks/" + data.Stack.Name + "/edit") } class="btn-primary">
@@ -347,6 +347,7 @@ templ Detail(data StackDetailData) {
 			<div
 				x-show="showCompareModal"
 				x-transition
+				style="display: none;"
 				class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
 				@click.self="showCompareModal = false"
 				x-cloak

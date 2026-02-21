@@ -187,6 +187,7 @@ func validInput() gitsync.CreateSyncInput {
 	return gitsync.CreateSyncInput{
 		ConnectionID:  uuid.New(),
 		RepositoryID:  uuid.New(),
+		RepoFullName:  "org/my-repo",
 		Name:          "my-sync",
 		SyncDirection: models.SyncDirectionToGit,
 		StackName:     "web-stack",

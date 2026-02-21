@@ -41,11 +41,12 @@ type CORSConfig struct {
 	MaxAge int
 }
 
-// DefaultCORSConfig returns a permissive CORS configuration for development.
-// WARNING: This allows all origins. Use a more restrictive config in production.
+// DefaultCORSConfig returns a restrictive CORS configuration.
+// No cross-origin requests are allowed by default. To allow cross-origin
+// requests, set USULNET_CORS_ORIGINS or configure security.cors_origins.
 func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
-		AllowedOrigins: []string{},
+		AllowedOrigins: nil, // nil = no cross-origin allowed (handled in CORS())
 		AllowedMethods: []string{
 			http.MethodGet,
 			http.MethodPost,
@@ -104,15 +105,28 @@ func ProductionCORSConfig(allowedOrigins []string) CORSConfig {
 }
 
 // CORS returns a CORS middleware handler with the given configuration.
+// If AllowedOrigins is nil or empty, no cross-origin requests are allowed
+// (as opposed to go-chi/cors default behavior which allows all origins).
 func CORS(config CORSConfig) func(http.Handler) http.Handler {
-	return cors.Handler(cors.Options{
+	opts := cors.Options{
 		AllowedOrigins:   config.AllowedOrigins,
 		AllowedMethods:   config.AllowedMethods,
 		AllowedHeaders:   config.AllowedHeaders,
 		ExposedHeaders:   config.ExposedHeaders,
 		AllowCredentials: config.AllowCredentials,
 		MaxAge:           config.MaxAge,
-	})
+	}
+
+	// go-chi/cors treats empty AllowedOrigins as "allow all". Override this
+	// by using AllowOriginFunc that rejects everything when no origins are
+	// explicitly configured.
+	if len(config.AllowedOrigins) == 0 {
+		opts.AllowOriginFunc = func(r *http.Request, origin string) bool {
+			return false
+		}
+	}
+
+	return cors.Handler(opts)
 }
 
 // CORSFromEnv creates a CORS configuration from environment settings.

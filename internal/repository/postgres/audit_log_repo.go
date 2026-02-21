@@ -107,7 +107,7 @@ func (r *AuditLogRepository) Create(ctx context.Context, input *CreateAuditLogIn
 		input.Action,
 		input.ResourceType,
 		input.ResourceID,
-		detailsJSON,
+		string(detailsJSON),
 		ipAddr,
 		input.UserAgent,
 		time.Now(),
@@ -193,10 +193,13 @@ func (r *AuditLogRepository) List(ctx context.Context, opts AuditLogListOptions)
 		opts.Limit = 50
 	}
 
-	// Build main query
+	// Build main query — extract username/success/error from JSONB at SQL level
 	query := fmt.Sprintf(`
 		SELECT id, user_id, action, resource_type, resource_id,
-			details, ip_address, user_agent, created_at
+			details, ip_address, user_agent, created_at,
+			details->>'username' AS username,
+			COALESCE((details->>'success')::boolean, true) AS success,
+			details->>'error' AS error_msg
 		FROM audit_log
 		%s
 		ORDER BY created_at DESC
@@ -227,7 +230,10 @@ func (r *AuditLogRepository) GetByUser(ctx context.Context, userID uuid.UUID, li
 
 	query := `
 		SELECT id, user_id, action, resource_type, resource_id,
-			details, ip_address, user_agent, created_at
+			details, ip_address, user_agent, created_at,
+			details->>'username' AS username,
+			COALESCE((details->>'success')::boolean, true) AS success,
+			details->>'error' AS error_msg
 		FROM audit_log
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -250,7 +256,10 @@ func (r *AuditLogRepository) GetByResource(ctx context.Context, resourceType, re
 
 	query := `
 		SELECT id, user_id, action, resource_type, resource_id,
-			details, ip_address, user_agent, created_at
+			details, ip_address, user_agent, created_at,
+			details->>'username' AS username,
+			COALESCE((details->>'success')::boolean, true) AS success,
+			details->>'error' AS error_msg
 		FROM audit_log
 		WHERE resource_type = $1 AND resource_id = $2
 		ORDER BY created_at DESC
@@ -273,7 +282,10 @@ func (r *AuditLogRepository) GetRecent(ctx context.Context, limit int) ([]*model
 
 	query := `
 		SELECT id, user_id, action, resource_type, resource_id,
-			details, ip_address, user_agent, created_at
+			details, ip_address, user_agent, created_at,
+			details->>'username' AS username,
+			COALESCE((details->>'success')::boolean, true) AS success,
+			details->>'error' AS error_msg
 		FROM audit_log
 		ORDER BY created_at DESC
 		LIMIT $1`
@@ -334,7 +346,9 @@ func (r *AuditLogRepository) GetStats(ctx context.Context, since time.Time) (map
 	return stats, nil
 }
 
-// scanAuditLogs scans multiple rows into AuditLogEntry
+// scanAuditLogs scans multiple rows into AuditLogEntry.
+// Expects 12 columns: id, user_id, action, resource_type, resource_id,
+// details, ip_address, user_agent, created_at, username, success, error_msg.
 func (r *AuditLogRepository) scanAuditLogs(rows pgx.Rows) ([]*models.AuditLogEntry, error) {
 	var logs []*models.AuditLogEntry
 
@@ -354,6 +368,9 @@ func (r *AuditLogRepository) scanAuditLogs(rows pgx.Rows) ([]*models.AuditLogEnt
 			&ipAddr,
 			&l.UserAgent,
 			&l.CreatedAt,
+			&l.Username,
+			&l.Success,
+			&l.ErrorMsg,
 		)
 		if err != nil {
 			return nil, errors.Wrap(err, errors.CodeDatabaseError, "failed to scan audit log")
@@ -373,16 +390,6 @@ func (r *AuditLogRepository) scanAuditLogs(rows pgx.Rows) ([]*models.AuditLogEnt
 			var details map[string]any
 			if err := json.Unmarshal(detailsJSON, &details); err == nil {
 				l.Details = &details
-				// Extract success and error from details
-				if success, ok := details["success"].(bool); ok {
-					l.Success = success
-				}
-				if errMsg, ok := details["error"].(string); ok {
-					l.ErrorMsg = &errMsg
-				}
-				if username, ok := details["username"].(string); ok {
-					l.Username = &username
-				}
 			}
 		}
 

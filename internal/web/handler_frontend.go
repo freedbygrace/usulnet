@@ -5,13 +5,18 @@
 package web
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
@@ -28,6 +33,11 @@ import (
 	updatestmpl "github.com/fr4nsys/usulnet/internal/web/templates/pages/updates"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/volumes"
 	"github.com/fr4nsys/usulnet/internal/web/templates/types"
+)
+
+const (
+	partialEndpointMaxLimit = 50
+	partialRequestTimeout   = 10 * time.Second
 )
 
 // ============================================================================
@@ -164,21 +174,23 @@ func (h *Handler) LoginPageTempl(w http.ResponseWriter, r *http.Request) {
 
 // TOTPVerifyPageTempl renders the TOTP code input page during login.
 func (h *Handler) TOTPVerifyPageTempl(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
 	returnURL := r.URL.Query().Get("return")
 	errorMsg := r.URL.Query().Get("error")
 
-	if token == "" {
+	// Read pending TOTP token from HttpOnly cookie (not URL)
+	cookie, err := r.Cookie("totp_pending")
+	if err != nil || cookie.Value == "" {
 		h.redirect(w, r, "/login")
 		return
 	}
+	token := cookie.Value
 
 	// Validate token is still valid (don't consume it, just check)
 	if len(h.totpSigningKey) == 0 {
 		h.redirect(w, r, "/login?error=2FA+not+configured")
 		return
 	}
-	_, err := totppkg.ValidatePendingToken(token, h.totpSigningKey)
+	_, err = totppkg.ValidatePendingToken(token, h.totpSigningKey)
 	if err != nil {
 		h.redirect(w, r, "/login?error=Session+expired,+please+login+again")
 		return
@@ -201,7 +213,13 @@ func (h *Handler) TOTPVerifySubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read token from form (hidden field) or cookie fallback
 	token := r.FormValue("totp_token")
+	if token == "" {
+		if cookie, err := r.Cookie("totp_pending"); err == nil {
+			token = cookie.Value
+		}
+	}
 	code := r.FormValue("totp_code")
 	returnURL := r.FormValue("return_url")
 
@@ -221,14 +239,25 @@ func (h *Handler) TOTPVerifySubmit(w http.ResponseWriter, r *http.Request) {
 	valid, err := h.services.Users().ValidateTOTPCode(r.Context(), userID, code)
 	if err != nil || !valid {
 		RecordAccessEvent("", userID, "login_failed", "session", "", "", "Invalid TOTP code", getClientIP(r), r.UserAgent(), false, "invalid totp code")
-		// Redirect back to TOTP page with error
-		redirectURL := "/login/totp?token=" + token + "&error=Invalid+code,+please+try+again"
+		// Redirect back to TOTP page with error — token stays in the cookie, not the URL
+		redirectURL := "/login/totp?error=Invalid+code,+please+try+again"
 		if returnURL != "" {
-			redirectURL += "&return=" + returnURL
+			redirectURL += "&return=" + url.QueryEscape(returnURL)
 		}
 		h.redirect(w, r, redirectURL)
 		return
 	}
+
+	// Clear the TOTP pending cookie now that verification succeeded
+	http.SetCookie(w, &http.Cookie{
+		Name:     "totp_pending",
+		Value:    "",
+		Path:     "/login/totp",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+	})
 
 	// TOTP valid — create full session (backend + cookie)
 	userCtx, err := h.services.Auth().CreateSessionForUser(r.Context(), userID, r.UserAgent(), getClientIP(r))
@@ -251,7 +280,7 @@ func (h *Handler) TOTPVerifySubmit(w http.ResponseWriter, r *http.Request) {
 
 	RecordAccessEvent(userCtx.Username, userCtx.ID, "login", "session", session.ID, "", "Login successful (TOTP)", getClientIP(r), r.UserAgent(), true, "")
 
-	if returnURL != "" && returnURL != "/login" && strings.HasPrefix(returnURL, "/") && !strings.HasPrefix(returnURL, "//") {
+	if returnURL != "" && isSafeReturnURL(returnURL) {
 		h.redirect(w, r, returnURL)
 		return
 	}
@@ -374,7 +403,7 @@ func (h *Handler) OAuthLogin(w http.ResponseWriter, r *http.Request) {
 	// Generate state token (random, stored in cookie for CSRF protection)
 	state := GenerateCSRFToken()
 	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
+		Name:     CookieOAuthState,
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
@@ -385,7 +414,7 @@ func (h *Handler) OAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Store provider name in cookie for callback
 	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_provider",
+		Name:     CookieOAuthProvider,
 		Value:    providerName,
 		Path:     "/",
 		HttpOnly: true,
@@ -422,14 +451,14 @@ func (h *Handler) OAuthCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate state against cookie
-	stateCookie, err := r.Cookie("oauth_state")
-	if err != nil || stateCookie.Value != state {
+	stateCookie, err := r.Cookie(CookieOAuthState)
+	if err != nil || subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(state)) != 1 {
 		h.redirect(w, r, "/login?error=Invalid+OAuth+state")
 		return
 	}
 
 	// Get provider name from cookie
-	providerCookie, err := r.Cookie("oauth_provider")
+	providerCookie, err := r.Cookie(CookieOAuthProvider)
 	if err != nil || providerCookie.Value == "" {
 		h.redirect(w, r, "/login?error=OAuth+session+expired")
 		return
@@ -437,8 +466,8 @@ func (h *Handler) OAuthCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	providerName := providerCookie.Value
 
 	// Clear state cookies
-	http.SetCookie(w, &http.Cookie{Name: "oauth_state", Value: "", Path: "/", MaxAge: -1})
-	http.SetCookie(w, &http.Cookie{Name: "oauth_provider", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: CookieOAuthState, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: CookieOAuthProvider, Value: "", Path: "/", MaxAge: -1})
 
 	// Exchange code for user info
 	userCtx, err := h.services.Auth().OAuthCallback(r.Context(), providerName, code, r.UserAgent(), getClientIP(r))
@@ -446,6 +475,28 @@ func (h *Handler) OAuthCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		slog.Error("OAuth callback failed", "provider", providerName, "error", err)
 		RecordAccessEvent("", "", "login_failed", "session", "", "", "OAuth callback failed: "+providerName, getClientIP(r), r.UserAgent(), false, err.Error())
 		h.redirect(w, r, "/login?error=OAuth+authentication+failed")
+		return
+	}
+
+	// If the user has 2FA enabled, redirect to the TOTP verification page
+	// instead of creating a session immediately.
+	if userCtx.RequiresTOTP {
+		if len(h.totpSigningKey) == 0 {
+			slog.Error("OAuth user has TOTP enabled but TOTP signing key is not configured", "user_id", userCtx.ID)
+			h.redirect(w, r, "/login?error=Two-factor+authentication+is+misconfigured.+Contact+your+administrator.")
+			return
+		}
+		token := totppkg.GeneratePendingToken(userCtx.ID, h.totpSigningKey)
+		http.SetCookie(w, &http.Cookie{
+			Name:     "totp_pending",
+			Value:    token,
+			Path:     "/login/totp",
+			MaxAge:   300,
+			HttpOnly: true,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteStrictMode,
+		})
+		h.redirect(w, r, "/login/totp")
 		return
 	}
 
@@ -477,7 +528,7 @@ func (h *Handler) DashboardTempl(w http.ResponseWriter, r *http.Request) {
 	pageData := h.preparePageData(r, "Dashboard", "dashboard")
 
 	// Get containers
-	containersList, _ := h.services.Containers().List(ctx, nil)
+	containersList, _, _ := h.services.Containers().List(ctx, nil)
 
 	// Get events
 	eventsList, _ := h.services.Events().List(ctx, 10)
@@ -526,16 +577,16 @@ func (h *Handler) ContainersTempl(w http.ResponseWriter, r *http.Request) {
 	pageData.SortOrder = GetQueryParam(r, "dir", "asc")
 
 	// Get containers
-	containersList, err := h.services.Containers().List(ctx, filters)
+	containersList, total, err := h.services.Containers().List(ctx, filters)
 	if err != nil {
 		h.RenderErrorTempl(w, r, http.StatusInternalServerError, "Error", err.Error())
 		return
 	}
 
-	// Pagination
+	// Pagination — use the real DB total so page count is accurate even when
+	// the in-memory slice is capped at the adapter's fetch limit.
 	page := GetQueryParamInt(r, "page", 1)
 	perPage := GetQueryParamInt(r, "per_page", 20)
-	total := int64(len(containersList))
 	pageData.Pagination = NewPagination(total, page, perPage)
 
 	// Paginate results
@@ -1102,15 +1153,40 @@ func (h *Handler) requireServiceMiddleware(serviceCheck func() bool, serviceName
 // Partial Handlers (Templ) - For HTMX requests
 // ============================================================================
 
+func renderHTMXState(iconClass, message string) string {
+	return `<div class="p-8 text-center text-gray-500">
+		<i class="fas ` + iconClass + ` text-3xl mb-3 opacity-50"></i>
+		<p>` + message + `</p>
+	</div>`
+}
+
+func clampPartialLimit(limit, defaultValue int) int {
+	if limit <= 0 {
+		return defaultValue
+	}
+	if limit > partialEndpointMaxLimit {
+		return partialEndpointMaxLimit
+	}
+	return limit
+}
+
 // ContainersPartialTempl renders just the container table for HTMX requests.
 func (h *Handler) ContainersPartialTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	limit := GetQueryParamInt(r, "limit", 5)
+	limit := clampPartialLimit(GetQueryParamInt(r, "limit", 5), 5)
+	ctx, cancel := context.WithTimeout(ctx, partialRequestTimeout)
+	defer cancel()
 
-	containersList, err := h.services.Containers().List(ctx, nil)
+	containersList, _, err := h.services.Containers().List(ctx, nil)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		errorMsg := "Failed to load containers"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			errorMsg = "Containers request timed out"
+		}
+		_, _ = w.Write([]byte(renderHTMXState("fa-triangle-exclamation", errorMsg)))
 		return
 	}
 
@@ -1121,6 +1197,11 @@ func (h *Handler) ContainersPartialTempl(w http.ResponseWriter, r *http.Request)
 
 	// Render partial HTML
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if len(containersList) == 0 {
+		_, _ = w.Write([]byte(renderHTMXState("fa-cube", "No containers found")))
+		return
+	}
 
 	for _, c := range containersList {
 		// Generate row HTML
@@ -1148,31 +1229,36 @@ func (h *Handler) ContainersPartialTempl(w http.ResponseWriter, r *http.Request)
 func (h *Handler) EventsPartialTempl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	limit := GetQueryParamInt(r, "limit", 10)
+	limit := clampPartialLimit(GetQueryParamInt(r, "limit", 10), 10)
+	ctx, cancel := context.WithTimeout(ctx, partialRequestTimeout)
+	defer cancel()
 
 	eventsList, err := h.services.Events().List(ctx, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		errorMsg := "Failed to load events"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			errorMsg = "Events request timed out"
+		}
+		_, _ = w.Write([]byte(renderHTMXState("fa-triangle-exclamation", errorMsg)))
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if len(eventsList) == 0 {
-		html := `<div class="p-8 text-center text-gray-500">
-			<i class="fas fa-stream text-3xl mb-3 opacity-50"></i>
-			<p>No recent events</p>
-		</div>`
-		w.Write([]byte(html))
+		_, _ = w.Write([]byte(renderHTMXState("fa-stream", "No recent events")))
 		return
 	}
 
 	for _, e := range eventsList {
-		// Determine icon and color
+		// Determine icon and color based on action
 		iconClass := "fa-info"
 		colorClass := "bg-gray-500/20 text-gray-400"
 
 		switch e.Action {
+		// Docker container actions
 		case "start":
 			iconClass = "fa-play"
 			colorClass = "bg-green-500/20 text-green-400"
@@ -1191,6 +1277,46 @@ func (h *Handler) EventsPartialTempl(w http.ResponseWriter, r *http.Request) {
 		case "pull":
 			iconClass = "fa-download"
 			colorClass = "bg-blue-500/20 text-blue-400"
+		// Audit log actions
+		case "login":
+			iconClass = "fa-sign-in-alt"
+			colorClass = "bg-green-500/20 text-green-400"
+		case "logout":
+			iconClass = "fa-sign-out-alt"
+			colorClass = "bg-gray-500/20 text-gray-400"
+		case "login_failed":
+			iconClass = "fa-exclamation-triangle"
+			colorClass = "bg-red-500/20 text-red-400"
+		case "password_change", "password_reset":
+			iconClass = "fa-key"
+			colorClass = "bg-yellow-500/20 text-yellow-400"
+		case "api_key_create":
+			iconClass = "fa-key"
+			colorClass = "bg-blue-500/20 text-blue-400"
+		case "api_key_delete":
+			iconClass = "fa-key"
+			colorClass = "bg-red-500/20 text-red-400"
+		case "update":
+			iconClass = "fa-edit"
+			colorClass = "bg-blue-500/20 text-blue-400"
+		case "delete":
+			iconClass = "fa-trash"
+			colorClass = "bg-red-500/20 text-red-400"
+		case "security_scan":
+			iconClass = "fa-shield-alt"
+			colorClass = "bg-purple-500/20 text-purple-400"
+		case "backup":
+			iconClass = "fa-database"
+			colorClass = "bg-blue-500/20 text-blue-400"
+		case "restore":
+			iconClass = "fa-undo"
+			colorClass = "bg-yellow-500/20 text-yellow-400"
+		}
+
+		// Use the pre-built Message for audit events, or compose for Docker events
+		displayMsg := e.Message
+		if e.Type != "audit" {
+			displayMsg = "<span class=\"font-medium\">" + e.Action + "</span> <span class=\"text-gray-400\">" + e.ActorName + "</span>"
 		}
 
 		html := `<div class="flex items-start gap-3 p-3 hover:bg-dark-700/50 transition-colors">
@@ -1198,10 +1324,7 @@ func (h *Handler) EventsPartialTempl(w http.ResponseWriter, r *http.Request) {
 				<i class="fas ` + iconClass + ` text-xs"></i>
 			</div>
 			<div class="flex-1 min-w-0">
-				<p class="text-sm text-white">
-					<span class="font-medium">` + e.Action + `</span>
-					<span class="text-gray-400"> ` + e.ActorName + `</span>
-				</p>
+				<p class="text-sm text-white">` + displayMsg + `</p>
 				<p class="text-xs text-gray-500">` + e.TimeHuman + `</p>
 			</div>
 		</div>`
@@ -1271,7 +1394,7 @@ func (h *Handler) SearchPartialTempl(w http.ResponseWriter, r *http.Request) {
 
 	// Search containers
 	filters := map[string]string{"search": query}
-	containersList, _ := h.services.Containers().List(ctx, filters)
+	containersList, _, _ := h.services.Containers().List(ctx, filters)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
@@ -1805,7 +1928,7 @@ func (h *Handler) UpdatesTempl(w http.ResponseWriter, r *http.Request) {
 	var containers []updatestmpl.ContainerBasic
 	containerSvc := h.services.Containers()
 	if containerSvc != nil {
-		if list, err := containerSvc.List(ctx, nil); err == nil {
+		if list, _, err := containerSvc.List(ctx, nil); err == nil {
 			for _, c := range list {
 				name := c.Name
 				if len(name) > 0 && name[0] == '/' {

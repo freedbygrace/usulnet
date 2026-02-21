@@ -90,7 +90,7 @@ func CatalogDeploy(data CatalogDeployData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-3xl mx-auto space-y-6\"><!-- Header --><div class=\"flex items-center gap-4\"><a href=\"/stacks/catalog\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg\"><i class=\"fas fa-arrow-left\"></i></a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-3xl mx-auto space-y-6\" x-data=\"catalogDeployCtrl()\" x-init=\"init()\"><!-- Header --><div class=\"flex items-center gap-4\"><a href=\"/stacks/catalog\" class=\"p-2 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg\"><i class=\"fas fa-arrow-left\"></i></a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -316,7 +316,7 @@ func CatalogDeploy(data CatalogDeployData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" method=\"POST\" class=\"space-y-6\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" method=\"POST\" class=\"space-y-6\" @submit.prevent=\"submitDeploy($event)\" x-ref=\"deployForm\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -654,20 +654,33 @@ func CatalogDeploy(data CatalogDeployData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</pre></details><!-- Deploy Actions --><div class=\"flex justify-end gap-3\"><a href=\"/stacks/catalog\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\"><i class=\"fas fa-rocket mr-2\"></i>Deploy ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</pre></details><!-- Deploy Actions --><div class=\"flex justify-end gap-3\"><a href=\"/stacks/catalog\" class=\"btn-secondary\">Cancel</a> <button type=\"submit\" class=\"btn-primary\" :disabled=\"deploying\"><template x-if=\"deploying\"><span><i class=\"fas fa-spinner fa-spin mr-2\"></i>Deploying...</span></template><template x-if=\"!deploying\"><span><i class=\"fas fa-rocket mr-2\"></i>Deploy ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(data.App.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/stacks/catalog_deploy.templ`, Line: 188, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/stacks/catalog_deploy.templ`, Line: 192, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</button></div></form></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</span></template></button></div></form><!-- Deploy Log Modal --><div x-show=\"showLogModal\" x-cloak class=\"fixed inset-0 z-50 flex items-center justify-center p-4\" @keydown.escape.window=\"if(deployFinished) showLogModal = false\"><!-- Backdrop --><div class=\"absolute inset-0 bg-black/70 backdrop-blur-sm\"></div><!-- Modal panel --><div class=\"relative w-full max-w-3xl bg-dark-800 rounded-2xl border border-dark-600 shadow-2xl flex flex-col\" style=\"max-height: 80vh;\"><!-- Header --><div class=\"flex items-center justify-between px-5 py-4 border-b border-dark-600\"><div class=\"flex items-center gap-3\"><div x-show=\"!deployFinished\" class=\"w-2 h-2 rounded-full bg-primary-400 animate-pulse\"></div><div x-show=\"deployFinished && deploySuccess\" class=\"w-2 h-2 rounded-full bg-green-400\"></div><div x-show=\"deployFinished && !deploySuccess\" class=\"w-2 h-2 rounded-full bg-red-400\"></div><h2 class=\"text-base font-semibold text-white font-display\"><span x-show=\"!deployFinished\">Deploying ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var38 string
+			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(data.App.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/stacks/catalog_deploy.templ`, Line: 217, Col: 64}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "...</span> <span x-show=\"deployFinished && deploySuccess\" class=\"text-green-400\">Deployment successful</span> <span x-show=\"deployFinished && !deploySuccess\" class=\"text-red-400\">Deployment failed</span></h2></div><button x-show=\"deployFinished\" @click=\"showLogModal = false\" class=\"p-1.5 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg transition-colors\"><i class=\"fas fa-times\"></i></button></div><!-- Log output --><div id=\"deploy-log-output\" class=\"flex-1 overflow-y-auto p-4 font-mono text-xs text-gray-300 space-y-0.5 bg-[#0d1117]\" style=\"min-height: 300px;\"><template x-if=\"logLines.length === 0 && !deployFinished\"><p class=\"text-gray-500 italic\">Waiting for output...</p></template><template x-for=\"(line, idx) in logLines\" :key=\"idx\"><div class=\"leading-5 whitespace-pre-wrap break-all\" x-text=\"line\"></div></template></div><!-- Footer --><div class=\"px-5 py-3 border-t border-dark-600 flex items-center justify-between gap-3\"><div class=\"flex items-center gap-2 text-sm\"><span x-show=\"!deployFinished\" class=\"text-gray-400\"><i class=\"fas fa-spinner fa-spin mr-1.5\"></i>Running docker compose...</span> <span x-show=\"deployFinished && deploySuccess\" class=\"text-green-400\"><i class=\"fas fa-check-circle mr-1.5\"></i>All services started successfully.</span> <span x-show=\"deployFinished && !deploySuccess\" class=\"text-red-400\"><i class=\"fas fa-exclamation-circle mr-1.5\"></i><span x-text=\"deployError\"></span></span></div><div class=\"flex gap-2 flex-shrink-0\"><button x-show=\"deployFinished && !deploySuccess\" @click=\"showLogModal = false\" class=\"btn-secondary text-sm\">Close</button> <a x-show=\"deployFinished && deploySuccess\" :href=\"deployRedirect\" class=\"btn-primary text-sm\"><i class=\"fas fa-arrow-right mr-1.5\"></i>Go to Stack</a></div></div></div></div><script>\n\t\t\tfunction catalogDeployCtrl() {\n\t\t\t\treturn {\n\t\t\t\t\tdeploying: false,\n\t\t\t\t\tshowLogModal: false,\n\t\t\t\t\tlogLines: [],\n\t\t\t\t\tdeployFinished: false,\n\t\t\t\t\tdeploySuccess: false,\n\t\t\t\t\tdeployRedirect: '',\n\t\t\t\t\tdeployError: '',\n\n\t\t\t\t\tinit() {},\n\n\t\t\t\t\tsubmitDeploy(evt) {\n\t\t\t\t\t\tconst form = this.$refs.deployForm;\n\t\t\t\t\t\tconst formData = new FormData(form);\n\t\t\t\t\t\tthis.deploying = true;\n\t\t\t\t\t\tthis.showLogModal = true;\n\t\t\t\t\t\tthis.logLines = [];\n\t\t\t\t\t\tthis.deployFinished = false;\n\t\t\t\t\t\tthis.deploySuccess = false;\n\t\t\t\t\t\tthis.deployRedirect = '';\n\t\t\t\t\t\tthis.deployError = '';\n\n\t\t\t\t\t\tfetch(form.action, {\n\t\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\t\theaders: { 'X-Deploy-Stream': '1' },\n\t\t\t\t\t\t\tbody: formData,\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.then(resp => {\n\t\t\t\t\t\t\tconst reader = resp.body.getReader();\n\t\t\t\t\t\t\tconst decoder = new TextDecoder();\n\t\t\t\t\t\t\tlet buf = '';\n\t\t\t\t\t\t\tconst self = this;\n\t\t\t\t\t\t\tfunction pump() {\n\t\t\t\t\t\t\t\treturn reader.read().then(({ done, value }) => {\n\t\t\t\t\t\t\t\t\tif (done) return;\n\t\t\t\t\t\t\t\t\tbuf += decoder.decode(value, { stream: true });\n\t\t\t\t\t\t\t\t\tconst parts = buf.split('\\n\\n');\n\t\t\t\t\t\t\t\t\tbuf = parts.pop();\n\t\t\t\t\t\t\t\t\tparts.forEach(block => {\n\t\t\t\t\t\t\t\t\t\tconst lines = block.split('\\n');\n\t\t\t\t\t\t\t\t\t\tlet evt = '', data = '';\n\t\t\t\t\t\t\t\t\t\tlines.forEach(l => {\n\t\t\t\t\t\t\t\t\t\t\tif (l.startsWith('event: ')) evt = l.slice(7);\n\t\t\t\t\t\t\t\t\t\t\telse if (l.startsWith('data: ')) data = l.slice(6);\n\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\tif (evt === 'log') {\n\t\t\t\t\t\t\t\t\t\t\tself.logLines.push(data);\n\t\t\t\t\t\t\t\t\t\t\tself.$nextTick(() => {\n\t\t\t\t\t\t\t\t\t\t\t\tconst el = document.getElementById('deploy-log-output');\n\t\t\t\t\t\t\t\t\t\t\t\tif (el) el.scrollTop = el.scrollHeight;\n\t\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\t} else if (evt === 'done') {\n\t\t\t\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\t\t\t\tconst res = JSON.parse(data);\n\t\t\t\t\t\t\t\t\t\t\t\tself.deployFinished = true;\n\t\t\t\t\t\t\t\t\t\t\t\tself.deploySuccess = res.ok;\n\t\t\t\t\t\t\t\t\t\t\t\tif (res.ok) self.deployRedirect = res.redirect;\n\t\t\t\t\t\t\t\t\t\t\t\telse self.deployError = res.error || 'Deploy failed';\n\t\t\t\t\t\t\t\t\t\t\t} catch(_) {}\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\treturn pump();\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn pump();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(err => {\n\t\t\t\t\t\t\tthis.deployError = err.message;\n\t\t\t\t\t\t\tthis.deployFinished = true;\n\t\t\t\t\t\t\tthis.deploySuccess = false;\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.finally(() => { this.deploying = false; });\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t}\n\t\t\t</script></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

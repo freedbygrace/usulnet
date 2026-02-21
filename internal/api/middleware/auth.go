@@ -47,6 +47,10 @@ type UserClaims struct {
 // APIKeyAuthenticator validates an API key and returns user claims.
 type APIKeyAuthenticator func(ctx context.Context, apiKey string) (*UserClaims, error)
 
+// TokenValidatorFunc is a function that performs additional token validation
+// (e.g., checking if a token has been revoked via the Redis blacklist).
+type TokenValidatorFunc func(ctx context.Context, token string, claims *UserClaims) error
+
 // AuthConfig contains configuration for the auth middleware.
 type AuthConfig struct {
 	// Secret is the JWT signing secret (required)
@@ -73,8 +77,8 @@ type AuthConfig struct {
 	ErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 
 	// TokenValidator is an optional function to perform additional token validation
-	// (e.g., check if token is revoked)
-	TokenValidator func(token string, claims *UserClaims) error
+	// (e.g., check if token is revoked). Receives the request context for store lookups.
+	TokenValidator func(ctx context.Context, token string, claims *UserClaims) error
 
 	// SuccessHandler is called after successful authentication (optional)
 	SuccessHandler func(w http.ResponseWriter, r *http.Request, claims *UserClaims)
@@ -84,10 +88,13 @@ type AuthConfig struct {
 }
 
 // DefaultAuthConfig returns a default auth configuration.
+// Tokens are only accepted from the Authorization header with Bearer prefix.
+// Query parameter tokens are intentionally NOT supported as they appear in
+// server logs, browser history, Referer headers, and proxy logs.
 func DefaultAuthConfig(secret string) AuthConfig {
 	return AuthConfig{
 		Secret:       secret,
-		TokenLookup:  "header:Authorization,query:token",
+		TokenLookup:  "header:Authorization",
 		AuthScheme:   "Bearer",
 		ContextKey:   UserContextKey,
 		ErrorHandler: defaultAuthErrorHandler,
@@ -196,7 +203,7 @@ func Auth(config AuthConfig) func(http.Handler) http.Handler {
 
 			// Optional: Additional token validation (e.g., check revocation)
 			if config.TokenValidator != nil {
-				if err := config.TokenValidator(tokenString, claims); err != nil {
+				if err := config.TokenValidator(r.Context(), tokenString, claims); err != nil {
 					config.ErrorHandler(w, r, apierrors.RevokedToken())
 					return
 				}
@@ -228,7 +235,7 @@ var RequireAuth = func(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetUserFromContext(r.Context())
 		if claims == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			apierrors.WriteError(w, apierrors.Unauthorized(""))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -275,13 +282,16 @@ func headerExtractor(name, authScheme string) tokenExtractor {
 			return ""
 		}
 
-		// Check for auth scheme prefix
+		// Require auth scheme prefix (e.g. "Bearer ") per RFC 6750.
+		// Accepting tokens without a scheme prefix can cause token confusion
+		// with other auth schemes (Basic, Digest, etc.)
 		if authScheme != "" {
 			prefix := authScheme + " "
 			if strings.HasPrefix(header, prefix) {
 				return strings.TrimPrefix(header, prefix)
 			}
-			// Also accept without prefix for backwards compatibility
+			// No valid scheme prefix found — reject
+			return ""
 		}
 
 		return header
@@ -403,8 +413,8 @@ func (s *TokenRevocationStore) cleanupExpired() {
 }
 
 // ValidatorWithRevocation returns a token validator that checks revocation.
-func (s *TokenRevocationStore) ValidatorWithRevocation() func(string, *UserClaims) error {
-	return func(token string, claims *UserClaims) error {
+func (s *TokenRevocationStore) ValidatorWithRevocation() func(context.Context, string, *UserClaims) error {
+	return func(_ context.Context, _ string, claims *UserClaims) error {
 		if claims.ID != "" && s.IsRevoked(claims.ID) {
 			return apierrors.RevokedToken()
 		}

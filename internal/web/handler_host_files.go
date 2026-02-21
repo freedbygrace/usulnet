@@ -6,10 +6,12 @@ package web
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,7 +32,7 @@ func (h *Handler) HostFilesTempl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := h.hostTerminalConfig
-	cfg.User = "root" // File browser always runs as root to view all files
+	cfg.User = "root"
 
 	if !cfg.Enabled {
 		h.RenderErrorTempl(w, r, http.StatusForbidden,
@@ -52,6 +54,14 @@ func (h *Handler) HostFilesTempl(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		path = "/"
 	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	path, err = validateHostPath(path)
+	if err != nil {
+		h.RenderErrorTempl(w, r, http.StatusBadRequest, "Invalid Path", "The requested path is not valid.")
+		return
+	}
 
 	pageData := h.prepareTemplPageData(r, "Files: "+host.Name, "nodes")
 
@@ -69,6 +79,26 @@ func (h *Handler) HostFilesTempl(w http.ResponseWriter, r *http.Request) {
 // =============================================================================
 // Host Filesystem API
 // =============================================================================
+
+// hostFilesUser extracts the host user from the X-Host-User header.
+// If a custom user is provided, it is validated (alphanumeric, underscore, hyphen, dot).
+// Defaults to "root" if no header is set.
+func hostFilesUser(r *http.Request) string {
+	user := r.Header.Get("X-Host-User")
+	if user == "" {
+		return "root"
+	}
+	// Validate username: only allow safe characters to prevent injection
+	for _, c := range user {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
+			return "root"
+		}
+	}
+	if len(user) > 64 {
+		return "root"
+	}
+	return user
+}
 
 // HostFileEntry represents a file or directory on the host.
 type HostFileEntry struct {
@@ -106,7 +136,7 @@ func (h *Handler) APIHostBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := h.hostTerminalConfig
-	cfg.User = "root" // File browser always runs as root to view all files
+	cfg.User = hostFilesUser(r)
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -123,6 +153,12 @@ func (h *Handler) APIHostBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
+	}
+
+	path, err := validateHostPath(path)
+	if err != nil {
+		h.jsonError(w, "Invalid path: "+err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	selfID := detectSelfContainerID()
@@ -158,7 +194,7 @@ func (h *Handler) APIHostReadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := h.hostTerminalConfig
-	cfg.User = "root" // File browser always runs as root to view all files
+	cfg.User = hostFilesUser(r)
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -178,11 +214,21 @@ func (h *Handler) APIHostReadFile(w http.ResponseWriter, r *http.Request) {
 		path = "/" + path
 	}
 
-	maxSize := 1024 * 1024 // 1MB default
+	path, err := validateHostPath(path)
+	if err != nil {
+		h.jsonError(w, "Invalid path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	const maxAllowedSize = 10 * 1024 * 1024 // 10MB hard limit
+	maxSize := 1024 * 1024                  // 1MB default
 	if ms := r.URL.Query().Get("max_size"); ms != "" {
-		if parsed, err := strconv.Atoi(ms); err == nil {
+		if parsed, err := strconv.Atoi(ms); err == nil && parsed > 0 {
 			maxSize = parsed
 		}
+	}
+	if maxSize > maxAllowedSize {
+		maxSize = maxAllowedSize
 	}
 
 	selfID := detectSelfContainerID()
@@ -234,7 +280,7 @@ func (h *Handler) APIHostDownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := h.hostTerminalConfig
-	cfg.User = "root" // File browser always runs as root to view all files
+	cfg.User = hostFilesUser(r)
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -254,6 +300,12 @@ func (h *Handler) APIHostDownloadFile(w http.ResponseWriter, r *http.Request) {
 		path = "/" + path
 	}
 
+	path, err := validateHostPath(path)
+	if err != nil {
+		h.jsonError(w, "Invalid path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	selfID := detectSelfContainerID()
 	if selfID == "" {
 		h.jsonError(w, "Cannot detect container ID", http.StatusInternalServerError)
@@ -267,12 +319,18 @@ func (h *Handler) APIHostDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract filename from path
-	parts := strings.Split(path, "/")
-	filename := parts[len(parts)-1]
-	if filename == "" {
+	// Extract filename from path — use filepath.Base for safety
+	filename := filepath.Base(path)
+	if filename == "" || filename == "." || filename == "/" {
 		filename = "download"
 	}
+	// Sanitize filename for Content-Disposition header (strip quotes and control chars)
+	filename = strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r < 32 {
+			return '_'
+		}
+		return r
+	}, filename)
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
@@ -290,7 +348,7 @@ func (h *Handler) APIHostMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := h.hostTerminalConfig
-	cfg.User = "root" // File browser always runs as root to view all files
+	cfg.User = hostFilesUser(r)
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -310,6 +368,12 @@ func (h *Handler) APIHostMkdir(w http.ResponseWriter, r *http.Request) {
 		path = "/" + path
 	}
 
+	path, err := validateHostPath(path)
+	if err != nil {
+		h.jsonError(w, "Invalid path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	selfID := detectSelfContainerID()
 	if selfID == "" {
 		h.jsonError(w, "Cannot detect container ID", http.StatusInternalServerError)
@@ -317,7 +381,7 @@ func (h *Handler) APIHostMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create directory via nsenter (as configured user)
-	_, err := runNsenterCommand(selfID, []string{"mkdir", "-p", path}, cfg)
+	_, err = runNsenterCommand(selfID, []string{"mkdir", "-p", path}, cfg)
 	if err != nil {
 		h.jsonError(w, "Failed to create directory: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -336,7 +400,7 @@ func (h *Handler) APIHostDeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := h.hostTerminalConfig
-	cfg.User = "root" // File browser always runs as root to view all files
+	cfg.User = hostFilesUser(r)
 	if !cfg.Enabled {
 		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
 		return
@@ -356,6 +420,18 @@ func (h *Handler) APIHostDeleteFile(w http.ResponseWriter, r *http.Request) {
 		path = "/" + path
 	}
 
+	path, err := validateHostPath(path)
+	if err != nil {
+		h.jsonError(w, "Invalid path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Refuse to delete the root filesystem
+	if path == "/" {
+		h.jsonError(w, "Deleting root filesystem is not allowed", http.StatusForbidden)
+		return
+	}
+
 	recursive := r.URL.Query().Get("recursive") == "true"
 
 	selfID := detectSelfContainerID()
@@ -372,8 +448,7 @@ func (h *Handler) APIHostDeleteFile(w http.ResponseWriter, r *http.Request) {
 		cmd = []string{"rm", path}
 	}
 
-	_, err := runNsenterCommand(selfID, cmd, cfg)
-	if err != nil {
+	if _, err := runNsenterCommand(selfID, cmd, cfg); err != nil {
 		h.jsonError(w, "Failed to delete: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -381,9 +456,106 @@ func (h *Handler) APIHostDeleteFile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// APIHostValidateUser checks if a username exists on the host.
+// POST /api/v1/hosts/{hostID}/validate-user
+func (h *Handler) APIHostValidateUser(w http.ResponseWriter, r *http.Request) {
+	hostID := chi.URLParam(r, "hostID")
+	if hostID == "" {
+		h.jsonError(w, "Host ID required", http.StatusBadRequest)
+		return
+	}
+
+	cfg := h.hostTerminalConfig
+	if !cfg.Enabled {
+		h.jsonError(w, "Host file browser disabled", http.StatusForbidden)
+		return
+	}
+
+	if !isHostPIDNamespace() {
+		h.jsonError(w, "Host PID namespace not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.jsonError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate username characters
+	user := req.Username
+	if user == "" {
+		h.jsonError(w, "Username is required", http.StatusBadRequest)
+		return
+	}
+	for _, c := range user {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
+			h.jsonError(w, "Invalid username characters", http.StatusBadRequest)
+			return
+		}
+	}
+	if len(user) > 64 {
+		h.jsonError(w, "Username too long", http.StatusBadRequest)
+		return
+	}
+
+	selfID := detectSelfContainerID()
+	if selfID == "" {
+		h.jsonError(w, "Cannot detect container ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user exists on host via getent
+	cfg.User = "root"
+	output, err := runNsenterCommand(selfID, []string{"getent", "passwd", user}, cfg)
+	if err != nil {
+		h.jsonError(w, "User not found on host: "+user, http.StatusNotFound)
+		return
+	}
+
+	// Parse the home directory from getent output (user:x:uid:gid:info:home:shell)
+	parts := strings.Split(strings.TrimSpace(output), ":")
+	home := "/"
+	if len(parts) >= 6 {
+		home = parts[5]
+	}
+
+	h.jsonResponse(w, map[string]string{
+		"username": user,
+		"home":     home,
+		"status":   "ok",
+	})
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+// validateHostPath sanitizes and validates a host filesystem path.
+// It cleans the path, ensures it's absolute, and rejects path traversal attempts.
+func validateHostPath(path string) (string, error) {
+	cleaned := filepath.Clean(path)
+	if !filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("path must be absolute: %q", path)
+	}
+	// Reject any remaining ".." components after Clean
+	for _, part := range strings.Split(cleaned, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("path traversal not allowed: %q", path)
+		}
+	}
+	return cleaned, nil
+}
+
+// shellQuote returns a shell-safe representation of a string by wrapping it
+// in single quotes and escaping any embedded single quotes. This prevents
+// shell metacharacter injection when arguments are passed to "su -c".
+func shellQuote(s string) string {
+	// Replace each ' with '\'' (end quote, escaped quote, start quote)
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
 
 // runNsenterCommand executes a command on the host via nsenter.
 // It uses docker exec -u 0 to run nsenter with root privileges,
@@ -398,8 +570,13 @@ func runNsenterCommand(selfContainerID string, cmd []string, cfg HostTerminalCon
 		"--", "su", "-", cfg.User, "-c",
 	}
 
-	// Join the command with proper escaping
-	cmdStr := strings.Join(cmd, " ")
+	// Shell-escape each argument to prevent injection via metacharacters.
+	// su -c passes the string to /bin/sh, so every argument must be quoted.
+	quoted := make([]string, len(cmd))
+	for i, arg := range cmd {
+		quoted[i] = shellQuote(arg)
+	}
+	cmdStr := strings.Join(quoted, " ")
 	args = append(args, cmdStr)
 
 	log.Printf("[DEBUG] Host files: running command: docker %v", args)

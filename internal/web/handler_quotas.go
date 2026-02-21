@@ -35,7 +35,7 @@ func (h *Handler) QuotasTempl(w http.ResponseWriter, r *http.Request) {
 
 	// Container stats
 	if containerSvc != nil {
-		if containers, err := containerSvc.List(ctx, nil); err == nil {
+		if containers, _, err := containerSvc.List(ctx, nil); err == nil {
 			usage.ContainersTotal = len(containers)
 			for _, c := range containers {
 				switch c.State {

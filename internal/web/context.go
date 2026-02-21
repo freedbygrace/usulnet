@@ -113,11 +113,12 @@ type BreadcrumbItem struct {
 
 // UserContext contains user information.
 type UserContext struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Email    string `json:"email,omitempty"`
-	Role     string `json:"role"`
-	RoleID   string `json:"role_id,omitempty"` // UUID of custom role for permission checking
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	Email        string `json:"email,omitempty"`
+	Role         string `json:"role"`
+	RoleID       string `json:"role_id,omitempty"` // UUID of custom role for permission checking
+	RequiresTOTP bool   `json:"requires_totp,omitempty"`
 }
 
 // GlobalStats for sidebar badges.
@@ -269,6 +270,8 @@ type ImageView struct {
 	CreatedHuman string    `json:"created_human"`
 	InUse        bool      `json:"in_use"`
 	Containers   int       `json:"containers"`
+	Architecture string    `json:"architecture,omitempty"`
+	OS           string    `json:"os,omitempty"`
 }
 
 // VolumeView for volume list templates.
@@ -307,6 +310,8 @@ type NetworkView struct {
 type StackView struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
+	Type           string    `json:"type"`     // compose or swarm
+	HostID         string    `json:"host_id"`
 	Status         string    `json:"status"`
 	ServiceCount   int       `json:"service_count"`
 	RunningCount   int       `json:"running_count"`
@@ -317,6 +322,9 @@ type StackView struct {
 	ComposeFile    string    `json:"compose_file"`
 	ContainerNames []string  `json:"container_names"`
 	IsExternal     bool      `json:"is_external"` // true if discovered from Docker, not managed by usulnet
+	GitRepo        string    `json:"git_repo,omitempty"`
+	GitBranch      string    `json:"git_branch,omitempty"`
+	GitCommit      string    `json:"git_commit,omitempty"`
 }
 
 // StackServiceView represents a service within a stack for templates.

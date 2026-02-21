@@ -1,0 +1,54 @@
+{
+  "templates": [
+    {
+      "name": "Nextcloud",
+      "description": "Self-hosted productivity and file sharing platform",
+      "image": "nextcloud:latest",
+      "ports": ["80/tcp"],
+      "volumes": [{"container": "/var/www/html"}],
+      "env": [
+        {"name": "NEXTCLOUD_ADMIN_USER", "label": "Admin username", "default": "admin"},
+        {"name": "NEXTCLOUD_ADMIN_PASSWORD", "label": "Admin password", "required": true, "type": "password"},
+        {"name": "NEXTCLOUD_TRUSTED_DOMAINS", "label": "Trusted domains"}
+      ]
+    },
+    {
+      "name": "MinIO",
+      "description": "S3-compatible object storage server",
+      "image": "minio/minio:latest",
+      "ports": ["9000/tcp", "9001/tcp"],
+      "volumes": [{"container": "/data"}],
+      "command": "server /data --console-address ':9001'",
+      "env": [
+        {"name": "MINIO_ROOT_USER", "label": "Root user", "default": "minioadmin"},
+        {"name": "MINIO_ROOT_PASSWORD", "label": "Root password", "required": true, "type": "password"}
+      ]
+    },
+    {
+      "name": "Syncthing",
+      "description": "Continuous peer-to-peer file synchronization",
+      "image": "syncthing/syncthing:latest",
+      "ports": ["8384/tcp", "22000/tcp", "22000/udp"],
+      "volumes": [{"container": "/var/syncthing"}]
+    },
+    {
+      "name": "FileBrowser",
+      "description": "Web-based file manager with upload/download support",
+      "image": "filebrowser/filebrowser:latest",
+      "ports": ["80/tcp"],
+      "volumes": [{"container": "/srv"}, {"container": "/database/filebrowser.db"}]
+    },
+    {
+      "name": "Seafile",
+      "description": "Enterprise file sync and share platform",
+      "image": "seafileltd/seafile-mc:latest",
+      "ports": ["80/tcp"],
+      "volumes": [{"container": "/shared"}],
+      "env": [
+        {"name": "SEAFILE_ADMIN_EMAIL", "label": "Admin email", "required": true},
+        {"name": "SEAFILE_ADMIN_PASSWORD", "label": "Admin password", "required": true, "type": "password"},
+        {"name": "SEAFILE_SERVER_HOSTNAME", "label": "Server hostname"}
+      ]
+    }
+  ]
+}

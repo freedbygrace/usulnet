@@ -29,8 +29,8 @@ type CustomLogUploadRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
-// logUploadDir is the base directory for stored log uploads.
-const logUploadDir = "/tmp/usulnet/log-uploads"
+// logUploadSubdir is the subdirectory under dataDir for stored log uploads.
+const logUploadSubdir = "log-uploads"
 
 // ============================================================================
 // Log Management Handlers
@@ -55,7 +55,7 @@ func (h *Handler) LogManagement(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	containerSvc := h.services.Containers()
 	if containerSvc != nil {
-		containers, _ := containerSvc.List(ctx, nil)
+		containers, _, _ := containerSvc.List(ctx, nil)
 		for _, c := range containers {
 			data.Containers = append(data.Containers, logspages.ContainerBasicView{
 				ID:   c.ID[:12],
@@ -108,7 +108,7 @@ func (h *Handler) loadLogAggregation(ctx interface{}) logspages.LogAggregationVi
 		return agg
 	}
 
-	containers, err := containerSvc.List(reqCtx, nil)
+	containers, _, err := containerSvc.List(reqCtx, nil)
 	if err != nil {
 		return agg
 	}
@@ -174,9 +174,154 @@ func (h *Handler) loadLogAggregation(ctx interface{}) logspages.LogAggregationVi
 	return agg
 }
 
-// loadDetectedPatterns loads detected error patterns
+// loadDetectedPatterns detects common error patterns from running container logs.
+// It reuses the aggregation logic and extends it with well-known pattern matching.
 func (h *Handler) loadDetectedPatterns(ctx interface{}) []logspages.DetectedPattern {
-	return []logspages.DetectedPattern{}
+	reqCtx, ok := ctx.(context.Context)
+	if !ok {
+		return nil
+	}
+
+	containerSvc := h.services.Containers()
+	if containerSvc == nil {
+		return nil
+	}
+
+	containers, _, err := containerSvc.List(reqCtx, nil)
+	if err != nil {
+		return nil
+	}
+
+	// Well-known error patterns to detect across all container logs
+	type knownPattern struct {
+		Name     string
+		Type     string
+		Severity string
+		Keywords []string
+	}
+	knownPatterns := []knownPattern{
+		{Name: "Out of Memory", Type: "oom", Severity: "critical", Keywords: []string{"OOMKilled", "out of memory", "Cannot allocate memory", "oom-kill"}},
+		{Name: "Connection Refused", Type: "connectivity", Severity: "error", Keywords: []string{"connection refused", "ECONNREFUSED", "connect: connection refused"}},
+		{Name: "Connection Timeout", Type: "connectivity", Severity: "error", Keywords: []string{"connection timed out", "timeout expired", "i/o timeout", "deadline exceeded"}},
+		{Name: "Permission Denied", Type: "permission", Severity: "error", Keywords: []string{"permission denied", "access denied", "EACCES", "403 Forbidden"}},
+		{Name: "Disk Full", Type: "disk", Severity: "critical", Keywords: []string{"no space left on device", "ENOSPC", "disk full"}},
+		{Name: "DNS Resolution Failure", Type: "dns", Severity: "error", Keywords: []string{"no such host", "Name or service not known", "NXDOMAIN", "DNS lookup failed"}},
+		{Name: "Stack Trace / Panic", Type: "crash", Severity: "critical", Keywords: []string{"panic:", "goroutine ", "Traceback (most recent", "Exception in thread", "FATAL ERROR"}},
+		{Name: "TLS/SSL Error", Type: "tls", Severity: "error", Keywords: []string{"certificate verify failed", "x509:", "SSL_ERROR", "tls: ", "certificate has expired"}},
+		{Name: "Authentication Failure", Type: "auth", Severity: "warning", Keywords: []string{"authentication failed", "invalid credentials", "login failed", "401 Unauthorized"}},
+		{Name: "Rate Limiting", Type: "rate_limit", Severity: "warning", Keywords: []string{"rate limit", "too many requests", "429", "throttled"}},
+	}
+
+	patternResults := make(map[string]*logspages.DetectedPattern)
+	var additionalErrorPatterns []logspages.DetectedPattern
+
+	for _, c := range containers {
+		if c.State != "running" {
+			continue
+		}
+		name := strings.TrimPrefix(c.Name, "/")
+		lines, lineErr := containerSvc.GetLogs(reqCtx, c.ID, 100)
+		if lineErr != nil {
+			continue
+		}
+
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			lineLower := strings.ToLower(line)
+
+			// Check against known patterns
+			for _, kp := range knownPatterns {
+				for _, keyword := range kp.Keywords {
+					if strings.Contains(lineLower, strings.ToLower(keyword)) {
+						key := kp.Name
+						if p, exists := patternResults[key]; exists {
+							p.Count++
+							// Add source if not already tracked
+							found := false
+							for _, s := range p.Sources {
+								if s == name {
+									found = true
+									break
+								}
+							}
+							if !found {
+								p.Sources = append(p.Sources, name)
+							}
+							p.LastSeen = "recent"
+						} else {
+							patternResults[key] = &logspages.DetectedPattern{
+								ID:        fmt.Sprintf("kp-%d", len(patternResults)+1),
+								Pattern:   kp.Name,
+								Type:      kp.Type,
+								Count:     1,
+								Severity:  kp.Severity,
+								Sources:   []string{name},
+								Example:   line,
+								FirstSeen: "recent",
+								LastSeen:  "recent",
+							}
+						}
+						break // Only match first keyword per known pattern
+					}
+				}
+			}
+
+			// Also detect generic error/critical patterns not covered by known patterns
+			result := models.ParseLogLine(line, models.LogSourceContainer, c.ID, name)
+			if result.Entry.Severity == models.LogSeverityError || result.Entry.Severity == models.LogSeverityCritical {
+				patternKey := result.Entry.Message
+				if len(patternKey) > 80 {
+					patternKey = patternKey[:80]
+				}
+				matched := false
+				for _, kp := range knownPatterns {
+					for _, keyword := range kp.Keywords {
+						if strings.Contains(lineLower, strings.ToLower(keyword)) {
+							matched = true
+							break
+						}
+					}
+					if matched {
+						break
+					}
+				}
+				if !matched {
+					found := false
+					for i := range additionalErrorPatterns {
+						if additionalErrorPatterns[i].Pattern == patternKey {
+							additionalErrorPatterns[i].Count++
+							found = true
+							break
+						}
+					}
+					if !found && len(additionalErrorPatterns) < 20 {
+						additionalErrorPatterns = append(additionalErrorPatterns, logspages.DetectedPattern{
+							ID:        fmt.Sprintf("ep-%d", len(additionalErrorPatterns)+1),
+							Pattern:   patternKey,
+							Type:      "error",
+							Count:     1,
+							Severity:  string(result.Entry.Severity),
+							Sources:   []string{name},
+							Example:   line,
+							FirstSeen: "recent",
+							LastSeen:  "recent",
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// Combine known patterns + additional error patterns
+	var results []logspages.DetectedPattern
+	for _, p := range patternResults {
+		results = append(results, *p)
+	}
+	results = append(results, additionalErrorPatterns...)
+
+	return results
 }
 
 // loadUploadedLogs loads user's uploaded log files from the database.
@@ -292,8 +437,9 @@ func (h *Handler) LogUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save file to disk
-	if err := os.MkdirAll(logUploadDir, 0o750); err == nil {
-		filePath := filepath.Join(logUploadDir, upload.ID.String()+".log")
+	uploadDir := filepath.Join(h.dataDir, logUploadSubdir)
+	if err := os.MkdirAll(uploadDir, 0o750); err == nil {
+		filePath := filepath.Join(uploadDir, upload.ID.String()+".log")
 		if err := os.WriteFile(filePath, content, 0o640); err == nil {
 			upload.FilePath = filePath
 		} else {

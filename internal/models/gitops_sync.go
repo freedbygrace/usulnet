@@ -50,6 +50,7 @@ type GitSyncConfig struct {
 	ConnectionID          uuid.UUID        `db:"connection_id" json:"connection_id"`
 	RepositoryID          uuid.UUID        `db:"repository_id" json:"repository_id"`
 	Name                  string           `db:"name" json:"name"`
+	RepoFullName          string           `db:"repo_full_name" json:"repo_full_name"`
 	SyncDirection         SyncDirection    `db:"sync_direction" json:"sync_direction"`
 	TargetPath            string           `db:"target_path" json:"target_path"`
 	StackName             string           `db:"stack_name" json:"stack_name"`
@@ -91,6 +92,7 @@ const (
 	SyncEventFileUpdated      = "file_updated"
 	SyncEventConflictDetected = "conflict_detected"
 	SyncEventDeployTriggered  = "deploy_triggered"
+	SyncEventSyncFailed       = "sync_failed"
 )
 
 // GitSyncConflict represents a conflict detected during bidirectional sync.
@@ -133,6 +135,7 @@ type EphemeralEnvironment struct {
 	ConnectionID   *uuid.UUID                 `db:"connection_id" json:"connection_id,omitempty"`
 	RepositoryID   *uuid.UUID                 `db:"repository_id" json:"repository_id,omitempty"`
 	Branch         string                     `db:"branch" json:"branch"`
+	RepoFullName   string                     `db:"repo_full_name" json:"repo_full_name"`
 	CommitSHA      string                     `db:"commit_sha" json:"commit_sha"`
 	StackName      string                     `db:"stack_name" json:"stack_name"`
 	ComposeFile    string                     `db:"compose_file" json:"compose_file"`

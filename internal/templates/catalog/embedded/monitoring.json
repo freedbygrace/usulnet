@@ -1,0 +1,68 @@
+{
+  "templates": [
+    {
+      "name": "Grafana",
+      "description": "Observability and data visualization platform",
+      "image": "grafana/grafana:latest",
+      "ports": ["3000/tcp"],
+      "volumes": [{"container": "/var/lib/grafana"}],
+      "env": [
+        {"name": "GF_SECURITY_ADMIN_USER", "label": "Admin username", "default": "admin"},
+        {"name": "GF_SECURITY_ADMIN_PASSWORD", "label": "Admin password", "default": "admin", "type": "password"}
+      ]
+    },
+    {
+      "name": "Prometheus",
+      "description": "Monitoring system and time-series database",
+      "image": "prom/prometheus:latest",
+      "ports": ["9090/tcp"],
+      "volumes": [{"container": "/prometheus"}],
+      "note": "Mount a prometheus.yml config file to /etc/prometheus/prometheus.yml"
+    },
+    {
+      "name": "Uptime Kuma",
+      "description": "Self-hosted monitoring tool with beautiful UI",
+      "image": "louislam/uptime-kuma:1",
+      "ports": ["3001/tcp"],
+      "volumes": [{"container": "/app/data"}]
+    },
+    {
+      "name": "Netdata",
+      "description": "Real-time performance and health monitoring",
+      "image": "netdata/netdata:latest",
+      "ports": ["19999/tcp"],
+      "volumes": [
+        {"container": "/host/proc", "bind": "/proc", "readonly": true},
+        {"container": "/host/sys", "bind": "/sys", "readonly": true},
+        {"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"}
+      ]
+    },
+    {
+      "name": "cAdvisor",
+      "description": "Container resource usage and performance analyzer",
+      "image": "gcr.io/cadvisor/cadvisor:latest",
+      "ports": ["8080/tcp"],
+      "volumes": [
+        {"container": "/rootfs", "bind": "/", "readonly": true},
+        {"container": "/var/run", "bind": "/var/run"},
+        {"container": "/sys", "bind": "/sys", "readonly": true},
+        {"container": "/var/lib/docker", "bind": "/var/lib/docker", "readonly": true}
+      ]
+    },
+    {
+      "name": "Loki",
+      "description": "Log aggregation system by Grafana Labs",
+      "image": "grafana/loki:latest",
+      "ports": ["3100/tcp"],
+      "volumes": [{"container": "/loki"}],
+      "command": "-config.file=/etc/loki/local-config.yaml"
+    },
+    {
+      "name": "Dozzle",
+      "description": "Real-time Docker log viewer in browser",
+      "image": "amir20/dozzle:latest",
+      "ports": ["8080/tcp"],
+      "volumes": [{"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"}]
+    }
+  ]
+}

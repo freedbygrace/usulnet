@@ -192,7 +192,7 @@ func (s *Service) DeleteConnection(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if err := s.connRepo.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("delete git connection %s: %w", id, err)
 	}
 	s.logger.Info("git connection deleted", "id", id)
 	return nil
@@ -220,7 +220,7 @@ func (s *Service) TestConnection(ctx context.Context, id uuid.UUID) (*TestResult
 	result := &TestResult{}
 
 	// Get provider
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
@@ -264,7 +264,7 @@ func (s *Service) SyncRepositories(ctx context.Context, connID uuid.UUID) (int, 
 		return 0, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return 0, err
 	}
@@ -364,7 +364,7 @@ func (s *Service) GetBranches(ctx context.Context, repoID uuid.UUID) ([]models.G
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +384,7 @@ func (s *Service) GetCommits(ctx context.Context, repoID uuid.UUID, branch strin
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +408,7 @@ func (s *Service) GetTags(ctx context.Context, repoID uuid.UUID) ([]models.GitTa
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +428,7 @@ func (s *Service) GetFileContent(ctx context.Context, repoID uuid.UUID, path, re
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +448,7 @@ func (s *Service) ListTree(ctx context.Context, repoID uuid.UUID, path, ref stri
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +468,7 @@ func (s *Service) GetPullRequests(ctx context.Context, repoID uuid.UUID, state s
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +489,7 @@ func (s *Service) GetIssues(ctx context.Context, repoID uuid.UUID, state string)
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +510,7 @@ func (s *Service) GetReleases(ctx context.Context, repoID uuid.UUID) ([]models.G
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +530,7 @@ func (s *Service) GetLatestRelease(ctx context.Context, repoID uuid.UUID) (*mode
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +549,7 @@ func (s *Service) GetGitignoreTemplates(ctx context.Context, connID uuid.UUID) (
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +564,7 @@ func (s *Service) GetLicenseTemplates(ctx context.Context, connID uuid.UUID) ([]
 		return nil, err
 	}
 
-	provider, err := s.getProvider(conn)
+	provider, err := s.GetProvider(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -608,14 +608,25 @@ func (s *Service) GetStats(ctx context.Context) (*Stats, error) {
 // Internal helpers
 // ============================================================================
 
-// getProvider creates the appropriate provider for a connection.
-func (s *Service) getProvider(conn *models.GitConnection) (gitprovider.Provider, error) {
+// GetProvider creates the appropriate provider for a connection.
+func (s *Service) GetProvider(conn *models.GitConnection) (gitprovider.Provider, error) {
 	token, err := s.encryptor.DecryptString(conn.APITokenEncrypted)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.CodeInternal, "failed to decrypt API token")
 	}
 
 	return gitprovider.NewProvider(conn.ProviderType, conn.URL, token)
+}
+
+// GetProviderForConnection resolves a connection by ID and returns its
+// configured git provider. Used by higher-level services (e.g. git sync)
+// that need direct provider access for file operations.
+func (s *Service) GetProviderForConnection(ctx context.Context, connID uuid.UUID) (gitprovider.Provider, error) {
+	conn, err := s.connRepo.GetByID(ctx, connID)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.CodeNotFound, "connection not found")
+	}
+	return s.GetProvider(conn)
 }
 
 func strPtr(s string) *string {

@@ -74,3 +74,26 @@ type RunbookListOptions struct {
 	Limit     int     `json:"limit,omitempty"`
 	Offset    int     `json:"offset,omitempty"`
 }
+
+// RunbookApproval tracks manual approval requests for runbook steps.
+type RunbookApproval struct {
+	ID          uuid.UUID  `json:"id" db:"id"`
+	ExecutionID uuid.UUID  `json:"execution_id" db:"execution_id"`
+	StepOrder   int        `json:"step_order" db:"step_order"`
+	Status      string     `json:"status" db:"status"` // pending, approved, rejected
+	RequestedAt time.Time  `json:"requested_at" db:"requested_at"`
+	RespondedAt *time.Time `json:"responded_at,omitempty" db:"responded_at"`
+	RespondedBy *uuid.UUID `json:"responded_by,omitempty" db:"responded_by"`
+	Comment     string     `json:"comment,omitempty" db:"comment"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+}
+
+const (
+	ApprovalStatusPending  = "pending"
+	ApprovalStatusApproved = "approved"
+	ApprovalStatusRejected = "rejected"
+)
+
+const (
+	ExecStatusWaitingApproval = "waiting_approval"
+)

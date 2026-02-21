@@ -192,6 +192,17 @@ func (c *Client) IsConnected() bool {
 	return c.conn != nil && c.conn.IsConnected()
 }
 
+// IsTLS returns true if the active NATS connection uses TLS.
+func (c *Client) IsTLS() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.conn == nil {
+		return false
+	}
+	_, err := c.conn.TLSConnectionState()
+	return err == nil
+}
+
 // Health checks the NATS connection health.
 func (c *Client) Health(ctx context.Context) error {
 	c.mu.RLock()

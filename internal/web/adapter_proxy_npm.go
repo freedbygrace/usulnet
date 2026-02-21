@@ -44,12 +44,12 @@ func (a *proxyAdapter) ListHosts(ctx context.Context) ([]ProxyHostView, error) {
 
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for list hosts: %w", err)
 	}
 
 	hosts, err := client.ListProxyHosts(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list proxy hosts: %w", err)
 	}
 
 	views := make([]ProxyHostView, 0, len(hosts))
@@ -100,12 +100,12 @@ func (a *proxyAdapter) GetHost(ctx context.Context, id int) (*ProxyHostView, err
 
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for get host: %w", err)
 	}
 
 	h, err := client.GetProxyHost(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get proxy host: %w", err)
 	}
 
 	view := npmHostToView(h)
@@ -119,7 +119,7 @@ func (a *proxyAdapter) CreateHost(ctx context.Context, h *ProxyHostView) error {
 
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for create host: %w", err)
 	}
 
 	domainNames := h.DomainNames
@@ -155,7 +155,7 @@ func (a *proxyAdapter) CreateHost(ctx context.Context, h *ProxyHostView) error {
 
 	created, err := client.CreateProxyHost(ctx, host)
 	if err != nil {
-		return err
+		return fmt.Errorf("create proxy host: %w", err)
 	}
 	h.ID = created.ID
 	return nil
@@ -168,7 +168,7 @@ func (a *proxyAdapter) UpdateHost(ctx context.Context, h *ProxyHostView) error {
 
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for update host: %w", err)
 	}
 
 	domainNames := h.DomainNames
@@ -203,7 +203,10 @@ func (a *proxyAdapter) UpdateHost(ctx context.Context, h *ProxyHostView) error {
 	}
 
 	_, err = client.UpdateProxyHost(ctx, h.ID, host)
-	return err
+	if err != nil {
+		return fmt.Errorf("update proxy host: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) RemoveHost(ctx context.Context, id int) error {
@@ -213,7 +216,7 @@ func (a *proxyAdapter) RemoveHost(ctx context.Context, id int) error {
 
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for remove host: %w", err)
 	}
 
 	return client.DeleteProxyHost(ctx, id)
@@ -226,7 +229,7 @@ func (a *proxyAdapter) EnableHost(ctx context.Context, id int) error {
 
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for enable host: %w", err)
 	}
 
 	return client.EnableProxyHost(ctx, id)
@@ -239,7 +242,7 @@ func (a *proxyAdapter) DisableHost(ctx context.Context, id int) error {
 
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for disable host: %w", err)
 	}
 
 	return client.DisableProxyHost(ctx, id)
@@ -275,7 +278,10 @@ func (a *proxyAdapter) SetupConnection(ctx context.Context, baseURL, email, pass
 		AdminEmail:    email,
 		AdminPassword: password,
 	}, userID)
-	return err
+	if err != nil {
+		return fmt.Errorf("setup npm connection: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) UpdateConnectionConfig(ctx context.Context, connID string, baseURL, email, password *string, enabled *bool, userID string) error {
@@ -288,7 +294,10 @@ func (a *proxyAdapter) UpdateConnectionConfig(ctx context.Context, connID string
 		AdminPassword: password,
 		IsEnabled:     enabled,
 	}, userID)
-	return err
+	if err != nil {
+		return fmt.Errorf("update npm connection config: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) DeleteConnection(ctx context.Context, connID string) error {
@@ -321,11 +330,11 @@ func (a *proxyAdapter) ListRedirections(ctx context.Context) ([]RedirectionHostV
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for list redirections: %w", err)
 	}
 	redirs, err := client.ListRedirectionHosts(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list redirection hosts: %w", err)
 	}
 	views := make([]RedirectionHostView, 0, len(redirs))
 	for _, r := range redirs {
@@ -359,11 +368,11 @@ func (a *proxyAdapter) GetRedirection(ctx context.Context, id int) (*Redirection
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for get redirection: %w", err)
 	}
 	r, err := client.GetRedirectionHost(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get redirection host: %w", err)
 	}
 	domain := ""
 	if len(r.DomainNames) > 0 {
@@ -393,7 +402,7 @@ func (a *proxyAdapter) CreateRedirection(ctx context.Context, rv *RedirectionHos
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for create redirection: %w", err)
 	}
 	domainNames := rv.DomainNames
 	if len(domainNames) == 0 && rv.Domain != "" {
@@ -411,7 +420,7 @@ func (a *proxyAdapter) CreateRedirection(ctx context.Context, rv *RedirectionHos
 	}
 	created, err := client.CreateRedirectionHost(ctx, r)
 	if err != nil {
-		return err
+		return fmt.Errorf("create redirection host: %w", err)
 	}
 	rv.ID = created.ID
 	return nil
@@ -423,7 +432,7 @@ func (a *proxyAdapter) UpdateRedirection(ctx context.Context, rv *RedirectionHos
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for update redirection: %w", err)
 	}
 	domainNames := rv.DomainNames
 	if len(domainNames) == 0 && rv.Domain != "" {
@@ -440,7 +449,10 @@ func (a *proxyAdapter) UpdateRedirection(ctx context.Context, rv *RedirectionHos
 		Enabled:           rv.Enabled,
 	}
 	_, err = client.UpdateRedirectionHost(ctx, rv.ID, r)
-	return err
+	if err != nil {
+		return fmt.Errorf("update redirection host: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) DeleteRedirection(ctx context.Context, id int) error {
@@ -449,7 +461,7 @@ func (a *proxyAdapter) DeleteRedirection(ctx context.Context, id int) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for delete redirection: %w", err)
 	}
 	return client.DeleteRedirectionHost(ctx, id)
 }
@@ -462,11 +474,11 @@ func (a *proxyAdapter) ListStreams(ctx context.Context) ([]StreamView, error) {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for list streams: %w", err)
 	}
 	streams, err := client.ListStreams(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list streams: %w", err)
 	}
 	views := make([]StreamView, 0, len(streams))
 	for _, s := range streams {
@@ -489,11 +501,11 @@ func (a *proxyAdapter) GetStream(ctx context.Context, id int) (*StreamView, erro
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for get stream: %w", err)
 	}
 	s, err := client.GetStream(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get stream: %w", err)
 	}
 	return &StreamView{
 		ID:             s.ID,
@@ -512,7 +524,7 @@ func (a *proxyAdapter) CreateStream(ctx context.Context, sv *StreamView) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for create stream: %w", err)
 	}
 	s := &npm.Stream{
 		IncomingPort:   sv.IncomingPort,
@@ -524,7 +536,7 @@ func (a *proxyAdapter) CreateStream(ctx context.Context, sv *StreamView) error {
 	}
 	created, err := client.CreateStream(ctx, s)
 	if err != nil {
-		return err
+		return fmt.Errorf("create stream: %w", err)
 	}
 	sv.ID = created.ID
 	return nil
@@ -536,7 +548,7 @@ func (a *proxyAdapter) UpdateStream(ctx context.Context, sv *StreamView) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for update stream: %w", err)
 	}
 	s := &npm.Stream{
 		IncomingPort:   sv.IncomingPort,
@@ -547,7 +559,10 @@ func (a *proxyAdapter) UpdateStream(ctx context.Context, sv *StreamView) error {
 		Enabled:        sv.Enabled,
 	}
 	_, err = client.UpdateStream(ctx, sv.ID, s)
-	return err
+	if err != nil {
+		return fmt.Errorf("update stream: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) DeleteStream(ctx context.Context, id int) error {
@@ -556,7 +571,7 @@ func (a *proxyAdapter) DeleteStream(ctx context.Context, id int) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for delete stream: %w", err)
 	}
 	return client.DeleteStream(ctx, id)
 }
@@ -569,11 +584,11 @@ func (a *proxyAdapter) ListDeadHosts(ctx context.Context) ([]DeadHostView, error
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for list dead hosts: %w", err)
 	}
 	dead, err := client.ListDeadHosts(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list dead hosts: %w", err)
 	}
 	views := make([]DeadHostView, 0, len(dead))
 	for _, d := range dead {
@@ -603,7 +618,7 @@ func (a *proxyAdapter) CreateDeadHost(ctx context.Context, dv *DeadHostView) err
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for create dead host: %w", err)
 	}
 	domainNames := dv.DomainNames
 	if len(domainNames) == 0 && dv.Domain != "" {
@@ -619,7 +634,7 @@ func (a *proxyAdapter) CreateDeadHost(ctx context.Context, dv *DeadHostView) err
 	}
 	created, err := client.CreateDeadHost(ctx, d)
 	if err != nil {
-		return err
+		return fmt.Errorf("create dead host: %w", err)
 	}
 	dv.ID = created.ID
 	return nil
@@ -631,7 +646,7 @@ func (a *proxyAdapter) DeleteDeadHost(ctx context.Context, id int) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for delete dead host: %w", err)
 	}
 	return client.DeleteDeadHost(ctx, id)
 }
@@ -644,11 +659,11 @@ func (a *proxyAdapter) ListCertificates(ctx context.Context) ([]CertificateView,
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for list certificates: %w", err)
 	}
 	certs, err := client.ListCertificates(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list certificates: %w", err)
 	}
 	views := make([]CertificateView, 0, len(certs))
 	for _, c := range certs {
@@ -668,11 +683,11 @@ func (a *proxyAdapter) GetCertificate(ctx context.Context, id int) (*Certificate
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for get certificate: %w", err)
 	}
 	c, err := client.GetCertificate(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get certificate: %w", err)
 	}
 	return &CertificateView{
 		ID:          c.ID,
@@ -689,7 +704,7 @@ func (a *proxyAdapter) RequestLECertificate(ctx context.Context, domains []strin
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for request certificate: %w", err)
 	}
 
 	req := &npm.CertificateRequest{
@@ -705,7 +720,10 @@ func (a *proxyAdapter) RequestLECertificate(ctx context.Context, domains []strin
 	}
 
 	_, err = client.RequestLetsEncryptCertificate(ctx, req)
-	return err
+	if err != nil {
+		return fmt.Errorf("request lets encrypt certificate: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) UploadCustomCertificate(ctx context.Context, niceName string, cert, key, intermediate []byte) error {
@@ -714,10 +732,13 @@ func (a *proxyAdapter) UploadCustomCertificate(ctx context.Context, niceName str
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for upload certificate: %w", err)
 	}
 	_, err = client.UploadCustomCertificate(ctx, niceName, cert, key, intermediate)
-	return err
+	if err != nil {
+		return fmt.Errorf("upload custom certificate: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) RenewCertificate(ctx context.Context, id int) error {
@@ -726,10 +747,13 @@ func (a *proxyAdapter) RenewCertificate(ctx context.Context, id int) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for renew certificate: %w", err)
 	}
 	_, err = client.RenewCertificate(ctx, id)
-	return err
+	if err != nil {
+		return fmt.Errorf("renew certificate: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) DeleteCertificate(ctx context.Context, id int) error {
@@ -738,7 +762,7 @@ func (a *proxyAdapter) DeleteCertificate(ctx context.Context, id int) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for delete certificate: %w", err)
 	}
 	return client.DeleteCertificate(ctx, id)
 }
@@ -751,11 +775,11 @@ func (a *proxyAdapter) ListAccessLists(ctx context.Context) ([]AccessListView, e
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for list access lists: %w", err)
 	}
 	lists, err := client.ListAccessLists(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list access lists: %w", err)
 	}
 	views := make([]AccessListView, 0, len(lists))
 	for _, l := range lists {
@@ -777,11 +801,11 @@ func (a *proxyAdapter) GetAccessList(ctx context.Context, id int) (*AccessListDe
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get npm client for get access list: %w", err)
 	}
 	l, err := client.GetAccessList(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get access list: %w", err)
 	}
 	items := make([]AccessListItemView, 0, len(l.Items))
 	for _, i := range l.Items {
@@ -813,7 +837,7 @@ func (a *proxyAdapter) CreateAccessList(ctx context.Context, av *AccessListDetai
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for create access list: %w", err)
 	}
 	items := make([]npm.AccessListItem, 0, len(av.Items))
 	for _, i := range av.Items {
@@ -832,7 +856,7 @@ func (a *proxyAdapter) CreateAccessList(ctx context.Context, av *AccessListDetai
 	}
 	created, err := client.CreateAccessList(ctx, l)
 	if err != nil {
-		return err
+		return fmt.Errorf("create access list: %w", err)
 	}
 	av.ID = created.ID
 	return nil
@@ -844,7 +868,7 @@ func (a *proxyAdapter) UpdateAccessList(ctx context.Context, av *AccessListDetai
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for update access list: %w", err)
 	}
 	items := make([]npm.AccessListItem, 0, len(av.Items))
 	for _, i := range av.Items {
@@ -862,7 +886,10 @@ func (a *proxyAdapter) UpdateAccessList(ctx context.Context, av *AccessListDetai
 		Clients:    clients,
 	}
 	_, err = client.UpdateAccessList(ctx, av.ID, l)
-	return err
+	if err != nil {
+		return fmt.Errorf("update access list: %w", err)
+	}
+	return nil
 }
 
 func (a *proxyAdapter) DeleteAccessList(ctx context.Context, id int) error {
@@ -871,7 +898,7 @@ func (a *proxyAdapter) DeleteAccessList(ctx context.Context, id int) error {
 	}
 	client, err := a.npmSvc.GetClient(ctx, resolveHostID(ctx, a.hostID).String())
 	if err != nil {
-		return err
+		return fmt.Errorf("get npm client for delete access list: %w", err)
 	}
 	return client.DeleteAccessList(ctx, id)
 }
@@ -888,12 +915,17 @@ func (a *proxyAdapter) ListAuditLogs(ctx context.Context, limit, offset int) ([]
 	}
 	views := make([]AuditLogView, 0, len(logs))
 	for _, l := range logs {
+		userName := ""
+		if l.UserID != nil {
+			userName = *l.UserID
+		}
 		views = append(views, AuditLogView{
 			ID:           l.ID,
 			Operation:    l.Operation,
 			ResourceType: l.ResourceType,
 			ResourceID:   l.ResourceID,
 			ResourceName: l.ResourceName,
+			UserName:     userName,
 			CreatedAt:    l.CreatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}

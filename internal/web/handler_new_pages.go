@@ -36,7 +36,7 @@ func (h *Handler) LogsPageTempl(w http.ResponseWriter, r *http.Request) {
 
 	containerSvc := h.services.Containers()
 	if containerSvc != nil {
-		containers, err := containerSvc.List(r.Context(), nil)
+		containers, _, err := containerSvc.List(r.Context(), nil)
 		if err == nil {
 			for _, c := range containers {
 				containerList = append(containerList, logs.ContainerBasicView{
@@ -445,6 +445,9 @@ func jobTypeLabel(t models.JobType) string {
 		models.JobTypeHostInventory:     "Host Inventory",
 		models.JobTypeMetricsCollection: "Metrics Collection",
 		models.JobTypeCleanup:           "Cleanup",
+		models.JobTypeWebhookDispatch:   "Webhook Dispatch",
+		models.JobTypeRunbookExecute:    "Runbook Execute",
+		models.JobTypeAutoDeploy:        "Auto Deploy",
 	}
 	if label, ok := labels[t]; ok {
 		return label
@@ -470,6 +473,9 @@ func jobTypeIcon(t models.JobType) string {
 		models.JobTypeHostInventory:     "fas fa-server",
 		models.JobTypeMetricsCollection: "fas fa-chart-line",
 		models.JobTypeCleanup:           "fas fa-trash-alt",
+		models.JobTypeWebhookDispatch:   "fas fa-paper-plane",
+		models.JobTypeRunbookExecute:    "fas fa-play-circle",
+		models.JobTypeAutoDeploy:        "fas fa-rocket",
 	}
 	if icon, ok := icons[t]; ok {
 		return icon

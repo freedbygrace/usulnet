@@ -1,0 +1,73 @@
+{
+  "templates": [
+    {
+      "name": "Jellyfin",
+      "description": "Free media system for streaming your library",
+      "image": "jellyfin/jellyfin:latest",
+      "ports": ["8096/tcp"],
+      "volumes": [
+        {"container": "/config"},
+        {"container": "/cache"},
+        {"container": "/media"}
+      ]
+    },
+    {
+      "name": "Plex",
+      "description": "Media server for personal streaming",
+      "image": "plexinc/pms-docker:latest",
+      "ports": ["32400/tcp"],
+      "volumes": [
+        {"container": "/config"},
+        {"container": "/transcode"},
+        {"container": "/data"}
+      ],
+      "env": [
+        {"name": "PLEX_CLAIM", "label": "Plex claim token (from plex.tv/claim)"}
+      ]
+    },
+    {
+      "name": "Navidrome",
+      "description": "Modern music server and streamer",
+      "image": "deluan/navidrome:latest",
+      "ports": ["4533/tcp"],
+      "volumes": [
+        {"container": "/data"},
+        {"container": "/music", "readonly": true}
+      ]
+    },
+    {
+      "name": "Immich",
+      "id": "immich-server",
+      "description": "Self-hosted photo and video backup solution",
+      "type": "stack",
+      "compose": "# Use the official Immich docker-compose from:\n# https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml\n# This template is a placeholder — Immich requires multiple services.",
+      "note": "Immich requires PostgreSQL, Redis, and machine-learning services. Use the official compose file."
+    },
+    {
+      "name": "PhotoPrism",
+      "description": "AI-powered photo management application",
+      "image": "photoprism/photoprism:latest",
+      "ports": ["2342/tcp"],
+      "volumes": [
+        {"container": "/photoprism/storage"},
+        {"container": "/photoprism/originals"}
+      ],
+      "env": [
+        {"name": "PHOTOPRISM_ADMIN_PASSWORD", "label": "Admin password", "required": true, "type": "password"},
+        {"name": "PHOTOPRISM_SITE_URL", "label": "Site URL", "default": "http://localhost:2342/"}
+      ]
+    },
+    {
+      "name": "Audiobookshelf",
+      "description": "Self-hosted audiobook and podcast server",
+      "image": "ghcr.io/advplyr/audiobookshelf:latest",
+      "ports": ["13378/tcp"],
+      "volumes": [
+        {"container": "/config"},
+        {"container": "/metadata"},
+        {"container": "/audiobooks"},
+        {"container": "/podcasts"}
+      ]
+    }
+  ]
+}

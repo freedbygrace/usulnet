@@ -66,6 +66,9 @@ type ServerConfig struct {
 	Commit    string
 	BuildTime string
 
+	// RedirectHTTPS redirects all HTTP requests to HTTPS when TLS is configured.
+	RedirectHTTPS bool
+
 	// Logger for the server (also wired into RouterConfig.Logger)
 	Logger middleware.RequestLogger
 
@@ -183,9 +186,32 @@ func (s *Server) Start() error {
 
 	httpAddr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 
+	// Determine HTTP handler: either the app router or an HTTPS redirect handler
+	var httpHandler http.Handler = s.router
+	if s.config.TLSConfig != nil && s.config.RedirectHTTPS {
+		httpsPort := s.config.HTTPSPort
+		if httpsPort == 0 {
+			httpsPort = 7443
+		}
+		httpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Preserve /health for container health checks over HTTP
+			if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
+				s.router.ServeHTTP(w, r)
+				return
+			}
+			host := r.Host
+			// Strip port if present
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			target := fmt.Sprintf("https://%s:%d%s", host, httpsPort, r.URL.RequestURI())
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+		})
+	}
+
 	s.httpServer = &http.Server{
 		Addr:              httpAddr,
-		Handler:           s.router,
+		Handler:           httpHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       s.config.ReadTimeout,
 		WriteTimeout:      s.config.WriteTimeout,
@@ -285,9 +311,30 @@ func (s *Server) StartAsync() <-chan error {
 		close(errChan)
 	}()
 
-	// Give the server a moment to start
-	time.Sleep(100 * time.Millisecond)
-	return errChan
+	// Wait for the server to be ready or fail — check running state
+	// rather than using an arbitrary timer.
+	deadline := time.After(5 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-errChan:
+			// Server failed immediately — re-send the error
+			ch := make(chan error, 1)
+			ch <- err
+			close(ch)
+			return ch
+		case <-ticker.C:
+			s.mu.Lock()
+			ready := s.running
+			s.mu.Unlock()
+			if ready {
+				return errChan
+			}
+		case <-deadline:
+			return errChan
+		}
+	}
 }
 
 // Shutdown gracefully shuts down the server.
@@ -374,8 +421,13 @@ func (s *Server) RegisterDockerHealth(pingFn func(ctx context.Context) error) {
 }
 
 // RegisterNATSHealth registers a NATS health checker.
-func (s *Server) RegisterNATSHealth(isConnectedFn func() bool) {
-	s.RegisterHealthChecker("nats", handlers.NATSHealthChecker(isConnectedFn))
+func (s *Server) RegisterNATSHealth(healthFn func(ctx context.Context) error) {
+	s.RegisterHealthChecker("nats", handlers.NATSHealthChecker(healthFn))
+}
+
+// RegisterDiskSpaceHealth registers a disk space health checker.
+func (s *Server) RegisterDiskSpaceHealth(path string, minFreeBytes uint64) {
+	s.RegisterHealthChecker("disk_space", handlers.DiskSpaceHealthChecker(path, minFreeBytes))
 }
 
 // ============================================================================

@@ -13,7 +13,6 @@ import (
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/crypto"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
-	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 )
 
 const (
@@ -22,6 +21,15 @@ const (
 	// MaxTokensPerUser is the maximum number of active reset tokens per user
 	MaxTokensPerUser = 3
 )
+
+// ResetRepository defines persistence operations for password reset tokens.
+type ResetRepository interface {
+	Create(ctx context.Context, userID uuid.UUID, expiresIn time.Duration) (string, error)
+	ValidateToken(ctx context.Context, token string) (uuid.UUID, error)
+	MarkAsUsed(ctx context.Context, token string) error
+	InvalidateAllForUser(ctx context.Context, userID uuid.UUID) error
+	DeleteExpired(ctx context.Context) (int64, error)
+}
 
 // UserRepository defines the interface for user operations needed by password reset
 type UserRepository interface {
@@ -49,7 +57,7 @@ type Config struct {
 
 // Service handles password reset operations
 type Service struct {
-	resetRepo      *postgres.PasswordResetRepository
+	resetRepo      ResetRepository
 	userRepo       UserRepository
 	emailSender    EmailSender
 	auditLogger    AuditLogger
@@ -60,7 +68,7 @@ type Service struct {
 
 // NewService creates a new password reset service
 func NewService(
-	resetRepo *postgres.PasswordResetRepository,
+	resetRepo ResetRepository,
 	userRepo UserRepository,
 	emailSender EmailSender,
 	auditLogger AuditLogger,

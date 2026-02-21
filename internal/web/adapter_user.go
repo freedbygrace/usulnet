@@ -7,6 +7,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -17,10 +18,18 @@ import (
 	authsvc "github.com/fr4nsys/usulnet/internal/services/auth"
 )
 
+// TOTPReplayGuard prevents TOTP code reuse within a time window.
+type TOTPReplayGuard interface {
+	MarkCodeUsed(ctx context.Context, userID, code string) (alreadyUsed bool, err error)
+}
+
 type userAdapter struct {
-	repo      *postgres.UserRepository
-	authSvc   *authsvc.Service
-	encryptor *crypto.AESEncryptor
+	repo         *postgres.UserRepository
+	authSvc      *authsvc.Service
+	encryptor    *crypto.AESEncryptor
+	replayGuard  TOTPReplayGuard
+	maxAttempts  int
+	lockDuration time.Duration
 }
 
 func (a *userAdapter) List(ctx context.Context, search string, role string) ([]UserView, int64, error) {
@@ -113,7 +122,7 @@ func (a *userAdapter) Update(ctx context.Context, id string, email *string, role
 
 	user, err := a.repo.GetByID(ctx, uid)
 	if err != nil {
-		return err
+		return fmt.Errorf("get user for update: %w", err)
 	}
 
 	if email != nil {
@@ -232,6 +241,23 @@ func (a *userAdapter) SetupTOTP(ctx context.Context, userID string) (string, str
 		return "", "", err
 	}
 
+	account := user.Username
+	if user.Email != nil && *user.Email != "" {
+		account = *user.Email
+	}
+
+	// If the user already has an unverified secret (pending setup from a previous
+	// page load), reuse it instead of generating a new one on every GET. This
+	// prevents the QR code from changing on page refresh.
+	if user.TOTPSecret != nil && !user.HasTOTP() {
+		secret, decErr := a.encryptor.DecryptString(*user.TOTPSecret)
+		if decErr == nil {
+			qrURI := totp.OTPAuthURI(secret, account, "")
+			return secret, qrURI, nil
+		}
+		// If decrypt fails (e.g. key rotation), fall through to generate a new one
+	}
+
 	// Generate new secret
 	secret, err := totp.GenerateSecret()
 	if err != nil {
@@ -248,12 +274,7 @@ func (a *userAdapter) SetupTOTP(ctx context.Context, userID string) (string, str
 		return "", "", err
 	}
 
-	account := user.Username
-	if user.Email != nil && *user.Email != "" {
-		account = *user.Email
-	}
 	qrURI := totp.OTPAuthURI(secret, account, "")
-
 	return secret, qrURI, nil
 }
 
@@ -269,7 +290,7 @@ func (a *userAdapter) VerifyAndEnableTOTP(ctx context.Context, userID string, co
 
 	user, err := a.repo.GetByID(ctx, uid)
 	if err != nil {
-		return err
+		return fmt.Errorf("get user for totp verification: %w", err)
 	}
 
 	if user.TOTPSecret == nil || *user.TOTPSecret == "" {
@@ -285,7 +306,7 @@ func (a *userAdapter) VerifyAndEnableTOTP(ctx context.Context, userID string, co
 	// Validate code
 	valid, err := totp.Validate(code, secret)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate totp code: %w", err)
 	}
 	if !valid {
 		return fmt.Errorf("invalid totp code")
@@ -313,19 +334,51 @@ func (a *userAdapter) ValidateTOTPCode(ctx context.Context, userID string, code 
 		return false, fmt.Errorf("totp not enabled")
 	}
 
+	// Reject if user is locked out (TOTP failures count toward lockout)
+	if user.IsLocked() {
+		return false, fmt.Errorf("user account is locked")
+	}
+
 	secret, err := a.encryptor.DecryptString(*user.TOTPSecret)
 	if err != nil {
 		return false, fmt.Errorf("decrypt totp secret: %w", err)
 	}
 
-	return totp.Validate(code, secret)
+	valid, err := totp.Validate(code, secret)
+	if err != nil {
+		return false, err
+	}
+
+	if !valid {
+		// Increment failed login attempts — TOTP failures share the same lockout
+		if a.maxAttempts > 0 {
+			_ = a.repo.IncrementFailedAttempts(ctx, uid, a.maxAttempts, a.lockDuration)
+		}
+		return false, nil
+	}
+
+	// Replay prevention: reject codes that were already consumed
+	if a.replayGuard != nil {
+		replayed, replayErr := a.replayGuard.MarkCodeUsed(ctx, userID, code)
+		if replayErr != nil {
+			// Fail closed: reject if replay check is unavailable
+			return false, fmt.Errorf("totp replay check unavailable: %w", replayErr)
+		}
+		if replayed {
+			return false, nil
+		}
+	}
+
+	// Valid + not replayed → reset failed attempts
+	_ = a.repo.ResetFailedAttempts(ctx, uid)
+	return true, nil
 }
 
 func (a *userAdapter) DisableTOTP(ctx context.Context, userID string, code string) error {
 	// Validate current code before disabling
 	valid, err := a.ValidateTOTPCode(ctx, userID, code)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate totp before disable: %w", err)
 	}
 	if !valid {
 		return fmt.Errorf("invalid totp code")

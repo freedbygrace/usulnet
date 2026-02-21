@@ -136,8 +136,10 @@ func (i *Interpolator) InterpolateAll(ctx context.Context, variables []*models.C
 
 // ValidateInterpolation checks if all variable references can be resolved
 func (i *Interpolator) ValidateInterpolation(ctx context.Context, value string, variables map[string]string) error {
-	_, _, err := i.Interpolate(ctx, value, variables)
-	return err
+	if _, _, err := i.Interpolate(ctx, value, variables); err != nil {
+		return fmt.Errorf("validate interpolation: %w", err)
+	}
+	return nil
 }
 
 // ExtractReferences extracts all variable names referenced in a value

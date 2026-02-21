@@ -30,7 +30,7 @@ func (h *Handler) BulkOpsTempl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containers, err := containerSvc.List(ctx, nil)
+	containers, _, err := containerSvc.List(ctx, nil)
 	if err != nil {
 		h.renderTempl(w, r, bulktmpl.BulkOps(bulktmpl.BulkOpsData{
 			PageData: pageData,

@@ -6,6 +6,7 @@ package ssh
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -56,12 +57,12 @@ func NewSFTPClient(sshClient *ssh.Client, connID uuid.UUID) (*SFTPClient, error)
 func (s *Service) ConnectSFTP(ctx context.Context, connID uuid.UUID) (*SFTPClient, error) {
 	conn, err := s.GetConnection(ctx, connID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get connection for SFTP: %w", err)
 	}
 
 	sshClient, err := s.dial(ctx, conn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial SSH for SFTP: %w", err)
 	}
 
 	sftpClient, err := NewSFTPClient(sshClient, connID)
@@ -204,7 +205,7 @@ func (s *Service) DeleteRecursive(ctx context.Context, client *SFTPClient, path 
 	for _, entry := range entries {
 		childPath := filepath.Join(path, entry.Name())
 		if err := s.DeleteRecursive(ctx, client, childPath); err != nil {
-			return err
+			return fmt.Errorf("delete recursive %q: %w", childPath, err)
 		}
 	}
 

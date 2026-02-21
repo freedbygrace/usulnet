@@ -254,7 +254,7 @@ func (h *Handler) SwitchHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save to session
-	session, err := h.sessionStore.Get(r, "usulnet_session")
+	session, err := h.sessionStore.Get(r, CookieSession)
 	if err != nil || session == nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return

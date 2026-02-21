@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# usulnet - GoReleaser Configuration
+# https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go install github.com/a-h/templ/cmd/templ@v0.3.977
+    - templ generate
+
+builds:
+  - id: usulnet
+    main: ./cmd/usulnet
+    binary: usulnet
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/fr4nsys/usulnet/internal/app.Version={{.Version}}
+      - -X github.com/fr4nsys/usulnet/internal/app.Commit={{.Commit}}
+      - -X github.com/fr4nsys/usulnet/internal/app.BuildTime={{.Date}}
+    flags:
+      - -trimpath
+
+  - id: usulnet-agent
+    main: ./cmd/usulnet-agent
+    binary: usulnet-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/fr4nsys/usulnet/internal/app.Version={{.Version}}
+      - -X github.com/fr4nsys/usulnet/internal/app.Commit={{.Commit}}
+      - -X github.com/fr4nsys/usulnet/internal/app.BuildTime={{.Date}}
+    flags:
+      - -trimpath
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+      - config.yaml
+      - deploy/**/*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^style:"
+  groups:
+    - title: "Security"
+      regexp: '^.*?sec(urity)?(\(.+\))?\!?:.+$'
+      order: 0
+    - title: "Features"
+      regexp: '^.*?feat(\(.+\))?\!?:.+$'
+      order: 1
+    - title: "Bug Fixes"
+      regexp: '^.*?fix(\(.+\))?\!?:.+$'
+      order: 2
+    - title: "Performance"
+      regexp: '^.*?perf(\(.+\))?\!?:.+$'
+      order: 3
+    - title: "Other"
+      order: 999
+
+dockers:
+  - image_templates:
+      - "ghcr.io/fr4nsys/usulnet:{{ .Version }}-amd64"
+      - "ghcr.io/fr4nsys/usulnet:latest-amd64"
+    use: buildx
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=COMMIT={{.Commit}}"
+      - "--build-arg=BUILD_TIME={{.Date}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.revision={{.Commit}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+    ids:
+      - usulnet
+
+  - image_templates:
+      - "ghcr.io/fr4nsys/usulnet:{{ .Version }}-arm64"
+      - "ghcr.io/fr4nsys/usulnet:latest-arm64"
+    use: buildx
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=COMMIT={{.Commit}}"
+      - "--build-arg=BUILD_TIME={{.Date}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.revision={{.Commit}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+    ids:
+      - usulnet
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "ghcr.io/fr4nsys/usulnet:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/fr4nsys/usulnet:{{ .Version }}-amd64"
+      - "ghcr.io/fr4nsys/usulnet:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/fr4nsys/usulnet:latest"
+    image_templates:
+      - "ghcr.io/fr4nsys/usulnet:latest-amd64"
+      - "ghcr.io/fr4nsys/usulnet:latest-arm64"
+
+release:
+  github:
+    owner: fr4nsys
+    name: usulnet
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  header: |
+    ## usulnet v{{.Version}}
+
+    Docker Management Platform — self-hosted alternative to Portainer.
+  footer: |
+    ## Docker
+
+    ```bash
+    docker pull ghcr.io/fr4nsys/usulnet:{{.Version}}
+    ```
+
+    **Full Changelog**: https://github.com/fr4nsys/usulnet/compare/{{ .PreviousTag }}...{{ .Tag }}

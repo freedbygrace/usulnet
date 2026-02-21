@@ -52,7 +52,7 @@ func (r *DatabaseConnectionRepository) Create(ctx context.Context, conn *models.
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
 		conn.ID, conn.UserID, conn.Name, conn.Type, conn.Host, conn.Port,
 		conn.Database, conn.Username, conn.Password, conn.SSL, conn.SSLMode,
-		conn.CACert, conn.ClientCert, conn.ClientKey, optionsJSON,
+		conn.CACert, conn.ClientCert, conn.ClientKey, string(optionsJSON),
 		conn.Status, conn.StatusMessage, conn.CreatedAt, conn.UpdatedAt,
 	)
 	if err != nil {
@@ -184,7 +184,7 @@ func (r *DatabaseConnectionRepository) Update(ctx context.Context, id uuid.UUID,
 		WHERE id = $1`,
 		conn.ID, conn.Name, conn.Host, conn.Port, conn.Database, conn.Username,
 		conn.Password, conn.SSL, conn.SSLMode, conn.CACert, conn.ClientCert,
-		conn.ClientKey, optionsJSON, conn.UpdatedAt,
+		conn.ClientKey, string(optionsJSON), conn.UpdatedAt,
 	)
 	if err != nil {
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to update database connection")

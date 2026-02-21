@@ -9,7 +9,8 @@ import (
 	"testing"
 )
 
-// TestRouter_PublicRoutes verifies that health and version endpoints are accessible without auth.
+// TestRouter_PublicRoutes verifies that health endpoints are accessible without auth.
+// Note: /api/v1/system/version is behind authentication (viewer+), tested in TestRouter_ValidAuth.
 func TestRouter_PublicRoutes(t *testing.T) {
 	ts := setupTestSuite(t)
 
@@ -21,7 +22,6 @@ func TestRouter_PublicRoutes(t *testing.T) {
 	}{
 		{"health endpoint", http.MethodGet, "/health", http.StatusOK},
 		{"liveness endpoint", http.MethodGet, "/healthz", http.StatusOK},
-		{"version endpoint", http.MethodGet, "/api/v1/system/version", http.StatusOK},
 	}
 
 	for _, tt := range tests {
@@ -40,6 +40,7 @@ func TestRouter_AuthRequired(t *testing.T) {
 		name string
 		path string
 	}{
+		{"system version", "/api/v1/system/version"},
 		{"system info", "/api/v1/system/info"},
 		{"system health", "/api/v1/system/health"},
 		{"system metrics", "/api/v1/system/metrics"},
@@ -52,6 +53,26 @@ func TestRouter_AuthRequired(t *testing.T) {
 			assertStatus(t, w, http.StatusUnauthorized)
 		})
 	}
+}
+
+// TestRouter_WebSocketAuthzNegative verifies WS routes enforce 401/403 on sensitive operations.
+func TestRouter_WebSocketAuthzNegative(t *testing.T) {
+	ts := setupTestSuite(t)
+	hostID := "550e8400-e29b-41d4-a716-446655440000"
+	containerID := "nginx"
+
+	t.Run("logs without token returns 401", func(t *testing.T) {
+		path := "/api/v1/ws/containers/" + hostID + "/" + containerID + "/logs"
+		w := doRequest(t, ts.router, http.MethodGet, path, "", "")
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("exec with viewer token returns 403", func(t *testing.T) {
+		viewerToken := generateTestToken(t, testUser(), "viewer", "viewer")
+		path := "/api/v1/ws/containers/" + hostID + "/" + containerID + "/exec"
+		w := doRequest(t, ts.router, http.MethodPost, path, `{"cmd":["/bin/sh"]}`, viewerToken)
+		assertStatus(t, w, http.StatusForbidden)
+	})
 }
 
 // TestRouter_InvalidToken verifies that invalid tokens are rejected.
@@ -81,6 +102,7 @@ func TestRouter_ValidAuth(t *testing.T) {
 		name string
 		path string
 	}{
+		{"system version", "/api/v1/system/version"},
 		{"system info", "/api/v1/system/info"},
 		{"system health", "/api/v1/system/health"},
 	}
@@ -201,8 +223,8 @@ func TestRouter_NotImplementedFallback(t *testing.T) {
 			assertStatus(t, w, http.StatusNotImplemented)
 
 			body := assertJSON(t, w)
-			if body["success"] != false {
-				t.Error("expected success: false in not implemented response")
+			if body["code"] != "NOT_IMPLEMENTED" {
+				t.Errorf("expected code NOT_IMPLEMENTED, got %v", body["code"])
 			}
 		})
 	}

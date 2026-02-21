@@ -221,8 +221,12 @@ func (m *Manager) buildOptions() ([]nats.Option, error) {
 
 // buildTLSConfig builds TLS configuration.
 func (m *Manager) buildTLSConfig() (*tls.Config, error) {
+	if m.config.TLSSkipVerify {
+		m.log.Warn("NATS TLS certificate verification is DISABLED — this is insecure outside development environments")
+	}
 	config := &tls.Config{
-		InsecureSkipVerify: m.config.TLSSkipVerify,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: m.config.TLSSkipVerify, //nolint:gosec // Configurable for dev/self-signed environments
 	}
 
 	// Load CA cert

@@ -100,26 +100,26 @@ type ImageLayerResponse struct {
 
 // PullRequest represents a pull request.
 type PullRequest struct {
-	Reference string                     `json:"reference"`
+	Reference string                     `json:"reference" validate:"required"`
 	Auth      *models.RegistryAuthConfig `json:"auth,omitempty"`
 }
 
 // PushRequest represents a push request.
 type PushRequest struct {
-	Reference string                     `json:"reference"`
+	Reference string                     `json:"reference" validate:"required"`
 	Auth      *models.RegistryAuthConfig `json:"auth,omitempty"`
 }
 
 // TagRequest represents a tag request.
 type TagRequest struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
+	Source string `json:"source" validate:"required"`
+	Target string `json:"target" validate:"required"`
 }
 
 // SearchRequest represents a search request.
 type SearchRequest struct {
-	Term  string                     `json:"term"`
-	Limit int                        `json:"limit,omitempty"`
+	Term  string                     `json:"term" validate:"required"`
+	Limit int                        `json:"limit,omitempty" validate:"omitempty,min=1,max=100"`
 	Auth  *models.RegistryAuthConfig `json:"auth,omitempty"`
 }
 
@@ -553,8 +553,8 @@ func toImageResponse(img *models.Image) ImageResponse {
 
 // BuildImageRequest represents a build image request.
 type BuildImageRequest struct {
-	Dockerfile string            `json:"dockerfile"`
-	Tags       []string          `json:"tags"`
+	Dockerfile string            `json:"dockerfile" validate:"required"`
+	Tags       []string          `json:"tags" validate:"required,min=1"`
 	BuildArgs  map[string]string `json:"build_args,omitempty"`
 	Target     string            `json:"target,omitempty"`
 	NoCache    bool              `json:"no_cache,omitempty"`

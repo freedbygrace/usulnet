@@ -238,3 +238,31 @@ type RegistryAuthConfig struct {
 	ServerAddress string `json:"server_address,omitempty"`
 	IdentityToken string `json:"identity_token,omitempty"`
 }
+
+// RegistryRepoInfo represents a repository within a registry.
+type RegistryRepoInfo struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	TagCount    int        `json:"tag_count,omitempty"`
+	PullCount   int64      `json:"pull_count,omitempty"`
+	LastUpdated *time.Time `json:"last_updated,omitempty"`
+	StarCount   int        `json:"star_count,omitempty"`
+	IsPrivate   bool       `json:"is_private,omitempty"`
+}
+
+// RegistryTagInfo represents a tag in a registry repository.
+type RegistryTagInfo struct {
+	Name       string     `json:"name"`
+	Digest     string     `json:"digest,omitempty"`
+	Size       int64      `json:"size,omitempty"`
+	LastPushed *time.Time `json:"last_pushed,omitempty"`
+}
+
+// RegistryManifestInfo represents manifest details for a specific tag.
+type RegistryManifestInfo struct {
+	Digest    string `json:"digest"`
+	MediaType string `json:"media_type"`
+	Size      int64  `json:"size"`
+	Platform  string `json:"platform,omitempty"`
+	Layers    int    `json:"layers"`
+}

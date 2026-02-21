@@ -1,0 +1,222 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
+
+type AboutData struct {
+	PageData layouts.PageData
+
+	// Version info
+	Version   string
+	Commit    string
+	BuildTime string
+	GoVersion string
+	OS        string
+	Arch      string
+
+	// Connection status
+	Connections []ConnectionStatus
+
+	// Docker info
+	DockerVersion    string
+	DockerAPIVersion string
+	DockerOS         string
+	DockerArch       string
+	DockerContainers int
+	DockerImages     int
+
+	// Instance info
+	Mode       string // standalone, master, agent
+	Uptime     string
+	ConfigPath string
+}
+
+type ConnectionStatus struct {
+	Name      string // PostgreSQL, Redis, NATS
+	Status    string // connected, disconnected, error
+	TLS       bool   // Whether connection uses TLS
+	TLSInfo   string // e.g. "TLS 1.3", "sslmode=prefer", "none"
+	Latency   string // e.g. "2ms"
+	Details   string // e.g. "PostgreSQL 16.2" or "Redis 8.0"
+}
+
+templ About(data AboutData) {
+	@layouts.Base(data.PageData) {
+		<div class="space-y-6">
+			<!-- Header -->
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-display font-bold text-white">About usulnet</h1>
+					<p class="text-gray-400 mt-1">System information, connection status, and instance management</p>
+				</div>
+			</div>
+
+			<!-- Version Card -->
+			<div class="card">
+				<div class="px-5 py-4 border-b border-dark-700">
+					<h2 class="font-medium text-white"><i class="fas fa-code-branch mr-2 text-primary-400"></i>Version Information</h2>
+				</div>
+				<div class="p-5">
+					<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Version</div>
+							<div class="text-lg font-display font-bold text-white">{ data.Version }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Commit</div>
+							<div class="text-sm font-mono text-gray-300">{ data.Commit }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Build Time</div>
+							<div class="text-sm text-gray-300">{ data.BuildTime }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Go Version</div>
+							<div class="text-sm text-gray-300">{ data.GoVersion }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Platform</div>
+							<div class="text-sm text-gray-300">{ data.OS }/{ data.Arch }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Mode</div>
+							<div class="text-sm text-gray-300 capitalize">{ data.Mode }</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Connection Status Card -->
+			<div class="card">
+				<div class="px-5 py-4 border-b border-dark-700">
+					<h2 class="font-medium text-white"><i class="fas fa-network-wired mr-2 text-primary-400"></i>Connection Status</h2>
+				</div>
+				<div class="p-5">
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="text-gray-500 text-left text-xs uppercase tracking-wide">
+									<th class="pb-3">Service</th>
+									<th class="pb-3">Status</th>
+									<th class="pb-3">Encryption</th>
+									<th class="pb-3">Latency</th>
+									<th class="pb-3">Details</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-dark-700">
+								for _, conn := range data.Connections {
+									<tr class="group">
+										<td class="py-3">
+											<span class="font-medium text-white">{ conn.Name }</span>
+										</td>
+										<td class="py-3">
+											if conn.Status == "connected" {
+												<span class="inline-flex items-center gap-1.5 text-green-400">
+													<span class="w-2 h-2 rounded-full bg-green-400"></span>
+													Connected
+												</span>
+											} else if conn.Status == "not configured" {
+												<span class="inline-flex items-center gap-1.5 text-gray-500">
+													<span class="w-2 h-2 rounded-full bg-gray-500"></span>
+													Not configured
+												</span>
+											} else {
+												<span class="inline-flex items-center gap-1.5 text-red-400">
+													<span class="w-2 h-2 rounded-full bg-red-400"></span>
+													{ conn.Status }
+												</span>
+											}
+										</td>
+										<td class="py-3">
+											if conn.TLS {
+												<span class="inline-flex items-center gap-1 text-green-400 text-xs">
+													<i class="fas fa-lock"></i>
+													{ conn.TLSInfo }
+												</span>
+											} else if conn.TLSInfo == "n/a" {
+												<span class="text-gray-500 text-xs">—</span>
+											} else {
+												<span class="inline-flex items-center gap-1 text-yellow-400 text-xs">
+													<i class="fas fa-lock-open"></i>
+													{ conn.TLSInfo }
+												</span>
+											}
+										</td>
+										<td class="py-3 text-gray-400">{ conn.Latency }</td>
+										<td class="py-3 text-gray-400">{ conn.Details }</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+
+			<!-- Docker Info Card -->
+			<div class="card">
+				<div class="px-5 py-4 border-b border-dark-700">
+					<h2 class="font-medium text-white"><i class="fab fa-docker mr-2 text-primary-400"></i>Docker Engine</h2>
+				</div>
+				<div class="p-5">
+					<div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Docker Version</div>
+							<div class="text-sm text-gray-300">{ data.DockerVersion }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">API Version</div>
+							<div class="text-sm text-gray-300">{ data.DockerAPIVersion }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Platform</div>
+							<div class="text-sm text-gray-300">{ data.DockerOS }/{ data.DockerArch }</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Resources</div>
+							<div class="text-sm text-gray-300">
+								{ intStr(data.DockerContainers) } containers, { intStr(data.DockerImages) } images
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Instance Backup Card -->
+			<div class="card">
+				<div class="px-5 py-4 border-b border-dark-700">
+					<h2 class="font-medium text-white"><i class="fas fa-database mr-2 text-primary-400"></i>Instance Backup &amp; Restore</h2>
+				</div>
+				<div class="p-5 space-y-4">
+					<p class="text-sm text-gray-400">
+						Export or import the entire usulnet instance state: database, configuration, and encryption keys.
+						Backups are AES-256-GCM encrypted and can be restored on a fresh usulnet installation.
+					</p>
+					<div class="flex items-center gap-3">
+						<form method="post" action="/about/instance-backup">
+							<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+							<button type="submit" class="btn-primary">
+								<i class="fas fa-download mr-2"></i>Export Instance Backup
+							</button>
+						</form>
+						<button
+							onclick="document.getElementById('restore-file').click()"
+							class="btn-secondary"
+						>
+							<i class="fas fa-upload mr-2"></i>Import Instance Backup
+						</button>
+						<form id="restore-form" method="post" action="/about/instance-restore" enctype="multipart/form-data" style="display:none;">
+							<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
+							<input type="file" id="restore-file" name="backup_file" accept=".usulnet,.enc" onchange="if(confirm('Restore from backup? This will overwrite the current database. The server will restart.')) document.getElementById('restore-form').submit();"/>
+						</form>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+func intStr(n int) string {
+	return fmt.Sprintf("%d", n)
+}

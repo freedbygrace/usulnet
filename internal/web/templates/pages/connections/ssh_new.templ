@@ -241,11 +241,62 @@ templ SSHConnectionNew(data SSHConnectionNewData) {
 			}
 
 			function testConnection() {
+				const btn = event.currentTarget;
 				const form = document.querySelector('form');
 				const formData = new FormData(form);
-				const data = Object.fromEntries(formData.entries());
 
-				alert('Test connection functionality coming soon');
+				// Validate required fields before saving
+				const name = formData.get('name');
+				const host = formData.get('host');
+				const username = formData.get('username');
+				if (!name || !host || !username) {
+					if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Please fill in Name, Host, and Username first', 'error'); }
+					else { alert('Please fill in Name, Host, and Username first'); }
+					return;
+				}
+
+				btn.disabled = true;
+				btn.textContent = 'Saving & Testing...';
+
+				// Save the connection first, then test it
+				fetch('/connections/ssh', {
+					method: 'POST',
+					body: formData,
+				}).then(function(resp) {
+					if (resp.redirected) {
+						// Extract connection ID from redirect URL (e.g. /connections/ssh/UUID/edit)
+						const url = new URL(resp.url);
+						const parts = url.pathname.split('/');
+						const idIdx = parts.indexOf('ssh') + 1;
+						if (idIdx > 0 && idIdx < parts.length) {
+							const connId = parts[idIdx];
+							// Now test the saved connection
+							return fetch('/connections/ssh/' + connId + '/test', {
+								method: 'POST',
+								headers: { 'X-CSRF-Token': formData.get('csrf_token') },
+							}).then(function(testResp) { return testResp.json(); })
+							.then(function(result) {
+								if (result.success) {
+									if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Connection successful (' + result.latency_ms + 'ms)', 'success'); }
+									else { alert('Connection successful!'); }
+								} else {
+									if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Connection failed: ' + result.message, 'error'); }
+									else { alert('Connection failed: ' + result.message); }
+								}
+								// Redirect to edit page
+								window.location.href = resp.url;
+							});
+						}
+					}
+					// If not redirected, there was an error — reload to show flash messages
+					window.location.reload();
+				}).catch(function(err) {
+					if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Error: ' + err.message, 'error'); }
+					else { alert('Error: ' + err.message); }
+				}).finally(function() {
+					btn.disabled = false;
+					btn.textContent = 'Test Connection';
+				});
 			}
 		</script>
 	}

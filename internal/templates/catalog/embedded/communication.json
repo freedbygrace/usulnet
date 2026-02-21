@@ -1,0 +1,46 @@
+{
+  "templates": [
+    {
+      "name": "Mattermost",
+      "description": "Open-source Slack alternative for team messaging",
+      "image": "mattermost/mattermost-team-edition:latest",
+      "ports": ["8065/tcp"],
+      "volumes": [
+        {"container": "/mattermost/config"},
+        {"container": "/mattermost/data"},
+        {"container": "/mattermost/logs"},
+        {"container": "/mattermost/plugins"}
+      ],
+      "env": [
+        {"name": "MM_SQLSETTINGS_DRIVERNAME", "label": "Database driver", "default": "postgres"},
+        {"name": "MM_SQLSETTINGS_DATASOURCE", "label": "Database connection string"}
+      ]
+    },
+    {
+      "name": "Rocket.Chat",
+      "description": "Open-source team communication platform",
+      "image": "rocket.chat:latest",
+      "ports": ["3000/tcp"],
+      "volumes": [{"container": "/app/uploads"}],
+      "env": [
+        {"name": "MONGO_URL", "label": "MongoDB connection URL", "required": true},
+        {"name": "ROOT_URL", "label": "Root URL", "default": "http://localhost:3000"}
+      ]
+    },
+    {
+      "name": "Element Web",
+      "description": "Matrix chat client for the web",
+      "image": "vectorim/element-web:latest",
+      "ports": ["80/tcp"],
+      "note": "Requires a Matrix homeserver (e.g., Synapse)"
+    },
+    {
+      "name": "Ntfy",
+      "description": "Simple push notification service with HTTP API",
+      "image": "binwiederhier/ntfy:latest",
+      "ports": ["80/tcp"],
+      "volumes": [{"container": "/var/cache/ntfy"}, {"container": "/etc/ntfy"}],
+      "command": "serve"
+    }
+  ]
+}

@@ -101,15 +101,14 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		r.Use(m.ThemeMiddleware)
 		r.Use(SecureHeaders)
 
-		// Auth pages
+		// Auth pages (POST routes are rate-limited to prevent brute force)
 		r.Get("/login", h.LoginPageTempl)
-		r.Post("/login", h.LoginSubmit)
-		r.Post("/logout", h.Logout)
-		r.Get("/logout", h.Logout) // GET fallback for <a href="/logout"> links
+		r.With(WebAuthRateLimit()).Post("/login", h.LoginSubmit)
+		r.Get("/logout", h.Logout)
 
-		// TOTP 2FA verification (during login)
+		// TOTP 2FA verification (during login, rate-limited)
 		r.Get("/login/totp", h.TOTPVerifyPageTempl)
-		r.Post("/login/totp", h.TOTPVerifySubmit)
+		r.With(WebAuthRateLimit()).Post("/login/totp", h.TOTPVerifySubmit)
 
 		// LDAP login (redirect to main login with method hint)
 		r.Get("/login/ldap", func(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +141,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		r.Use(m.CSRFMiddleware)
 		r.Use(SecureHeaders)
 		r.Use(NoCache)
+		r.Use(MaxRequestBody(10 * 1024 * 1024)) // 10 MB body size limit
+
+		// Logout (CSRF-protected POST)
+		r.Post("/logout", h.Logout)
 
 		// Dashboard
 		r.Get("/", h.DashboardTempl)
@@ -165,6 +168,11 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Get("/{id}/files/api/browse/*", h.ContainerBrowseAPI)
 				r.Get("/{id}/files/api/file/*", h.ContainerReadFileAPI)
 				r.Get("/{id}/files/api/download/*", h.ContainerDownloadFileAPI)
+			})
+
+			// File write operations - require container:exec (writing inside containers is privileged)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("container:exec"))
 				r.Put("/{id}/files/api/file/*", h.ContainerWriteFileAPI)
 				r.Delete("/{id}/files/api/file/*", h.ContainerDeleteFileAPI)
 				r.Post("/{id}/files/api/mkdir/*", h.ContainerMkdirAPI)
@@ -379,13 +387,11 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			// Apply updates (settings:update)
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("settings:update"))
-				r.Post("/check", h.UpdatesCheckTempl)
 				r.Post("/check-all", h.UpdatesCheckTempl)
 				r.Post("/apply-all", h.UpdateBatch)
 				r.Post("/manual", h.UpdateManual)
 				r.Post("/{id}/apply", h.UpdateApplyTempl)
 				r.Post("/{id}/rollback", h.UpdateRollbackTempl)
-				r.Post("/batch", h.UpdateBatch)
 				r.Post("/policies", h.AutoUpdatePolicyCreate)
 				r.Post("/policies/{id}/toggle", h.AutoUpdatePolicyToggle)
 				r.Post("/policies/{id}/delete", h.AutoUpdatePolicyDelete)
@@ -466,6 +472,13 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Get("/picker", h.TerminalPickerTempl)
 		})
 
+		// Session Replay (Phase 7.2)
+		r.Route("/session-replay", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:view"))
+			r.Get("/{id}", h.SessionReplayPage)
+			r.Get("/{id}/data", h.SessionReplayData)
+		})
+
 		// Nodes (usulnet Docker Nodes) - renamed from Hosts
 		r.Route("/nodes", func(r chi.Router) {
 			// View - require host:view
@@ -473,6 +486,11 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Use(m.RequirePermission("host:view"))
 				r.Get("/", h.HostsTempl)
 				r.Get("/{id}", h.HostDetailTempl)
+			})
+
+			// Terminal and file browser - requires host:view (same as node detail)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:view"))
 				r.Get("/{id}/terminal", h.HostTerminalTempl)
 				r.Get("/{id}/files", h.HostFilesTempl)
 				r.Get("/{id}/files/*", h.HostFilesTempl)
@@ -507,7 +525,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			})
 		})
 
-		// Swarm Cluster Management (requires FeatureSwarm — disabled in CE)
+		// Swarm Cluster Management (Enterprise/Business license required)
 		r.Route("/swarm", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureSwarm))
 
@@ -661,6 +679,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 				r.Group(func(r chi.Router) {
 					r.Use(m.RequirePermission("backup:create"))
+					r.Post("/update", h.StorageUpdateConnection)
 					r.Post("/delete", h.StorageDeleteConnection)
 					r.Post("/test", h.StorageTestConnection)
 					r.Post("/buckets", h.StorageCreateBucket)
@@ -694,208 +713,269 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					func() bool { return h.sshService != nil },
 					"SSH Connections", "Enable SSH by configuring an encryption key (USULNET_ENCRYPTION_KEY)",
 				))
+				// Read-only (inherits host:view)
 				r.Get("/", h.SSHConnectionsTempl)
-				r.Get("/new", h.SSHConnectionNewTempl)
-				r.Post("/", h.SSHConnectionCreate)
 				r.Get("/{id}", h.SSHConnectionDetailTempl)
-				r.Post("/{id}", h.SSHConnectionUpdate)
-				r.Delete("/{id}", h.SSHConnectionDelete)
-				r.Post("/{id}/test", h.SSHConnectionTest)
-				r.Post("/{id}/duplicate", h.SSHConnectionDuplicate)
 				r.Get("/{id}/terminal", h.SSHConnectionTerminalTempl)
+				r.Get("/{id}/tunnels", h.SSHTunnelsTempl)
 
-				// SFTP Browser
+				// SFTP Browser - read-only
 				r.Get("/{id}/files", h.SFTPBrowserTempl)
 				r.Get("/{id}/files/list", h.SFTPListFiles)
-				r.Post("/{id}/files/upload", h.SFTPUpload)
 				r.Get("/{id}/files/download", h.SFTPDownload)
-				r.Post("/{id}/files/delete", h.SFTPDelete)
-				r.Post("/{id}/files/mkdir", h.SFTPMkdir)
-				r.Post("/{id}/files/rename", h.SFTPRename)
 
-				// SSH Tunnels
-				r.Get("/{id}/tunnels", h.SSHTunnelsTempl)
-				r.Post("/{id}/tunnels", h.SSHTunnelCreate)
-				r.Post("/{id}/tunnels/{tunnelID}/toggle", h.SSHTunnelToggle)
-				r.Delete("/{id}/tunnels/{tunnelID}", h.SSHTunnelDelete)
+				// Mutations require host:update
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.SSHConnectionNewTempl)
+					r.Post("/", h.SSHConnectionCreate)
+					r.Post("/{id}", h.SSHConnectionUpdate)
+					r.Delete("/{id}", h.SSHConnectionDelete)
+					r.Post("/{id}/test", h.SSHConnectionTest)
+					r.Post("/{id}/duplicate", h.SSHConnectionDuplicate)
+
+					// SFTP Browser - write operations
+					r.Post("/{id}/files/upload", h.SFTPUpload)
+					r.Post("/{id}/files/delete", h.SFTPDelete)
+					r.Post("/{id}/files/mkdir", h.SFTPMkdir)
+					r.Post("/{id}/files/rename", h.SFTPRename)
+
+					// SSH Tunnels - mutations
+					r.Post("/{id}/tunnels", h.SSHTunnelCreate)
+					r.Post("/{id}/tunnels/{tunnelID}/toggle", h.SSHTunnelToggle)
+					r.Delete("/{id}/tunnels/{tunnelID}", h.SSHTunnelDelete)
+				})
 			})
 
 			// RDP Connections
 			r.Route("/rdp", func(r chi.Router) {
+				// Read-only (inherits host:view)
 				r.Get("/", h.RDPConnectionsTempl)
-				r.Get("/new", h.RDPConnectionNewTempl)
-				r.Post("/", h.RDPConnectionCreate)
 				r.Get("/{id}", h.RDPConnectionDetailTempl)
-				r.Post("/{id}", h.RDPConnectionUpdate)
-				r.Delete("/{id}", h.RDPConnectionDelete)
-				r.Post("/{id}/test", h.RDPConnectionTest)
 				r.Get("/{id}/download", h.RDPConnectionDownload)
 				r.Get("/{id}/session", h.RDPSessionTempl)
+
+				// Mutations require host:update
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.RDPConnectionNewTempl)
+					r.Post("/", h.RDPConnectionCreate)
+					r.Post("/{id}", h.RDPConnectionUpdate)
+					r.Delete("/{id}", h.RDPConnectionDelete)
+					r.Post("/{id}/test", h.RDPConnectionTest)
+				})
 			})
 
 			// SSH Keys
 			r.Route("/keys", func(r chi.Router) {
+				// Read-only (inherits host:view)
 				r.Get("/", h.SSHKeysTempl)
-				r.Get("/new", h.SSHKeyNewTempl)
-				r.Post("/", h.SSHKeyCreate)
 				r.Get("/{id}", h.SSHKeyDetailTempl)
-				r.Delete("/{id}", h.SSHKeyDelete)
 				r.Get("/{id}/download", h.SSHKeyDownload)
+
+				// Mutations require host:update
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.SSHKeyNewTempl)
+					r.Post("/", h.SSHKeyCreate)
+					r.Delete("/{id}", h.SSHKeyDelete)
+				})
 			})
 
 			// Web Shortcuts
 			r.Route("/shortcuts", func(r chi.Router) {
+				// Read-only (inherits host:view)
 				r.Get("/", h.ShortcutsTempl)
-				r.Get("/new", h.ShortcutNewTempl)
-				r.Post("/", h.ShortcutCreate)
 				r.Get("/{id}/edit", h.ShortcutEditTempl)
-				r.Post("/{id}", h.ShortcutUpdate)
-				r.Delete("/{id}", h.ShortcutDelete)
+
+				// Mutations require host:update
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Get("/new", h.ShortcutNewTempl)
+					r.Post("/", h.ShortcutCreate)
+					r.Post("/{id}", h.ShortcutUpdate)
+					r.Delete("/{id}", h.ShortcutDelete)
+				})
 			})
 
 			// Database Connections
 			r.Route("/database", func(r chi.Router) {
+				// Read-only: list and browse (inherits host:view)
 				r.Get("/", h.DatabaseConnectionsTempl)
-				r.Post("/", h.DatabaseConnectionCreate)
 				r.Get("/{id}", h.DatabaseBrowserTempl)
-				r.Post("/{id}/test", h.DatabaseConnectionTest)
-				r.Delete("/{id}", h.DatabaseConnectionDelete)
-				r.Post("/{id}/write-mode", h.DatabaseWriteModeToggle)
-				r.Get("/{id}/query", h.DatabaseQueryTempl)
-				r.Post("/{id}/query", h.DatabaseQueryExecute)
+
+				// Mutations and query execution require host:update
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Post("/", h.DatabaseConnectionCreate)
+					r.Post("/{id}/test", h.DatabaseConnectionTest)
+					r.Delete("/{id}", h.DatabaseConnectionDelete)
+					r.Get("/{id}/query", h.DatabaseQueryTempl)
+					r.Post("/{id}/query", h.DatabaseQueryExecute)
+					r.Post("/{id}/write-mode", h.DatabaseWriteModeToggle)
+				})
 			})
 
 			// LDAP Connections
 			r.Route("/ldap", func(r chi.Router) {
+				// Read-only: list and browse (inherits host:view)
 				r.Get("/", h.LDAPConnectionsTempl)
-				r.Post("/", h.LDAPConnectionCreate)
 				r.Get("/{id}", h.LDAPBrowserTempl)
 				r.Get("/{id}/settings", h.LDAPConnectionSettingsTempl)
-				r.Post("/{id}/settings", h.LDAPConnectionSettingsUpdate)
-				r.Post("/{id}/test", h.LDAPConnectionTest)
-				r.Delete("/{id}", h.LDAPConnectionDelete)
-				r.Post("/{id}/write-mode", h.LDAPWriteModeToggle)
-				r.Get("/{id}/search", h.LDAPSearchTempl)
-				r.Post("/{id}/search", h.LDAPSearchExecute)
+
+				// Mutations and search execution require host:update
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("host:update"))
+					r.Post("/", h.LDAPConnectionCreate)
+					r.Post("/{id}/settings", h.LDAPConnectionSettingsUpdate)
+					r.Post("/{id}/test", h.LDAPConnectionTest)
+					r.Delete("/{id}", h.LDAPConnectionDelete)
+					r.Get("/{id}/search", h.LDAPSearchTempl)
+					r.Post("/{id}/search", h.LDAPSearchExecute)
+					r.Post("/{id}/write-mode", h.LDAPWriteModeToggle)
+				})
 			})
 		})
 
-		// WebSocket for SSH Terminal
-		r.Get("/ws/ssh/{id}", h.WSSSHExec)
+		// WebSocket for SSH Terminal (rate-limited; host:view already required by auth group)
+		r.With(WebSocketRateLimit(), m.RequirePermission("host:view")).
+			Get("/ws/ssh/{id}", h.WSSSHExec)
 
-		// WebSocket for RDP Session (via guacd)
-		r.Get("/ws/rdp/{id}", h.WSRDPExec)
+		// WebSocket for RDP Session (via guacd) (rate-limited; host:view already required by auth group)
+		r.With(WebSocketRateLimit(), m.RequirePermission("host:view")).
+			Get("/ws/rdp/{id}", h.WSRDPExec)
 
 		// Gitea Integration (legacy routes - kept for backwards compatibility)
 		r.Route("/integrations/gitea", func(r chi.Router) {
 			r.Use(m.RequirePermission("stack:view"))
 			r.Get("/", h.GiteaTempl)
 
-			// Connection management
-			r.Post("/connections", h.GiteaCreateConnection)
+			// Connection management (mutations require stack:deploy)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("stack:deploy"))
+				r.Post("/connections", h.GiteaCreateConnection)
+			})
 			r.Route("/connections/{id}", func(r chi.Router) {
-				r.Post("/test", h.GiteaTestConnection)
-				r.Post("/sync", h.GiteaSyncRepos)
-				r.Post("/delete", h.GiteaDeleteConnection)
-				r.Get("/templates", h.GiteaTemplates) // gitignore & license templates
+				r.Get("/templates", h.GiteaTemplates) // gitignore & license templates (read-only)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("stack:deploy"))
+					r.Post("/test", h.GiteaTestConnection)
+					r.Post("/sync", h.GiteaSyncRepos)
+					r.Post("/delete", h.GiteaDeleteConnection)
+				})
 			})
 
-			// Repository creation (Tier 1)
-			r.Post("/repos", h.GiteaCreateRepo)
+			// Repository creation (requires stack:deploy)
+			r.With(m.RequirePermission("stack:deploy")).Post("/repos", h.GiteaCreateRepo)
 
-			// Repository operations (Tier 1)
+			// Repository operations
 			r.Route("/repos/{id}", func(r chi.Router) {
-				// Existing
+				// Read-only operations (stack:view inherited)
 				r.Get("/", h.GiteaRepoDetail)
 				r.Get("/files", h.GiteaRepoFiles)
 				r.Get("/file", h.GiteaFileContent)
-				r.Post("/file", h.GiteaFileSave)
-
-				// Tier 1: Repository management
-				r.Post("/edit", h.GiteaEditRepo)
-				r.Post("/delete", h.GiteaDeleteRepo)
-
-				// Tier 1: Branches
 				r.Get("/branches", h.GiteaListBranches)
-				r.Post("/branches", h.GiteaCreateBranch)
-				r.Delete("/branches/{name}", h.GiteaDeleteBranch)
-
-				// Tier 1: Tags
 				r.Get("/tags", h.GiteaListTags)
-				r.Post("/tags", h.GiteaCreateTag)
-				r.Delete("/tags/{name}", h.GiteaDeleteTag)
-
-				// Tier 1: Commits & Diff
 				r.Get("/commits", h.GiteaListCommitsFiltered)
 				r.Get("/commits/{sha}", h.GiteaGetCommit)
 				r.Get("/compare", h.GiteaCompare)
 				r.Get("/diff", h.GiteaGetDiff)
 
+				// Mutation operations (require stack:deploy)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("stack:deploy"))
+					r.Post("/file", h.GiteaFileSave)
+					r.Post("/edit", h.GiteaEditRepo)
+					r.Post("/delete", h.GiteaDeleteRepo)
+					r.Post("/branches", h.GiteaCreateBranch)
+					r.Delete("/branches/{name}", h.GiteaDeleteBranch)
+					r.Post("/tags", h.GiteaCreateTag)
+					r.Delete("/tags/{name}", h.GiteaDeleteTag)
+				})
+
 				// Tier 2: Pull Requests
 				r.Route("/pulls", func(r chi.Router) {
 					r.Get("/", h.GiteaListPRs)
-					r.Post("/", h.GiteaCreatePR)
 					r.Get("/{number}", h.GiteaGetPR)
-					r.Patch("/{number}", h.GiteaEditPR)
-					r.Post("/{number}/merge", h.GiteaMergePR)
 					r.Get("/{number}/diff", h.GiteaGetPRDiff)
 					r.Get("/{number}/reviews", h.GiteaListPRReviews)
-					r.Post("/{number}/reviews", h.GiteaCreatePRReview)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Post("/", h.GiteaCreatePR)
+						r.Patch("/{number}", h.GiteaEditPR)
+						r.Post("/{number}/merge", h.GiteaMergePR)
+						r.Post("/{number}/reviews", h.GiteaCreatePRReview)
+					})
 				})
 
 				// Tier 2: Issues
 				r.Route("/issues", func(r chi.Router) {
 					r.Get("/", h.GiteaListIssues)
-					r.Post("/", h.GiteaCreateIssue)
 					r.Get("/{number}", h.GiteaGetIssue)
-					r.Patch("/{number}", h.GiteaEditIssue)
 					r.Get("/{number}/comments", h.GiteaListIssueComments)
-					r.Post("/{number}/comments", h.GiteaCreateIssueComment)
-					r.Delete("/comments/{commentId}", h.GiteaDeleteIssueComment)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Post("/", h.GiteaCreateIssue)
+						r.Patch("/{number}", h.GiteaEditIssue)
+						r.Post("/{number}/comments", h.GiteaCreateIssueComment)
+						r.Delete("/comments/{commentId}", h.GiteaDeleteIssueComment)
+					})
 				})
 
-				// Tier 2: Labels & Milestones
+				// Tier 2: Labels & Milestones (read-only)
 				r.Get("/labels", h.GiteaListLabels)
 				r.Get("/milestones", h.GiteaListMilestones)
 
 				// Tier 2: Collaborators
 				r.Route("/collaborators", func(r chi.Router) {
 					r.Get("/", h.GiteaListCollaborators)
-					r.Put("/{username}", h.GiteaAddCollaborator)
-					r.Delete("/{username}", h.GiteaRemoveCollaborator)
 					r.Get("/{username}/permission", h.GiteaGetCollaboratorPermission)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Put("/{username}", h.GiteaAddCollaborator)
+						r.Delete("/{username}", h.GiteaRemoveCollaborator)
+					})
 				})
 				r.Get("/teams", h.GiteaListRepoTeams)
 
-				// Tier 3: Webhooks
+				// Tier 3: Webhooks (all mutations require stack:deploy)
 				r.Route("/hooks", func(r chi.Router) {
 					r.Get("/", h.GiteaListHooks)
-					r.Post("/", h.GiteaCreateHook)
 					r.Get("/{hookId}", h.GiteaGetHook)
-					r.Patch("/{hookId}", h.GiteaEditHook)
-					r.Delete("/{hookId}", h.GiteaDeleteHook)
-					r.Post("/{hookId}/test", h.GiteaTestHook)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Post("/", h.GiteaCreateHook)
+						r.Patch("/{hookId}", h.GiteaEditHook)
+						r.Delete("/{hookId}", h.GiteaDeleteHook)
+						r.Post("/{hookId}/test", h.GiteaTestHook)
+					})
 				})
 
-				// Tier 3: Deploy Keys
+				// Tier 3: Deploy Keys (all mutations require stack:deploy)
 				r.Route("/keys", func(r chi.Router) {
 					r.Get("/", h.GiteaListDeployKeys)
-					r.Post("/", h.GiteaCreateDeployKey)
 					r.Get("/{keyId}", h.GiteaGetDeployKey)
-					r.Delete("/{keyId}", h.GiteaDeleteDeployKey)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Post("/", h.GiteaCreateDeployKey)
+						r.Delete("/{keyId}", h.GiteaDeleteDeployKey)
+					})
 				})
 
-				// Tier 3: Releases
+				// Tier 3: Releases (all mutations require stack:deploy)
 				r.Route("/releases", func(r chi.Router) {
 					r.Get("/", h.GiteaListReleases)
-					r.Post("/", h.GiteaCreateRelease)
 					r.Get("/latest", h.GiteaGetLatestRelease)
 					r.Get("/tags/{tag}", h.GiteaGetReleaseByTag)
 					r.Get("/{releaseId}", h.GiteaGetRelease)
-					r.Patch("/{releaseId}", h.GiteaEditRelease)
-					r.Delete("/{releaseId}", h.GiteaDeleteRelease)
 					r.Get("/{releaseId}/assets", h.GiteaListReleaseAssets)
-					r.Delete("/{releaseId}/assets/{assetId}", h.GiteaDeleteReleaseAsset)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Post("/", h.GiteaCreateRelease)
+						r.Patch("/{releaseId}", h.GiteaEditRelease)
+						r.Delete("/{releaseId}", h.GiteaDeleteRelease)
+						r.Delete("/{releaseId}/assets/{assetId}", h.GiteaDeleteReleaseAsset)
+					})
 				})
 
 				// Tier 3: Actions / CI
@@ -904,72 +984,81 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 					r.Get("/runs", h.GiteaListActionRuns)
 					r.Get("/runs/{runId}", h.GiteaGetActionRun)
 					r.Get("/runs/{runId}/jobs", h.GiteaListActionJobs)
-					r.Post("/runs/{runId}/cancel", h.GiteaCancelActionRun)
-					r.Post("/runs/{runId}/rerun", h.GiteaRerunActionRun)
 					r.Get("/jobs/{jobId}/logs", h.GiteaGetActionJobLogs)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Post("/runs/{runId}/cancel", h.GiteaCancelActionRun)
+						r.Post("/runs/{runId}/rerun", h.GiteaRerunActionRun)
+					})
 				})
 
 				// Tier 3: Commit Status (for CI integrations)
 				r.Get("/commits/{sha}/status", h.GiteaGetCombinedStatus)
 				r.Get("/commits/{sha}/statuses", h.GiteaListCommitStatuses)
-				r.Post("/statuses/{sha}", h.GiteaCreateCommitStatus)
+				r.With(m.RequirePermission("stack:deploy")).
+					Post("/statuses/{sha}", h.GiteaCreateCommitStatus)
 			})
 		})
 
-		// Unified Git Integration (supports Gitea, GitHub, GitLab)
+		// Unified Git Integration (supports Gitea, GitHub, GitLab) - Business+ feature
 		r.Route("/integrations/git", func(r chi.Router) {
 			r.Use(m.RequirePermission("stack:view"))
+			r.Use(h.requireFeature(license.FeatureGitSync))
 			r.Get("/", h.GitListTempl) // Reuses GiteaTempl for now
 
-			// Connection management (multi-provider)
-			r.Post("/connections", h.GitCreateConnection)
+			// Connection management (mutations require stack:deploy)
 			r.Route("/connections/{id}", func(r chi.Router) {
-				r.Post("/test", h.GitTestConnection)
-				r.Post("/sync", h.GitSyncRepos)
-				r.Post("/delete", h.GitDeleteConnection)
 				r.Get("/templates", h.GitTemplates)
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("stack:deploy"))
+					r.Post("/test", h.GitTestConnection)
+					r.Post("/sync", h.GitSyncRepos)
+					r.Post("/delete", h.GitDeleteConnection)
+				})
 			})
+			r.With(m.RequirePermission("stack:deploy")).Post("/connections", h.GitCreateConnection)
 
 			// Repository operations (multi-provider)
-			r.Post("/repos", h.GitCreateRepo)
+			r.With(m.RequirePermission("stack:deploy")).Post("/repos", h.GitCreateRepo)
 			r.Route("/repos/{id}", func(r chi.Router) {
+				// Read-only
 				r.Get("/", h.GitRepoDetail)
 				r.Get("/files", h.GitRepoFiles)
 				r.Get("/file", h.GitFileContent)
-				r.Post("/file", h.GitFileSave)
-				r.Post("/edit", h.GitEditRepo)
-				r.Post("/delete", h.GitDeleteRepo)
-
-				// Branches
 				r.Get("/branches", h.GitListBranches)
-				r.Post("/branches", h.GitCreateBranch)
-				r.Delete("/branches/{name}", h.GitDeleteBranch)
-
-				// Tags
 				r.Get("/tags", h.GitListTags)
-
-				// Commits
 				r.Get("/commits", h.GitListCommits)
 				r.Get("/commits/{sha}", h.GitGetCommit)
+				r.Get("/releases", h.GitListReleases)
+				r.Get("/releases/latest", h.GitGetLatestRelease)
+
+				// Mutations require stack:deploy
+				r.Group(func(r chi.Router) {
+					r.Use(m.RequirePermission("stack:deploy"))
+					r.Post("/file", h.GitFileSave)
+					r.Post("/edit", h.GitEditRepo)
+					r.Post("/delete", h.GitDeleteRepo)
+					r.Post("/branches", h.GitCreateBranch)
+					r.Delete("/branches/{name}", h.GitDeleteBranch)
+				})
 
 				// Pull Requests / Merge Requests
 				r.Route("/pulls", func(r chi.Router) {
 					r.Get("/", h.GitListPRs)
-					r.Post("/", h.GitCreatePR)
 					r.Get("/{number}", h.GitGetPR)
-					r.Post("/{number}/merge", h.GitMergePR)
+					r.Group(func(r chi.Router) {
+						r.Use(m.RequirePermission("stack:deploy"))
+						r.Post("/", h.GitCreatePR)
+						r.Post("/{number}/merge", h.GitMergePR)
+					})
 				})
 
 				// Issues
 				r.Route("/issues", func(r chi.Router) {
 					r.Get("/", h.GitListIssues)
-					r.Post("/", h.GitCreateIssue)
 					r.Get("/{number}", h.GitGetIssue)
+					r.With(m.RequirePermission("stack:deploy")).Post("/", h.GitCreateIssue)
 				})
-
-				// Releases
-				r.Get("/releases", h.GitListReleases)
-				r.Get("/releases/latest", h.GitGetLatestRelease)
 			})
 		})
 
@@ -1024,19 +1113,76 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 		// Tools
 		r.Route("/tools", func(r chi.Router) {
+			// Dev Tools index
+			r.Get("/", h.ToolsIndex)
+
+			// Crypto & Security
+			r.Get("/token", h.ToolToken)
+			r.Get("/hash", h.ToolHash)
+			r.Get("/bcrypt", h.ToolBcrypt)
+			r.Get("/hmac", h.ToolHMAC)
+			r.Get("/encrypt", h.ToolEncrypt)
+			r.Get("/password", h.ToolPassword)
+			r.Get("/rsa", h.ToolRSA)
+
+			// Generators
+			r.Get("/uuid", h.ToolUUID)
+			r.Get("/ulid", h.ToolULID)
+			r.Get("/lorem", h.ToolLorem)
+			r.Get("/crontab", h.ToolCrontab)
+			r.Get("/port", h.ToolPort)
+			r.Get("/qrcode", h.ToolQRCode)
+			r.Get("/mac-gen", h.ToolMACGen)
+
+			// Encoders & Decoders
+			r.Get("/base64", h.ToolBase64)
+			r.Get("/url-encode", h.ToolURLEncode)
+			r.Get("/html-entities", h.ToolHTMLEntities)
+			r.Get("/jwt", h.ToolJWT)
+			r.Get("/basic-auth", h.ToolBasicAuth)
+
+			// Converters
+			r.Get("/json-yaml", h.ToolJSONYAML)
+			r.Get("/json-toml", h.ToolJSONTOML)
+			r.Get("/yaml-toml", h.ToolYAMLTOML)
+			r.Get("/base-converter", h.ToolBaseConverter)
+			r.Get("/color", h.ToolColor)
+			r.Get("/datetime", h.ToolDatetime)
+			r.Get("/case", h.ToolCase)
+			r.Get("/ipv4-convert", h.ToolIPv4Convert)
+
+			// Formatters
+			r.Get("/json-format", h.ToolJSONFormat)
+			r.Get("/sql-format", h.ToolSQLFormat)
+			r.Get("/xml-format", h.ToolXMLFormat)
+			r.Get("/yaml-format", h.ToolYAMLFormat)
+			r.Get("/json-csv", h.ToolJSONCSV)
+
+			// Network
+			r.Get("/subnet", h.ToolSubnet)
+			r.Get("/ipv6-ula", h.ToolIPv6ULA)
+			r.Get("/mac-lookup", h.ToolMACLookup)
+
+			// Text & Dev
+			r.Get("/regex", h.ToolRegex)
+			r.Get("/text-diff", h.ToolTextDiff)
+			r.Get("/text-stats", h.ToolTextStats)
+			r.Get("/slugify", h.ToolSlugify)
+			r.Get("/docker-compose", h.ToolDockerCompose)
+			r.Get("/chmod", h.ToolChmod)
+			r.Get("/http-codes", h.ToolHTTPCodes)
+			r.Get("/markdown", h.ToolMarkdown)
+
 			// Command Cheat Sheet (any authenticated user)
 			r.Get("/cheatsheet", h.CheatSheet)
 			r.Post("/cheatsheet/custom", h.CheatSheetCustomCreate)
 			r.Delete("/cheatsheet/custom/{id}", h.CheatSheetCustomDelete)
 
-			// Ansible Inventory Browser (host:view)
-			r.Group(func(r chi.Router) {
-				r.Use(m.RequirePermission("host:view"))
-				r.Get("/ansible", h.AnsibleInventory)
-				r.Post("/ansible/upload", h.AnsibleInventoryUpload)
-				r.Post("/ansible/parse", h.AnsibleInventoryParse)
-				r.Delete("/ansible/{id}", h.AnsibleInventoryDelete)
-			})
+			// Ansible Inventory Browser
+			r.Get("/ansible", h.AnsibleInventory)
+			r.Post("/ansible/upload", h.AnsibleInventoryUpload)
+			r.Post("/ansible/parse", h.AnsibleInventoryParse)
+			r.Delete("/ansible/{id}", h.AnsibleInventoryDelete)
 
 			// Network Packet Capture (host:update - highly sensitive)
 			r.Group(func(r chi.Router) {
@@ -1046,15 +1192,19 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/capture/start", h.PacketCaptureStart)
 				r.Post("/capture/{id}/stop", h.PacketCaptureStop)
 				r.Get("/capture/{id}/download", h.PacketCaptureDownload)
+				r.Get("/capture/{id}/analyze", h.PacketCaptureAnalyze)
 				r.Delete("/capture/{id}", h.PacketCaptureDelete)
 			})
 		})
 
-		// Topology
-		r.Get("/topology", h.TopologyTempl)
+		// Calendar
+		r.Get("/calendar", h.CalendarPage)
 
-		// Dependencies (full dependency graph)
-		r.Get("/dependencies", h.DependenciesTempl)
+		// Topology (requires container:view — shows container relationships)
+		r.With(m.RequirePermission("container:view")).Get("/topology", h.TopologyTempl)
+
+		// Dependencies (full dependency graph — requires container:view)
+		r.With(m.RequirePermission("container:view")).Get("/dependencies", h.DependenciesTempl)
 
 		// Lifecycle Policies (automated resource cleanup) - requires settings:update
 		r.Route("/lifecycle", func(r chi.Router) {
@@ -1080,8 +1230,9 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Post("/{id}/delete", h.QuotaDelete)
 		})
 
-		// GitOps Pipelines (automated deployment from Git) - requires stack:deploy
+		// GitOps Pipelines (automated deployment from Git) - Business+ feature
 		r.Route("/gitops", func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureGitSync))
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("stack:view"))
 				r.Get("/", h.GitOpsTempl)
@@ -1158,7 +1309,69 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/{id}/acknowledge", h.VulnAcknowledge)
 				r.Post("/{id}/resolve", h.VulnResolve)
 				r.Post("/{id}/accept", h.VulnAcceptRisk)
+				r.Post("/{id}/assign", h.VulnAssign)
 			})
+		})
+
+		// Vulnerability Management API — JSON endpoints for AJAX operations
+		r.Route("/api/v1/vulnerabilities", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:view"))
+				r.Get("/dashboard", h.VulnDashboardAPI)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:scan"))
+				r.Put("/{id}/assign", h.VulnAssignAPI)
+				r.Put("/{id}/resolve", h.VulnResolveAPI)
+			})
+		})
+
+		// Change Management Audit Trail (Phase 3 Enterprise)
+		r.Route("/changes", func(r chi.Router) {
+			r.Use(m.RequirePermission("audit:view"))
+			r.Get("/", h.ChangesTempl)
+			r.Get("/export/csv", h.ChangeExportCSV)
+		})
+
+		// Change Management API
+		r.Route("/api/v1/changes", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("audit:view"))
+				r.Get("/", h.ChangeListAPI)
+				r.Get("/stats", h.ChangeStatsAPI)
+				r.Get("/{id}", h.ChangeDetailAPI)
+				r.Get("/resource/{resourceType}/{resourceID}", h.ChangeResourceAPI)
+			})
+		})
+
+		// Drift Detection (Phase 4 Enterprise)
+		r.Route("/drift", func(r chi.Router) {
+			r.Use(m.RequirePermission("audit:view"))
+			r.Get("/", h.DriftTempl)
+			r.Post("/{id}/accept", h.DriftAcceptAPI)
+			r.Post("/{id}/remediate", h.DriftRemediateAPI)
+		})
+
+		// Drift Detection API
+		r.Route("/api/v1/drift", func(r chi.Router) {
+			r.Use(m.RequirePermission("audit:view"))
+			r.Get("/", h.DriftListAPI)
+			r.Get("/stats", h.DriftStatsAPI)
+			r.Get("/{id}", h.DriftDetailAPI)
+		})
+
+		// Resource Optimization (Phase 5 Enterprise)
+		r.Route("/resource-optimization", func(r chi.Router) {
+			r.Use(m.RequirePermission("audit:view"))
+			r.Get("/", h.CostOptTempl)
+			r.Post("/{id}/apply", h.CostOptApplyAPI)
+			r.Post("/{id}/dismiss", h.CostOptDismissAPI)
+		})
+
+		// Resource Optimization API
+		r.Route("/api/v1/resource-optimization", func(r chi.Router) {
+			r.Use(m.RequirePermission("audit:view"))
+			r.Get("/stats", h.CostOptStatsAPI)
 		})
 
 		// Access Control Audit (admin only)
@@ -1186,28 +1399,32 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		})
 
 		// Ports
-		r.Get("/ports", h.PortsTempl)
+		r.With(m.RequirePermission("container:view")).Get("/ports", h.PortsTempl)
 
 		// Events
-		r.Get("/events", h.EventsTempl)
+		r.With(m.RequirePermission("container:view")).Get("/events", h.EventsTempl)
 
 		// Centralized Logs
-		r.Get("/logs", h.LogsPageTempl)
+		r.With(m.RequirePermission("container:view")).Get("/logs", h.LogsPageTempl)
 
-		// Log Management
+		// Log Management (requires security:view)
 		r.Route("/logs/management", func(r chi.Router) {
+			r.Use(m.RequirePermission("security:view"))
 			r.Get("/", h.LogManagement)
 		})
 
-		// Log Uploads
+		// Log Uploads (requires security:scan for mutations)
 		r.Route("/logs/uploads", func(r chi.Router) {
-			r.Post("/", h.LogUpload)
-			r.Get("/{id}", h.LogUploadAnalyze)
-			r.Delete("/{id}", h.LogUploadDelete)
+			r.With(m.RequirePermission("security:view")).Get("/{id}", h.LogUploadAnalyze)
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("security:scan"))
+				r.Post("/", h.LogUpload)
+				r.Delete("/{id}", h.LogUploadDelete)
+			})
 		})
 
 		// Log Search API
-		r.Get("/api/logs/search", h.LogSearchAPI)
+		r.With(m.RequirePermission("security:view")).Get("/api/logs/search", h.LogSearchAPI)
 
 		// Notifications
 		r.Route("/notifications", func(r chi.Router) {
@@ -1219,7 +1436,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 		// Profile
 		r.Route("/profile", func(r chi.Router) {
-			r.Get("/", h.ProfileTempl)
+			r.Get("/", h.ProfilePage)
 			r.Post("/", h.UpdateProfile)
 			r.Post("/password", h.UpdatePassword)
 			r.Put("/preferences", h.UpdatePreferences)
@@ -1319,8 +1536,9 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/{id}/disable", h.OAuthProviderDisable)
 			})
 
-			// LDAP Providers (Admin)
+			// LDAP Providers (Admin — requires FeatureLDAP, disabled in CE)
 			r.Route("/admin/ldap", func(r chi.Router) {
+				r.Use(h.requireFeature(license.FeatureLDAP))
 				r.Get("/", h.LDAPProvidersTempl)
 				r.Post("/", h.LDAPProviderCreate)
 				r.Get("/{id}", h.LDAPProviderEditTempl)
@@ -1331,8 +1549,9 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/{id}/test", h.LDAPProviderTest)
 			})
 
-			// Notification Channels (Admin)
+			// Notification Channels (Admin, Business+ feature)
 			r.Route("/admin/notifications", func(r chi.Router) {
+				r.Use(h.requireFeature(license.FeatureMultiNotification))
 				r.Get("/channels", h.NotificationChannelsTempl)
 				r.Post("/channels", h.NotificationChannelCreate)
 				r.Get("/channels/{name}/edit", h.NotificationChannelEditTempl)
@@ -1340,8 +1559,9 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/channels/{name}/test", h.NotificationChannelTest)
 			})
 
-			// Roles (Admin)
+			// Roles (Admin, Business+ feature)
 			r.Route("/admin/roles", func(r chi.Router) {
+				r.Use(h.requireFeature(license.FeatureCustomRoles))
 				// View - require role:view
 				r.Group(func(r chi.Router) {
 					r.Use(m.RequirePermission("role:view"))
@@ -1376,12 +1596,20 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 				r.Post("/", h.RegistryCreate)
 				r.Post("/{id}/update", h.RegistryUpdate)
 				r.Post("/{id}/delete", h.RegistryDelete)
+				// Registry browsing (Business+ feature)
+				r.Group(func(r chi.Router) {
+					r.Use(h.requireFeature(license.FeatureRegistryBrowsing))
+					r.Get("/{id}/browse", h.RegistryBrowse)
+					r.Get("/{id}/browse/repos/*", h.RegistryRepoTags)
+					r.Get("/{id}/manifest", h.RegistryTagManifest)
+				})
 			})
 
 			// Webhooks & Auto-Deploy (Admin)
 			r.Route("/webhooks", func(r chi.Router) {
 				r.Get("/", h.WebhooksTempl)
 				r.Post("/", h.WebhookCreate)
+				r.Post("/{id}/update", h.WebhookUpdate)
 				r.Post("/{id}/delete", h.WebhookDelete)
 				r.Post("/autodeploy", h.AutoDeployCreate)
 				r.Post("/autodeploy/{id}/delete", h.AutoDeployDelete)
@@ -1398,6 +1626,10 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			// Jobs (Admin)
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", h.JobsTempl)
+				r.Get("/scheduled", h.ScheduledJobsTempl)
+				r.Post("/scheduled", h.ScheduledJobCreate)
+				r.Post("/scheduled/{id}/delete", h.ScheduledJobDelete)
+				r.Post("/scheduled/{id}/run", h.ScheduledJobRunNow)
 				r.Get("/{id}", h.JobDetailTempl)
 				r.Post("/{id}/cancel", h.JobCancel)
 				r.Post("/{id}/delete", h.JobDelete)
@@ -1411,8 +1643,16 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			})
 		})
 
+		// About page (any authenticated user can view; backup/restore requires admin)
+		r.Route("/about", func(r chi.Router) {
+			r.Get("/", h.AboutTempl)
+			r.With(m.AdminRequired).Post("/instance-backup", h.InstanceBackup)
+			r.With(m.AdminRequired).Post("/instance-restore", h.InstanceRestore)
+		})
+
 		// WebSocket endpoints (with per-resource permissions)
 		r.Route("/ws", func(r chi.Router) {
+			r.Use(WebSocketRateLimit())
 			r.With(m.RequirePermission("container:logs")).Get("/logs/{id}", h.WSContainerLogs)
 			r.With(m.RequirePermission("container:exec")).Get("/exec/{id}", h.WSContainerExec)
 			r.With(m.RequirePermission("container:view")).Get("/stats/{id}", h.WSContainerStats)
@@ -1435,14 +1675,68 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Get("/download/*", h.APIHostDownloadFile)
 			r.Post("/mkdir/*", h.APIHostMkdir)
 			r.Delete("/file/*", h.APIHostDeleteFile)
+			r.Post("/validate-user", h.APIHostValidateUser)
 		})
 
-		// Terminal session history API
+		// Terminal session history API (requires container:view — exposes session metadata)
 		r.Route("/api/v1/terminal", func(r chi.Router) {
+			r.Use(m.RequirePermission("container:view"))
 			r.Get("/sessions", h.APITerminalSessionList)
 			r.Get("/sessions/active", h.APITerminalSessionsActive)
 			r.Get("/sessions/{id}", h.APITerminalSessionGet)
 			r.Get("/sessions/target/{type}/{id}", h.APITerminalSessionsByTarget)
+		})
+
+		// ================================================================
+		// Enterprise Feature Pages (HTML rendering)
+		// ================================================================
+
+		// OPA Policies page (Enterprise license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureOPAPolicies))
+			r.With(m.RequirePermission("security:view")).Get("/opa-policies", h.OPAPoliciesPageTempl)
+		})
+
+		// Runtime Security page (Enterprise license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureRuntimeSecurity))
+			r.With(m.RequirePermission("security:view")).Get("/runtime-security", h.RuntimeSecurityPageTempl)
+		})
+
+		// Image Signing page (Enterprise license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureImageSigning))
+			r.With(m.RequirePermission("image:view")).Get("/image-signing", h.ImageSigningPageTempl)
+		})
+
+		// Custom Dashboards page (Enterprise license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureCustomDashboards))
+			r.With(m.RequirePermission("host:view")).Get("/custom-dashboards", h.CustomDashboardsPageTempl)
+		})
+
+		// Git Sync page (Business+ license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureGitSync))
+			r.With(m.RequirePermission("stack:view")).Get("/git-sync", h.GitSyncPageTempl)
+		})
+
+		// Ephemeral Environments page (Enterprise license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureEphemeralEnvs))
+			r.With(m.RequirePermission("stack:view")).Get("/ephemeral-environments", h.EphemeralEnvsPageTempl)
+		})
+
+		// Manifest Builder page (Enterprise license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureManifestBuilder))
+			r.With(m.RequirePermission("stack:view")).Get("/manifest-builder", h.ManifestBuilderPageTempl)
+		})
+
+		// Compliance Frameworks page (Enterprise license)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireFeature(license.FeatureCompliance))
+			r.With(m.RequirePermission("security:view")).Get("/compliance-frameworks", h.ComplianceFrameworksPageTempl)
 		})
 
 		// ================================================================
@@ -1452,23 +1746,33 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Compliance frameworks (Enterprise license)
 		r.Route("/api/v1/compliance", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureCompliance))
-			r.Get("/frameworks", h.ComplianceFrameworksTempl)
-			r.Post("/frameworks/{id}/assess", h.ComplianceFrameworkAssess)
-			r.Get("/assessments/{assessmentId}/report", h.ComplianceFrameworkReport)
-			r.Post("/frameworks/seed", h.ComplianceFrameworkSeed)
+			// Framework CRUD
+			r.With(m.RequirePermission("security:view")).Get("/frameworks", h.ComplianceFrameworksTempl)
+			r.With(m.RequirePermission("security:view")).Get("/frameworks/{id}/status", h.ComplianceFrameworkStatus)
+			r.With(m.RequirePermission("security:view")).Get("/frameworks/{id}/controls", h.ComplianceFrameworkControls)
+			r.With(m.RequirePermission("security:view")).Get("/frameworks/{id}/assessments", h.ComplianceFrameworkAssessments)
+			r.With(m.RequirePermission("security:scan")).Post("/frameworks/{id}/assess", h.ComplianceFrameworkAssess)
+			r.With(m.AdminRequired).Post("/frameworks/seed", h.ComplianceFrameworkSeed)
+			// Controls
+			r.With(m.RequirePermission("security:scan")).Put("/controls/{id}/status", h.ComplianceControlUpdateStatus)
+			// Assessments & reports
+			r.With(m.RequirePermission("security:view")).Get("/assessments/{assessmentId}/report", h.ComplianceFrameworkReport)
+			r.With(m.RequirePermission("security:view")).Get("/assessments/{id}/evidence", h.ComplianceEvidenceList)
+			r.With(m.RequirePermission("security:scan")).Post("/assessments/{id}/evidence", h.ComplianceEvidenceCreate)
 		})
 
 		// OPA policy engine (Enterprise license)
 		r.Route("/api/v1/opa", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureOPAPolicies))
-			r.Get("/policies", h.OPAPoliciesJSON)
-			r.Post("/evaluate/container/{id}", h.OPAPolicyEvaluateContainer)
-			r.Post("/policies/seed", h.OPAPolicySeed)
+			r.With(m.RequirePermission("security:view")).Get("/policies", h.OPAPoliciesJSON)
+			r.With(m.RequirePermission("security:scan")).Post("/evaluate/container/{id}", h.OPAPolicyEvaluateContainer)
+			r.With(m.AdminRequired).Post("/policies/seed", h.OPAPolicySeed)
 		})
 
 		// Log aggregation and search (Enterprise license)
 		r.Route("/api/v1/logs", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureLogAggregation))
+			r.Use(m.RequirePermission("security:view"))
 			r.Get("/search", h.LogSearchJSON)
 			r.Get("/stats", h.LogStatsJSON)
 		})
@@ -1476,27 +1780,47 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Image signing and verification (Enterprise license)
 		r.Route("/api/v1/images/signing", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureImageSigning))
-			r.Get("/signatures", h.ImageSignaturesJSON)
-			r.Get("/verify", h.ImageVerifyJSON)
-			r.Get("/trust-policies", h.ImageTrustPoliciesJSON)
-			r.Post("/trust-policies/seed", h.ImageSignSeed)
+			r.With(m.RequirePermission("image:view")).Get("/signatures", h.ImageSignaturesJSON)
+			r.With(m.RequirePermission("image:view")).Get("/verify", h.ImageVerifyJSON)
+			r.With(m.RequirePermission("image:view")).Get("/trust-policies", h.ImageTrustPoliciesJSON)
+			r.With(m.AdminRequired).Post("/trust-policies/seed", h.ImageSignSeed)
 		})
 
 		// Runtime security (Enterprise license)
 		r.Route("/api/v1/runtime-security", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureRuntimeSecurity))
-			r.Get("/events", h.RuntimeEventsJSON)
-			r.Post("/events/{id}/acknowledge", h.RuntimeEventAcknowledge)
-			r.Get("/dashboard", h.RuntimeDashboardJSON)
-			r.Get("/rules", h.RuntimeRulesJSON)
-			r.Post("/rules/seed", h.RuntimeSeedRules)
-			r.Post("/monitor", h.RuntimeMonitorAll)
+			r.With(m.RequirePermission("security:view")).Get("/events", h.RuntimeEventsJSON)
+			r.With(m.RequirePermission("security:scan")).Post("/events/{id}/acknowledge", h.RuntimeEventAcknowledge)
+			r.With(m.RequirePermission("security:view")).Get("/dashboard", h.RuntimeDashboardJSON)
+			r.With(m.RequirePermission("security:view")).Get("/rules", h.RuntimeRulesJSON)
+			r.With(m.AdminRequired).Post("/rules/seed", h.RuntimeSeedRules)
+			r.With(m.RequirePermission("security:scan")).Post("/monitor", h.RuntimeMonitorAll)
 		})
 
-		// Dashboard layouts (Enterprise license)
+		// Dashboard layouts and widgets (Enterprise license)
 		r.Route("/api/v1/dashboards", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureCustomDashboards))
+			r.Use(m.RequirePermission("host:view"))
+
+			// Layouts
 			r.Get("/layouts", h.DashboardLayoutsJSON)
+			r.With(m.OperatorRequired).Post("/layouts", h.DashboardLayoutCreateJSON)
+			r.Route("/layouts/{layoutID}", func(r chi.Router) {
+				r.Get("/", h.DashboardLayoutGetJSON)
+				r.With(m.OperatorRequired).Put("/", h.DashboardLayoutUpdateJSON)
+				r.With(m.OperatorRequired).Delete("/", h.DashboardLayoutDeleteJSON)
+
+				// Widgets within a layout
+				r.Get("/widgets", h.DashboardWidgetsJSON)
+				r.With(m.OperatorRequired).Post("/widgets", h.DashboardWidgetCreateJSON)
+			})
+
+			// Widget direct operations
+			r.Route("/widgets/{widgetID}", func(r chi.Router) {
+				r.Use(m.OperatorRequired)
+				r.Put("/", h.DashboardWidgetUpdateJSON)
+				r.Delete("/", h.DashboardWidgetDeleteJSON)
+			})
 		})
 
 		// ================================================================
@@ -1506,26 +1830,30 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Bidirectional Git Sync
 		r.Route("/api/v1/git-sync", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureGitSync))
+			r.Use(m.RequirePermission("stack:view"))
 			r.Get("/configs", h.GitSyncConfigsJSON)
-			r.Post("/configs", h.GitSyncConfigCreate)
+			r.With(m.OperatorRequired).Post("/configs", h.GitSyncConfigCreate)
 			r.Get("/configs/{id}", h.GitSyncConfigGet)
-			r.Delete("/configs/{id}", h.GitSyncConfigDelete)
-			r.Post("/configs/{id}/toggle", h.GitSyncConfigToggle)
+			r.With(m.OperatorRequired).Delete("/configs/{id}", h.GitSyncConfigDelete)
+			r.With(m.OperatorRequired).Post("/configs/{id}/toggle", h.GitSyncConfigToggle)
+			r.With(m.OperatorRequired).Post("/configs/{id}/trigger", h.GitSyncTrigger)
 			r.Get("/configs/{id}/events", h.GitSyncEventsJSON)
 			r.Get("/configs/{id}/conflicts", h.GitSyncConflictsJSON)
-			r.Post("/conflicts/{conflictId}/resolve", h.GitSyncConflictResolve)
+			r.With(m.OperatorRequired).Post("/conflicts/{conflictId}/resolve", h.GitSyncConflictResolve)
 			r.Get("/stats", h.GitSyncStatsJSON)
 		})
 
 		// Branch-based Ephemeral Environments
 		r.Route("/api/v1/ephemeral", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureEphemeralEnvs))
+			r.Use(m.RequirePermission("container:view"))
 			r.Get("/environments", h.EphemeralEnvsJSON)
-			r.Post("/environments", h.EphemeralEnvCreate)
+			r.With(m.OperatorRequired).Post("/environments", h.EphemeralEnvCreate)
 			r.Get("/environments/{id}", h.EphemeralEnvGet)
-			r.Post("/environments/{id}/stop", h.EphemeralEnvStop)
-			r.Delete("/environments/{id}", h.EphemeralEnvDestroy)
-			r.Post("/environments/{id}/extend", h.EphemeralEnvExtendTTL)
+			r.With(m.OperatorRequired).Post("/environments/{id}/provision", h.EphemeralEnvProvision)
+			r.With(m.OperatorRequired).Post("/environments/{id}/stop", h.EphemeralEnvStop)
+			r.With(m.OperatorRequired).Delete("/environments/{id}", h.EphemeralEnvDestroy)
+			r.With(m.OperatorRequired).Post("/environments/{id}/extend", h.EphemeralEnvExtendTTL)
 			r.Get("/environments/{id}/logs", h.EphemeralEnvLogsJSON)
 			r.Get("/dashboard", h.EphemeralEnvDashboardJSON)
 		})
@@ -1533,42 +1861,46 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 		// Visual GitOps Manifest Builder
 		r.Route("/api/v1/manifests", func(r chi.Router) {
 			r.Use(h.requireFeature(license.FeatureManifestBuilder))
+			r.Use(m.RequirePermission("stack:view"))
 			// Templates
 			r.Get("/templates", h.ManifestTemplatesJSON)
-			r.Post("/templates", h.ManifestTemplateCreate)
+			r.With(m.OperatorRequired).Post("/templates", h.ManifestTemplateCreate)
 			r.Get("/templates/categories", h.ManifestTemplateCategoriesJSON)
 			r.Get("/templates/{id}", h.ManifestTemplateGet)
-			r.Delete("/templates/{id}", h.ManifestTemplateDelete)
-			r.Post("/templates/{id}/render", h.ManifestTemplateRender)
+			r.With(m.OperatorRequired).Delete("/templates/{id}", h.ManifestTemplateDelete)
+			r.With(m.OperatorRequired).Post("/templates/{id}/render", h.ManifestTemplateRender)
 			// Builder sessions
 			r.Get("/sessions", h.ManifestSessionsJSON)
-			r.Post("/sessions", h.ManifestSessionCreate)
+			r.With(m.OperatorRequired).Post("/sessions", h.ManifestSessionCreate)
 			r.Get("/sessions/{id}", h.ManifestSessionGet)
-			r.Put("/sessions/{id}", h.ManifestSessionUpdate)
-			r.Delete("/sessions/{id}", h.ManifestSessionDelete)
-			r.Post("/sessions/{id}/save", h.ManifestSessionSave)
+			r.With(m.OperatorRequired).Put("/sessions/{id}", h.ManifestSessionUpdate)
+			r.With(m.OperatorRequired).Delete("/sessions/{id}", h.ManifestSessionDelete)
+			r.With(m.OperatorRequired).Post("/sessions/{id}/save", h.ManifestSessionSave)
 			// Generation & validation
-			r.Post("/generate", h.ManifestGenerateJSON)
-			r.Post("/validate", h.ManifestValidateJSON)
+			r.With(m.OperatorRequired).Post("/generate", h.ManifestGenerateJSON)
+			r.With(m.OperatorRequired).Post("/validate", h.ManifestValidateJSON)
 			// Component library
 			r.Get("/components", h.ManifestComponentsJSON)
 			// Seed data
-			r.Post("/seed", h.ManifestSeedJSON)
+			r.With(m.AdminRequired).Post("/seed", h.ManifestSeedJSON)
 		})
 
 		// HTMX Partials — canonical prefix for all partial/fragment endpoints.
 		// Monitoring partials moved here from /monitoring/* (INT-DTO-L1).
 		r.Route("/partials", func(r chi.Router) {
-			r.Get("/stats", h.StatsPartial)
-			r.Get("/containers", h.ContainersPartialTempl)
-			r.Get("/container/{id}", h.ContainerRowPartial)
-			r.Get("/images", h.ImagesPartial)
-			r.Get("/events", h.EventsPartialTempl)
+			r.With(m.RequirePermission("container:view")).Get("/stats", h.StatsPartial)
 			r.Get("/notifications", h.NotificationsPartialTempl)
-			r.Get("/search", h.SearchPartialTempl)
+			r.With(m.RequirePermission("container:view")).Get("/search", h.SearchPartialTempl)
+
+			// Container/image/event partials require appropriate permissions
+			r.With(m.RequirePermission("container:view")).Get("/containers", h.ContainersPartialTempl)
+			r.With(m.RequirePermission("container:view")).Get("/container/{id}", h.ContainerRowPartial)
+			r.With(m.RequirePermission("image:view")).Get("/images", h.ImagesPartial)
+			r.With(m.RequirePermission("container:view")).Get("/events", h.EventsPartialTempl)
 
 			// Monitoring partials (moved from /monitoring/*)
 			r.Route("/monitoring", func(r chi.Router) {
+				r.Use(m.RequirePermission("host:view"))
 				r.Get("/host", h.MonitoringHostPartial)
 				r.Get("/containers", h.MonitoringContainersPartial)
 				r.Get("/history", h.MonitoringHistoryJSON)

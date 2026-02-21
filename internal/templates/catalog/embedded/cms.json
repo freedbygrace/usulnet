@@ -1,0 +1,55 @@
+{
+  "templates": [
+    {
+      "name": "WordPress",
+      "description": "Popular open-source content management system",
+      "image": "wordpress:latest",
+      "ports": ["80/tcp"],
+      "volumes": [{"container": "/var/www/html"}],
+      "env": [
+        {"name": "WORDPRESS_DB_HOST", "label": "Database host", "required": true},
+        {"name": "WORDPRESS_DB_USER", "label": "Database user", "default": "wordpress"},
+        {"name": "WORDPRESS_DB_PASSWORD", "label": "Database password", "required": true, "type": "password"},
+        {"name": "WORDPRESS_DB_NAME", "label": "Database name", "default": "wordpress"}
+      ]
+    },
+    {
+      "name": "Ghost",
+      "description": "Professional publishing and newsletter platform",
+      "image": "ghost:5-alpine",
+      "ports": ["2368/tcp"],
+      "volumes": [{"container": "/var/lib/ghost/content"}],
+      "env": [
+        {"name": "url", "label": "Blog URL", "default": "http://localhost:2368"}
+      ]
+    },
+    {
+      "name": "Wiki.js",
+      "description": "Modern wiki platform with powerful editing tools",
+      "image": "ghcr.io/requarks/wiki:2",
+      "ports": ["3000/tcp"],
+      "env": [
+        {"name": "DB_TYPE", "label": "Database type", "default": "sqlite"},
+        {"name": "DB_HOST", "label": "Database host"},
+        {"name": "DB_PORT", "label": "Database port"},
+        {"name": "DB_USER", "label": "Database user"},
+        {"name": "DB_PASS", "label": "Database password", "type": "password"},
+        {"name": "DB_NAME", "label": "Database name"}
+      ]
+    },
+    {
+      "name": "BookStack",
+      "description": "Simple, self-hosted documentation platform",
+      "image": "linuxserver/bookstack:latest",
+      "ports": ["6875/tcp"],
+      "volumes": [{"container": "/config"}],
+      "env": [
+        {"name": "APP_URL", "label": "Application URL", "required": true},
+        {"name": "DB_HOST", "label": "Database host", "required": true},
+        {"name": "DB_USER", "label": "Database user", "default": "bookstack"},
+        {"name": "DB_PASS", "label": "Database password", "required": true, "type": "password"},
+        {"name": "DB_DATABASE", "label": "Database name", "default": "bookstackapp"}
+      ]
+    }
+  ]
+}

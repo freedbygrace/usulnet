@@ -5,6 +5,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -13,16 +14,32 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	auditsvc "github.com/fr4nsys/usulnet/internal/services/audit"
 	aatmpl "github.com/fr4nsys/usulnet/internal/web/templates/pages/accessaudit"
 )
 
-// In-memory access audit cache. Entries persist across requests but not across restarts.
-// The API layer's audit service (internal/services/audit) handles persistent DB logging
-// via the audit_log table. This cache is for the access-audit dashboard's fast rendering.
+// maxAccessAuditEntries is the maximum number of in-memory audit entries to keep.
+const maxAccessAuditEntries = 500
+
+// In-memory access audit cache for fast dashboard rendering.
+// Events are also persisted to PostgreSQL via the audit service when configured.
 var (
 	accessAuditEntries []accessAuditEntry
 	accessAuditMu      sync.RWMutex
+
+	// auditDBService persists access events to the database when set.
+	// Configured during app startup via SetAuditDBService.
+	auditDBService   *auditsvc.Service
+	auditDBServiceMu sync.RWMutex
 )
+
+// SetAuditDBService sets the audit service for database persistence of access events.
+// Called during app startup to wire the persistent audit log.
+func SetAuditDBService(svc *auditsvc.Service) {
+	auditDBServiceMu.Lock()
+	defer auditDBServiceMu.Unlock()
+	auditDBService = svc
+}
 
 type accessAuditEntry struct {
 	ID           string
@@ -40,11 +57,11 @@ type accessAuditEntry struct {
 	CreatedAt    time.Time
 }
 
-// RecordAccessEvent records an access event to the in-memory audit log.
-// This can be called from other handlers to track actions.
+// RecordAccessEvent records an access event to the in-memory audit log
+// and persists it to the database via the audit service if configured.
 func RecordAccessEvent(userName, userID, action, resourceType, resourceID, resourceName, details, ip, ua string, success bool, errMsg string) {
+	// In-memory cache for fast dashboard rendering
 	accessAuditMu.Lock()
-	defer accessAuditMu.Unlock()
 	accessAuditEntries = append([]accessAuditEntry{{
 		ID:           uuid.New().String(),
 		UserName:     userName,
@@ -60,8 +77,43 @@ func RecordAccessEvent(userName, userID, action, resourceType, resourceID, resou
 		ErrorMsg:     errMsg,
 		CreatedAt:    time.Now(),
 	}}, accessAuditEntries...)
-	if len(accessAuditEntries) > 10000 {
-		accessAuditEntries = accessAuditEntries[:10000]
+	if len(accessAuditEntries) > maxAccessAuditEntries {
+		accessAuditEntries = accessAuditEntries[:maxAccessAuditEntries]
+	}
+	accessAuditMu.Unlock()
+
+	// Persist to database asynchronously
+	auditDBServiceMu.RLock()
+	svc := auditDBService
+	auditDBServiceMu.RUnlock()
+	if svc != nil {
+		entry := auditsvc.LogEntry{
+			Username:     &userName,
+			Action:       action,
+			ResourceType: resourceType,
+			ResourceID:   &resourceID,
+			IPAddress:    &ip,
+			UserAgent:    &ua,
+			Success:      success,
+		}
+		if userID != "" {
+			if parsed, err := uuid.Parse(userID); err == nil {
+				entry.UserID = &parsed
+			}
+		}
+		if resourceName != "" || details != "" {
+			entry.Details = map[string]any{}
+			if resourceName != "" {
+				entry.Details["resource_name"] = resourceName
+			}
+			if details != "" {
+				entry.Details["details"] = details
+			}
+		}
+		if errMsg != "" {
+			entry.ErrorMsg = &errMsg
+		}
+		svc.LogAsync(context.Background(), entry)
 	}
 }
 

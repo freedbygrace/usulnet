@@ -127,8 +127,8 @@ func main() {
 		}
 	}()
 
-	// Run agent
-	if err := ag.Run(ctx); err != nil && err != context.Canceled {
+	// Run agent (nil ready channel — standalone agent doesn't need readiness signal)
+	if err := ag.Run(ctx, nil); err != nil && err != context.Canceled {
 		log.Fatal("Agent failed", "error", err)
 	}
 

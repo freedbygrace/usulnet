@@ -1,0 +1,51 @@
+{
+  "templates": [
+    {
+      "name": "Home Assistant",
+      "description": "Open-source home automation platform",
+      "image": "homeassistant/home-assistant:latest",
+      "ports": ["8123/tcp"],
+      "volumes": [{"container": "/config"}],
+      "env": [
+        {"name": "TZ", "label": "Timezone", "default": "UTC"}
+      ],
+      "note": "For full hardware access, use host network mode"
+    },
+    {
+      "name": "Mosquitto",
+      "description": "Lightweight MQTT message broker",
+      "image": "eclipse-mosquitto:2",
+      "ports": ["1883/tcp", "9001/tcp"],
+      "volumes": [
+        {"container": "/mosquitto/config"},
+        {"container": "/mosquitto/data"},
+        {"container": "/mosquitto/log"}
+      ]
+    },
+    {
+      "name": "Node-RED",
+      "description": "Flow-based programming tool for IoT automation",
+      "image": "nodered/node-red:latest",
+      "ports": ["1880/tcp"],
+      "volumes": [{"container": "/data"}]
+    },
+    {
+      "name": "Zigbee2MQTT",
+      "description": "Bridge Zigbee devices to MQTT without proprietary bridges",
+      "image": "koenkk/zigbee2mqtt:latest",
+      "ports": ["8080/tcp"],
+      "volumes": [{"container": "/app/data"}],
+      "env": [
+        {"name": "TZ", "label": "Timezone", "default": "UTC"}
+      ],
+      "note": "Requires a Zigbee adapter (USB dongle) and Mosquitto MQTT broker"
+    },
+    {
+      "name": "ESPHome",
+      "description": "System to control ESP8266/ESP32 microcontrollers",
+      "image": "ghcr.io/esphome/esphome:latest",
+      "ports": ["6052/tcp"],
+      "volumes": [{"container": "/config"}]
+    }
+  ]
+}

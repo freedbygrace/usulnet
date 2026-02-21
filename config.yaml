@@ -21,20 +21,30 @@ server:
     # cert_file: ""             # Custom certificate path (overrides auto-generated)
     # key_file: ""              # Custom private key path
     # data_dir: ""              # PKI data directory (default: <storage.path>/pki)
+  redirect_https: true          # Redirect HTTP→HTTPS when TLS is enabled (health checks still work over HTTP)
 
 # Database (PostgreSQL)
 database:
-  url: "postgres://usulnet:usulnet_dev@postgres:5432/usulnet?sslmode=disable"
+  url: "postgres://usulnet:usulnet_dev@postgres:5432/usulnet"
+  ssl_mode: "require"           # Options: disable, prefer, require, verify-full
+  # ssl_rootcert: ""            # CA certificate for server verification (required for verify-full)
+  # ssl_cert: ""                # Client certificate (optional, for mTLS)
+  # ssl_key: ""                 # Client private key (optional, for mTLS)
   max_open_conns: 25
   max_idle_conns: 10
   conn_max_lifetime: "30m"
   conn_max_idle_time: "5m"
 
 # Redis (caching and sessions)
+# TLS is auto-configured when server.tls.enabled=true (default).
+# The redis:// URL is automatically upgraded to rediss:// when TLS is active.
 redis:
   url: "redis://redis:6379"
-  password: ""
-  db: 0
+  # tls_enabled: true           # Auto-enabled by PKI when server.tls.enabled=true
+  # tls_skip_verify: true       # Skip CA verification (default for self-signed)
+  # tls_ca_file: ""             # CA certificate for server verification
+  # tls_cert_file: ""           # Client certificate (optional, for mTLS)
+  # tls_key_file: ""            # Client private key (optional, for mTLS)
 
 # NATS (messaging)
 nats:
@@ -55,13 +65,14 @@ nats:
 # Security (JWT, encryption, passwords)
 # This is the section the app validates - NOT "auth"
 security:
-  # Generate with: openssl rand -hex 32
-  jwt_secret: "edbdbc0721315fc2529c04509d65c62e7c51ce9b10941078f2fae131acfb0e96"
+  # REQUIRED: Generate with: openssl rand -hex 32
+  # DO NOT use the example values — generate unique secrets for each deployment.
+  jwt_secret: ""
   jwt_expiry: "24h"
   refresh_expiry: "168h"
-  # Generate with: openssl rand -hex 32 (must be 64 hex chars = 32 bytes)
-  config_encryption_key: "ed2cb601a830465890822d80d13668530b5af3c1c372799310339e8daf02e2e6"
-  cookie_secure: false
+  # REQUIRED: Generate with: openssl rand -hex 32 (must be 64 hex chars = 32 bytes)
+  config_encryption_key: ""
+  cookie_secure: true
   cookie_samesite: "lax"
   password_min_length: 8
 

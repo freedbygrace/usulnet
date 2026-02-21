@@ -110,11 +110,18 @@ templ Events(data EventsData) {
 
 		<script>
 			(function() {
+				function escapeHtml(str) {
+					if (!str) return '';
+					return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+				}
+
 				const eventsList = document.getElementById('events-list');
 				const emptyState = document.getElementById('empty-state');
 				const wsStatus = document.getElementById('ws-status');
 				let ws = null;
 				let activeFilter = '';
+				let reconnectAttempts = 0;
+				const MAX_RECONNECT_ATTEMPTS = 5;
 
 				const iconMap = {
 					container: 'fa-box', image: 'fa-layer-group',
@@ -133,6 +140,7 @@ templ Events(data EventsData) {
 					ws = new WebSocket(`${protocol}//${window.location.host}/ws/events`);
 
 					ws.onopen = function() {
+						reconnectAttempts = 0;
 						wsStatus.classList.add('hidden');
 					};
 
@@ -145,10 +153,18 @@ templ Events(data EventsData) {
 						} catch(err) {}
 					};
 
-					ws.onclose = function() {
-						wsStatus.textContent = 'Disconnected from event stream. Reconnecting...';
+					ws.onclose = function(e) {
+						if (e.code === 1000 || e.code === 1001) return;
+						if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+							wsStatus.textContent = 'Event stream connection lost. Please refresh the page.';
+							wsStatus.classList.remove('hidden');
+							return;
+						}
+						const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+						reconnectAttempts++;
+						wsStatus.textContent = 'Disconnected from event stream. Reconnecting in ' + (delay / 1000) + 's...';
 						wsStatus.classList.remove('hidden');
-						setTimeout(connectWS, 3000);
+						setTimeout(connectWS, delay);
 					};
 
 					ws.onerror = function() {
@@ -163,18 +179,18 @@ templ Events(data EventsData) {
 					const color = colorMap[msg.action] || 'text-blue-400';
 					const display = activeFilter && msg.event_type !== activeFilter ? 'none' : '';
 
-					const html = `<div class="p-4 flex items-start gap-4" data-event-type="${msg.event_type}" style="display:${display}">
+					const html = `<div class="p-4 flex items-start gap-4" data-event-type="${escapeHtml(msg.event_type)}" style="display:${display}">
 						<div class="w-10 h-10 rounded-lg flex items-center justify-center bg-dark-700 ${color}">
 							<i class="fas ${icon}"></i>
 						</div>
 						<div class="flex-1 min-w-0">
 							<div class="flex items-center gap-2 mb-1">
-								<span class="font-medium ${color}">${msg.action}</span>
-								<span class="text-gray-400">${msg.event_type}</span>
-								<span class="text-white font-medium truncate">${msg.actor_name || ''}</span>
+								<span class="font-medium ${color}">${escapeHtml(msg.action)}</span>
+								<span class="text-gray-400">${escapeHtml(msg.event_type)}</span>
+								<span class="text-white font-medium truncate">${escapeHtml(msg.actor_name)}</span>
 							</div>
-							<p class="text-sm text-gray-400">${msg.message || ''}</p>
-							<div class="text-xs text-gray-500 mt-1">${msg.time_human || msg.timestamp || ''}</div>
+							<p class="text-sm text-gray-400">${escapeHtml(msg.message)}</p>
+							<div class="text-xs text-gray-500 mt-1">${escapeHtml(msg.time_human || msg.timestamp)}</div>
 						</div>
 					</div>`;
 					eventsList.insertAdjacentHTML('afterbegin', html);

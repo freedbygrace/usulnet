@@ -56,6 +56,9 @@ func containerToView(c *models.Container) ContainerView {
 		}
 	}
 
+	// Extract health status from Docker status string (e.g. "Up 2 hours (healthy)")
+	health := extractHealthStatus(c.Status)
+
 	view := ContainerView{
 		ID:              c.ID,
 		ShortID:         shortID(c.ID),
@@ -65,7 +68,7 @@ func containerToView(c *models.Container) ContainerView {
 		ImageShort:      shortImage(c.Image),
 		State:           string(c.State),
 		Status:          c.Status,
-		Health:          "",
+		Health:          health,
 		Created:         created,
 		CreatedHuman:    humanTime(created),
 		Networks:        networks,
@@ -99,6 +102,11 @@ func containerToView(c *models.Container) ContainerView {
 			Mode:        m.Mode,
 			RW:          m.RW,
 		})
+	}
+
+	// Environment variables (model stores variable names only, not values)
+	for _, envName := range c.EnvVars {
+		view.Env = append(view.Env, EnvView{Key: envName})
 	}
 
 	return view
@@ -150,11 +158,9 @@ func volumeToView(v *models.Volume) VolumeView {
 		inUse = refCount > 0
 	}
 
-	// Build UsedBy slice from RefCount (names not available from volume API)
+	// UsedBy is populated by the adapter layer via container cross-reference.
+	// The volume API only provides a RefCount, not actual container names.
 	var usedBy []string
-	for i := int64(0); i < refCount; i++ {
-		usedBy = append(usedBy, fmt.Sprintf("container-%d", i+1))
-	}
 
 	return VolumeView{
 		Name:         v.Name,
@@ -224,9 +230,11 @@ func stackToView(s *models.Stack) StackView {
 		return StackView{}
 	}
 
-	return StackView{
+	view := StackView{
 		ID:           s.ID.String(),
 		Name:         s.Name,
+		Type:         string(s.Type),
+		HostID:       s.HostID.String(),
 		Status:       string(s.Status),
 		ServiceCount: s.ServiceCount,
 		RunningCount: s.RunningCount,
@@ -236,6 +244,16 @@ func stackToView(s *models.Stack) StackView {
 		CreatedHuman: humanTime(s.CreatedAt),
 		UpdatedHuman: humanTime(s.UpdatedAt),
 	}
+	if s.GitRepo != nil {
+		view.GitRepo = *s.GitRepo
+	}
+	if s.GitBranch != nil {
+		view.GitBranch = *s.GitBranch
+	}
+	if s.GitCommit != nil {
+		view.GitCommit = *s.GitCommit
+	}
+	return view
 }
 
 // ============================================================================
@@ -355,6 +373,22 @@ func issueToView(i *models.SecurityIssue) IssueView {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+// extractHealthStatus extracts health status from Docker's human-readable status string.
+// Docker includes health info in parentheses, e.g. "Up 2 hours (healthy)", "Up 5 min (unhealthy)".
+func extractHealthStatus(status string) string {
+	lower := strings.ToLower(status)
+	switch {
+	case strings.Contains(lower, "(healthy)"):
+		return "healthy"
+	case strings.Contains(lower, "(unhealthy)"):
+		return "unhealthy"
+	case strings.Contains(lower, "(health: starting)"):
+		return "starting"
+	default:
+		return ""
+	}
+}
 
 func shortID(id string) string {
 	// Remove sha256: prefix if present

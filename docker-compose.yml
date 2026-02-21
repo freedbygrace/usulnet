@@ -42,8 +42,10 @@ services:
     container_name: usulnet
     restart: unless-stopped
     ports:
-      - "${USULNET_HTTP_PORT:-8080}:8080"    # HTTP
-      - "${USULNET_HTTPS_PORT:-7443}:7443"   # HTTPS (auto-TLS)
+      # Port 8080 (HTTP) is kept internal for health checks and HTTP→HTTPS redirect.
+      # Uncomment the line below only if you need direct HTTP access.
+      # - "${USULNET_HTTP_PORT:-8080}:8080"  # HTTP (not exposed by default)
+      - "${USULNET_HTTPS_PORT:-7443}:7443"   # HTTPS (auto-TLS, default entry point)
     volumes:
       # Docker socket for container management (required)
       - /var/run/docker.sock:/var/run/docker.sock
@@ -63,8 +65,10 @@ services:
       - USULNET_MODE=${USULNET_MODE:-standalone}
 
       # --- Infrastructure connections ---
-      - USULNET_DATABASE_URL=postgres://${DB_USER:-usulnet}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-usulnet}?sslmode=disable
-      - USULNET_REDIS_URL=redis://redis:6379
+      # sslmode=require: encrypted connection, no CA cert verification (self-signed default).
+      # Override to verify-full if you mount your own CA cert.
+      - USULNET_DATABASE_URL=postgres://${DB_USER:-usulnet}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-usulnet}?sslmode=require
+      - USULNET_REDIS_URL=rediss://redis:6379
       - USULNET_NATS_URL=nats://nats:4222
 
       # --- Security (MUST be changed in production) ---
@@ -184,32 +188,51 @@ services:
     image: postgres:16-alpine
     container_name: usulnet-postgres
     restart: unless-stopped
+    # SSL is always enabled. A self-signed ECDSA P-256 cert is generated on
+    # every startup — no external files or init containers required.
+    # To use your own certificate, uncomment the volume below and place
+    # postgres-server.crt / postgres-server.key inside the host directory.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        apk add --no-cache openssl >/dev/null 2>&1
+        mkdir -p /tmp/pg-certs
+        if [ -f /certs-src/postgres-server.crt ] && [ -f /certs-src/postgres-server.key ]; then
+          cp /certs-src/postgres-server.crt /tmp/pg-certs/server.crt
+          cp /certs-src/postgres-server.key /tmp/pg-certs/server.key
+        else
+          openssl req -new -x509 -days 3650 -nodes \
+            -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+            -subj "/CN=postgres/O=usulnet" \
+            -keyout /tmp/pg-certs/server.key \
+            -out /tmp/pg-certs/server.crt 2>/dev/null
+        fi
+        chown 70:70 /tmp/pg-certs/server.key /tmp/pg-certs/server.crt
+        chmod 600 /tmp/pg-certs/server.key
+        chmod 644 /tmp/pg-certs/server.crt
+        exec docker-entrypoint.sh postgres \
+          -c ssl=on \
+          -c ssl_cert_file=/tmp/pg-certs/server.crt \
+          -c ssl_key_file=/tmp/pg-certs/server.key \
+          -c shared_buffers=128MB \
+          -c work_mem=8MB \
+          -c maintenance_work_mem=64MB \
+          -c effective_cache_size=256MB \
+          -c max_connections=100 \
+          -c wal_buffers=4MB \
+          -c checkpoint_completion_target=0.9 \
+          -c log_min_duration_statement=1000
     environment:
       POSTGRES_USER: ${DB_USER:-usulnet}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME:-usulnet}
-      # Performance tuning for containerized PostgreSQL
       POSTGRES_INITDB_ARGS: "--data-checksums"
-    command:
-      - "postgres"
-      - "-c"
-      - "shared_buffers=128MB"
-      - "-c"
-      - "work_mem=8MB"
-      - "-c"
-      - "maintenance_work_mem=64MB"
-      - "-c"
-      - "effective_cache_size=256MB"
-      - "-c"
-      - "max_connections=100"
-      - "-c"
-      - "wal_buffers=4MB"
-      - "-c"
-      - "checkpoint_completion_target=0.9"
-      - "-c"
-      - "log_min_duration_statement=1000"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Optional: mount your own TLS certs to use sslmode=verify-full
+      # - ${PG_CERTS_DIR:-./certs}:/certs-src:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-usulnet} -d ${DB_NAME:-usulnet}"]
       interval: 10s
@@ -234,29 +257,52 @@ services:
     # Access via: docker exec -it usulnet-postgres psql -U usulnet
 
   # ---------------------------------------------------------------------------
-  # Redis 8 — Sessions, Cache & JWT Blacklist
+  # Redis 8 — Sessions, Cache & JWT Blacklist (TLS encrypted by default)
   # ---------------------------------------------------------------------------
   redis:
     image: redis:8-alpine
     container_name: usulnet-redis
     restart: unless-stopped
-    command:
-      - "redis-server"
-      - "--appendonly"
-      - "yes"
-      - "--maxmemory"
-      - "256mb"
-      - "--maxmemory-policy"
-      - "allkeys-lru"
-      - "--save"
-      - "60"
-      - "1000"
-      - "--tcp-backlog"
-      - "511"
+    # TLS is always enabled. A self-signed ECDSA P-256 cert is generated on
+    # every startup — no external files or init containers required.
+    # To use your own certificate, uncomment the volume below and place
+    # redis-server.crt / redis-server.key inside the host directory.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        apk add --no-cache openssl >/dev/null 2>&1
+        mkdir -p /tmp/redis-certs
+        if [ -f /certs-src/redis-server.crt ] && [ -f /certs-src/redis-server.key ]; then
+          cp /certs-src/redis-server.crt /tmp/redis-certs/server.crt
+          cp /certs-src/redis-server.key /tmp/redis-certs/server.key
+        else
+          openssl req -new -x509 -days 3650 -nodes \
+            -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+            -subj "/CN=redis/O=usulnet" \
+            -keyout /tmp/redis-certs/server.key \
+            -out /tmp/redis-certs/server.crt 2>/dev/null
+        fi
+        chmod 600 /tmp/redis-certs/server.key
+        chmod 644 /tmp/redis-certs/server.crt
+        exec redis-server \
+          --tls-port 6379 \
+          --port 0 \
+          --tls-cert-file /tmp/redis-certs/server.crt \
+          --tls-key-file /tmp/redis-certs/server.key \
+          --tls-auth-clients no \
+          --appendonly yes \
+          --maxmemory 256mb \
+          --maxmemory-policy allkeys-lru \
+          --save "60 1000" \
+          --tcp-backlog 511
     volumes:
       - redis_data:/data
+      # Optional: mount your own TLS certs for CA-verified connections
+      # - ${REDIS_CERTS_DIR:-./certs}:/certs-src:ro
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--tls", "--insecure", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5

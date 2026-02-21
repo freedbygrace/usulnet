@@ -97,9 +97,19 @@ type Service struct {
 	blacklistMu  sync.RWMutex
 	jwtBlacklist JWTBlacklist
 
+	// Optional: TOTP validator for 2FA verification
+	totpMu        sync.RWMutex
+	totpValidator TOTPValidator
+
 	// Optional: LDAP and OAuth providers (injected separately)
+	providerMu     sync.RWMutex
 	ldapProviders  []LDAPProvider
 	oauthProviders map[string]OAuthProvider
+}
+
+// TOTPValidator validates TOTP codes for a user.
+type TOTPValidator interface {
+	ValidateTOTPCode(ctx context.Context, userID uuid.UUID, code string) (bool, error)
 }
 
 // LDAPProvider interface for LDAP authentication.
@@ -124,6 +134,9 @@ type OAuthProvider interface {
 	Exchange(ctx context.Context, code string) (*OAuthUser, error)
 	GetName() string
 	IsEnabled() bool
+	// AutoProvisionEnabled returns true if this provider should auto-create
+	// users on first OAuth login. If false, users must be pre-created.
+	AutoProvisionEnabled() bool
 }
 
 // OAuthUser represents a user authenticated via OAuth.
@@ -175,6 +188,26 @@ func (s *Service) HasJWTBlacklist() bool {
 	s.blacklistMu.RLock()
 	defer s.blacklistMu.RUnlock()
 	return s.jwtBlacklist != nil
+}
+
+// SetTOTPValidator sets the TOTP validator for 2FA verification.
+// Thread-safe: may be called after startup.
+func (s *Service) SetTOTPValidator(v TOTPValidator) {
+	s.totpMu.Lock()
+	s.totpValidator = v
+	s.totpMu.Unlock()
+}
+
+// ValidateTOTPCode validates a TOTP code for a user.
+// Returns (false, nil) if TOTP is not configured.
+func (s *Service) ValidateTOTPCode(ctx context.Context, userID uuid.UUID, code string) (bool, error) {
+	s.totpMu.RLock()
+	v := s.totpValidator
+	s.totpMu.RUnlock()
+	if v == nil {
+		return false, errors.New("TOTP validation not configured")
+	}
+	return v.ValidateTOTPCode(ctx, userID, code)
 }
 
 // ============================================================================
@@ -254,7 +287,7 @@ func (s *Service) IsTokenBlacklisted(ctx context.Context, tokenString string) (b
 	if claims.ID != "" {
 		blacklisted, err := s.jwtBlacklist.IsBlacklisted(ctx, claims.ID)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("check token blacklist: %w", err)
 		}
 		if blacklisted {
 			return true, nil
@@ -265,7 +298,7 @@ func (s *Service) IsTokenBlacklisted(ctx context.Context, tokenString string) (b
 	if claims.UserID != "" && claims.IssuedAt != nil {
 		blacklisted, err := s.jwtBlacklist.IsUserTokenBlacklisted(ctx, claims.UserID, claims.IssuedAt.Time)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("check user token blacklist: %w", err)
 		}
 		if blacklisted {
 			return true, nil
@@ -283,13 +316,14 @@ func (s *Service) CreateTokenValidator() func(ctx context.Context, tokenString s
 			return nil
 		}
 
-		// Check individual token blacklist
+		// Check individual token blacklist — fail CLOSED on errors:
+		// if Redis is unavailable, deny access rather than accepting
+		// potentially-revoked tokens.
 		if jti != "" {
 			blacklisted, err := s.jwtBlacklist.IsBlacklisted(ctx, jti)
 			if err != nil {
-				s.logger.Warn("Failed to check token blacklist", "error", err)
-				// On error, allow the request (fail open)
-				return nil
+				s.logger.Error("Failed to check token blacklist, denying access", "error", err)
+				return fmt.Errorf("token validation unavailable: %w", err)
 			}
 			if blacklisted {
 				return ErrTokenRevoked
@@ -300,8 +334,8 @@ func (s *Service) CreateTokenValidator() func(ctx context.Context, tokenString s
 		if userID != "" && !issuedAt.IsZero() {
 			blacklisted, err := s.jwtBlacklist.IsUserTokenBlacklisted(ctx, userID, issuedAt)
 			if err != nil {
-				s.logger.Warn("Failed to check user token blacklist", "error", err)
-				return nil
+				s.logger.Error("Failed to check user token blacklist, denying access", "error", err)
+				return fmt.Errorf("token validation unavailable: %w", err)
 			}
 			if blacklisted {
 				return ErrTokenRevoked
@@ -334,6 +368,11 @@ type LoginResult struct {
 	RefreshToken string
 	ExpiresAt    time.Time
 	SessionID    uuid.UUID
+
+	// RequiresTOTP is true when the user has 2FA enabled and the login
+	// was credential-only. The caller must complete TOTP verification
+	// before treating the session as authenticated.
+	RequiresTOTP bool
 }
 
 // Login authenticates a user with username and password.
@@ -350,25 +389,37 @@ func (s *Service) VerifyCredentials(ctx context.Context, input LoginInput) (*mod
 		return nil, ErrInvalidCredentials
 	}
 
-	if !user.IsActive {
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "account disabled")
-		return nil, ErrUserDisabled
-	}
-
 	if user.IsLDAP {
-		// LDAP verification without session creation
+		// LDAP users: check lockout before LDAP bind
+		if user.IsLocked() {
+			s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account locked")
+			return nil, ErrUserLocked
+		}
+		if !user.IsActive {
+			s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account disabled")
+			return nil, ErrUserDisabled
+		}
 		if err := s.verifyLDAPCredentials(ctx, user, input); err != nil {
 			return nil, err
 		}
 		return user, nil
 	}
 
+	// Local users: always run bcrypt first to prevent timing-based
+	// enumeration of account status (active, locked, etc.)
+	passwordValid := crypto.CheckPassword(input.Password, user.PasswordHash)
+
+	if !user.IsActive {
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account disabled")
+		return nil, ErrUserDisabled
+	}
+
 	if user.IsLocked() {
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "account locked")
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account locked")
 		return nil, ErrUserLocked
 	}
 
-	if !crypto.CheckPassword(input.Password, user.PasswordHash) {
+	if !passwordValid {
 		if s.config.MaxLoginAttempts > 0 {
 			if err := s.userRepo.IncrementFailedAttempts(
 				ctx,
@@ -379,7 +430,7 @@ func (s *Service) VerifyCredentials(ctx context.Context, input LoginInput) (*mod
 				s.logger.Error("failed to increment login attempts", "error", err)
 			}
 		}
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "invalid password")
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "invalid password")
 		return nil, ErrInvalidCredentials
 	}
 
@@ -388,11 +439,16 @@ func (s *Service) VerifyCredentials(ctx context.Context, input LoginInput) (*mod
 
 // verifyLDAPCredentials checks LDAP bind without creating a session.
 func (s *Service) verifyLDAPCredentials(ctx context.Context, user *models.User, input LoginInput) error {
-	if len(s.ldapProviders) == 0 {
+	s.providerMu.RLock()
+	providers := make([]LDAPProvider, len(s.ldapProviders))
+	copy(providers, s.ldapProviders)
+	s.providerMu.RUnlock()
+
+	if len(providers) == 0 {
 		return errors.New("LDAP authentication not configured")
 	}
 
-	for _, provider := range s.ldapProviders {
+	for _, provider := range providers {
 		if !provider.IsEnabled() {
 			continue
 		}
@@ -419,7 +475,7 @@ func (s *Service) verifyLDAPCredentials(ctx context.Context, user *models.User, 
 		}
 	}
 
-	s.logLoginAttempt(ctx, user, input.IPAddress, false, "LDAP auth failed")
+	s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "LDAP auth failed")
 	return ErrInvalidCredentials
 }
 
@@ -448,19 +504,23 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResult, er
 		return s.loginLDAP(ctx, user, input)
 	}
 
+	// Always run bcrypt first to prevent timing-based enumeration
+	// of account status (active, locked, etc.)
+	passwordValid := crypto.CheckPassword(input.Password, user.PasswordHash)
+
 	// Check if user can login
 	if !user.IsActive {
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "account disabled")
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account disabled")
 		return nil, ErrUserDisabled
 	}
 
 	if user.IsLocked() {
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "account locked")
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account locked")
 		return nil, ErrUserLocked
 	}
 
-	// Verify password
-	if !crypto.CheckPassword(input.Password, user.PasswordHash) {
+	// Verify password result
+	if !passwordValid {
 		// Increment failed attempts
 		if s.config.MaxLoginAttempts > 0 {
 			if err := s.userRepo.IncrementFailedAttempts(
@@ -473,8 +533,17 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResult, er
 			}
 		}
 
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "invalid password")
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "invalid password")
 		return nil, ErrInvalidCredentials
+	}
+
+	// Check if user has TOTP 2FA enabled — if so, do NOT create a session yet.
+	// The caller must verify the TOTP code and then call CreateSessionForUser.
+	if user.HasTOTP() {
+		return &LoginResult{
+			User:         user,
+			RequiresTOTP: true,
+		}, nil
 	}
 
 	// Success - create session
@@ -498,7 +567,7 @@ func (s *Service) createLoginSession(ctx context.Context, user *models.User, inp
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	s.logLoginAttempt(ctx, user, input.IPAddress, true, "")
+	s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, true, "")
 
 	return &LoginResult{
 		User:         user,
@@ -511,19 +580,30 @@ func (s *Service) createLoginSession(ctx context.Context, user *models.User, inp
 
 // loginLDAP handles login for LDAP users.
 func (s *Service) loginLDAP(ctx context.Context, user *models.User, input LoginInput) (*LoginResult, error) {
-	if len(s.ldapProviders) == 0 {
+	s.providerMu.RLock()
+	providers := make([]LDAPProvider, len(s.ldapProviders))
+	copy(providers, s.ldapProviders)
+	s.providerMu.RUnlock()
+
+	if len(providers) == 0 {
 		return nil, errors.New("LDAP authentication not configured")
 	}
 
 	// Check if user can login
 	if !user.IsActive {
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "account disabled")
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account disabled")
 		return nil, ErrUserDisabled
+	}
+
+	// Enforce application-level lockout for LDAP users too
+	if user.IsLocked() {
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "account locked")
+		return nil, ErrUserLocked
 	}
 
 	// Try LDAP authentication
 	var authenticated bool
-	for _, provider := range s.ldapProviders {
+	for _, provider := range providers {
 		if !provider.IsEnabled() {
 			continue
 		}
@@ -552,8 +632,27 @@ func (s *Service) loginLDAP(ctx context.Context, user *models.User, input LoginI
 	}
 
 	if !authenticated {
-		s.logLoginAttempt(ctx, user, input.IPAddress, false, "LDAP auth failed")
+		// Increment failed attempts for LDAP users too (application-level lockout)
+		if s.config.MaxLoginAttempts > 0 {
+			if err := s.userRepo.IncrementFailedAttempts(
+				ctx,
+				user.ID,
+				s.config.MaxLoginAttempts,
+				s.config.LockoutDuration,
+			); err != nil {
+				s.logger.Error("failed to increment login attempts", "error", err)
+			}
+		}
+		s.logLoginAttempt(ctx, user, input.IPAddress, input.UserAgent, false, "LDAP auth failed")
 		return nil, ErrInvalidCredentials
+	}
+
+	// Check if LDAP user has TOTP enabled — require 2FA before session
+	if user.HasTOTP() {
+		return &LoginResult{
+			User:         user,
+			RequiresTOTP: true,
+		}, nil
 	}
 
 	return s.createLoginSession(ctx, user, input)
@@ -575,7 +674,7 @@ func (s *Service) Refresh(ctx context.Context, input RefreshInput) (*LoginResult
 	// Validate refresh token and get session
 	session, err := s.sessionSvc.ValidateRefreshToken(ctx, input.RefreshToken)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate refresh token: %w", err)
 	}
 
 	// Get user
@@ -598,7 +697,7 @@ func (s *Service) Refresh(ctx context.Context, input RefreshInput) (*LoginResult
 	// Refresh session
 	sessionResult, err := s.sessionSvc.Refresh(ctx, input.RefreshToken, user)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("refresh session: %w", err)
 	}
 
 	return &LoginResult{
@@ -684,7 +783,7 @@ func (s *Service) AuthenticateAPIKey(ctx context.Context, apiKey string) (*model
 	// Get user
 	user, err := s.userRepo.GetByID(ctx, key.UserID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("get user for API key: %w", err)
 	}
 
 	// Check if user can login
@@ -709,13 +808,15 @@ type ChangePasswordInput struct {
 	UserID          uuid.UUID
 	CurrentPassword string
 	NewPassword     string
+	IPAddress       string
+	UserAgent       string
 }
 
 // ChangePassword changes a user's password.
 func (s *Service) ChangePassword(ctx context.Context, input ChangePasswordInput) error {
 	user, err := s.userRepo.GetByID(ctx, input.UserID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get user for password change: %w", err)
 	}
 
 	// LDAP users cannot change password locally
@@ -730,7 +831,7 @@ func (s *Service) ChangePassword(ctx context.Context, input ChangePasswordInput)
 
 	// Validate new password (with username check)
 	if err := s.validatePasswordForUser(input.NewPassword, user.Username); err != nil {
-		return err
+		return fmt.Errorf("validate new password: %w", err)
 	}
 
 	// Hash new password
@@ -741,17 +842,26 @@ func (s *Service) ChangePassword(ctx context.Context, input ChangePasswordInput)
 
 	// Update password
 	if err := s.userRepo.UpdatePassword(ctx, user.ID, newHash); err != nil {
-		return err
+		return fmt.Errorf("update password in database: %w", err)
 	}
 
-	s.logger.Info("password changed", "user_id", user.ID)
+	// Invalidate all sessions and blacklist all tokens on password change.
+	// This ensures a compromised session cannot persist after credential rotation.
+	if _, err := s.sessionSvc.RevokeAllForUser(ctx, user.ID); err != nil {
+		s.logger.Error("failed to revoke sessions after password change", "error", err)
+	}
+	if err := s.BlacklistUserTokens(ctx, user.ID, "password_change"); err != nil {
+		s.logger.Error("failed to blacklist tokens after password change", "error", err)
+	}
+
+	s.logger.Info("password changed", "user_id", user.ID, "ip", input.IPAddress)
 
 	// Audit log
 	s.auditMu.RLock()
 	audit := s.auditSvc
 	s.auditMu.RUnlock()
 	if audit != nil {
-		audit.LogPasswordChange(ctx, user.ID, user.Username, "", "", true)
+		audit.LogPasswordChange(ctx, user.ID, user.Username, input.IPAddress, input.UserAgent, true)
 	}
 
 	return nil
@@ -761,7 +871,7 @@ func (s *Service) ChangePassword(ctx context.Context, input ChangePasswordInput)
 func (s *Service) ResetPassword(ctx context.Context, userID uuid.UUID, newPassword string) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get user for password reset: %w", err)
 	}
 
 	// LDAP users cannot have local password
@@ -771,7 +881,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID uuid.UUID, newPasswo
 
 	// Validate new password
 	if err := s.validatePassword(newPassword); err != nil {
-		return err
+		return fmt.Errorf("validate new password for reset: %w", err)
 	}
 
 	// Hash new password
@@ -782,11 +892,12 @@ func (s *Service) ResetPassword(ctx context.Context, userID uuid.UUID, newPasswo
 
 	// Update password
 	if err := s.userRepo.UpdatePassword(ctx, user.ID, newHash); err != nil {
-		return err
+		return fmt.Errorf("update password in database for reset: %w", err)
 	}
 
-	// Revoke all sessions
+	// Revoke all sessions and blacklist all tokens
 	_, _ = s.sessionSvc.RevokeAllForUser(ctx, userID)
+	_ = s.BlacklistUserTokens(ctx, userID, "password_reset")
 
 	s.logger.Info("password reset", "user_id", userID)
 
@@ -825,12 +936,16 @@ func (s *Service) validatePasswordForUser(password, username string) error {
 
 // RegisterOAuthProvider registers an OAuth provider.
 func (s *Service) RegisterOAuthProvider(name string, provider OAuthProvider) {
+	s.providerMu.Lock()
 	s.oauthProviders[name] = provider
+	s.providerMu.Unlock()
 }
 
 // GetOAuthAuthURL returns the OAuth authorization URL for a provider.
 func (s *Service) GetOAuthAuthURL(providerName, state string) (string, error) {
+	s.providerMu.RLock()
 	provider, ok := s.oauthProviders[providerName]
+	s.providerMu.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("unknown OAuth provider: %s", providerName)
 	}
@@ -844,7 +959,9 @@ func (s *Service) GetOAuthAuthURL(providerName, state string) (string, error) {
 
 // OAuthCallback handles OAuth callback and returns login result.
 func (s *Service) OAuthCallback(ctx context.Context, providerName, code string, input LoginInput) (*LoginResult, error) {
+	s.providerMu.RLock()
 	provider, ok := s.oauthProviders[providerName]
+	s.providerMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("unknown OAuth provider: %s", providerName)
 	}
@@ -862,10 +979,13 @@ func (s *Service) OAuthCallback(ctx context.Context, providerName, code string, 
 	// Find or create user
 	user, err := s.userRepo.GetByUsername(ctx, oauthUser.Username)
 	if err != nil {
-		// Create new user
-		var appErr *apperrors.AppError
-		if !errors.As(err, &appErr) {
+		// Only auto-provision on "not found" errors; propagate all others.
+		if !apperrors.IsNotFoundError(err) {
 			return nil, err
+		}
+
+		if !provider.AutoProvisionEnabled() {
+			return nil, fmt.Errorf("user %q not found and auto-provisioning is disabled for provider %s", oauthUser.Username, providerName)
 		}
 
 		user = &models.User{
@@ -895,6 +1015,16 @@ func (s *Service) OAuthCallback(ctx context.Context, providerName, code string, 
 		return nil, ErrUserDisabled
 	}
 
+	// OAuth users with TOTP enabled must still complete 2FA.
+	// Newly auto-provisioned users won't have TOTP, so this only
+	// applies to existing users who enabled it after initial setup.
+	if user.HasTOTP() {
+		return &LoginResult{
+			User:         user,
+			RequiresTOTP: true,
+		}, nil
+	}
+
 	return s.createLoginSession(ctx, user, input)
 }
 
@@ -904,7 +1034,9 @@ func (s *Service) OAuthCallback(ctx context.Context, providerName, code string, 
 
 // RegisterLDAPProvider registers an LDAP provider.
 func (s *Service) RegisterLDAPProvider(provider LDAPProvider) {
+	s.providerMu.Lock()
 	s.ldapProviders = append(s.ldapProviders, provider)
+	s.providerMu.Unlock()
 }
 
 // SetAuditService sets the audit logger for the auth service.
@@ -923,7 +1055,7 @@ func (s *Service) SetAuditService(auditSvc AuditLogger) {
 func (s *Service) GetUserSessions(ctx context.Context, userID uuid.UUID, currentSessionID uuid.UUID) ([]*SessionInfo, error) {
 	sessions, err := s.sessionSvc.ListActiveForUser(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list active sessions for user: %w", err)
 	}
 
 	return ToSessionInfoList(sessions, currentSessionID), nil
@@ -934,7 +1066,7 @@ func (s *Service) RevokeSession(ctx context.Context, userID, sessionID uuid.UUID
 	// Verify session belongs to user
 	session, err := s.sessionRepo.GetByID(ctx, sessionID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get session for revocation: %w", err)
 	}
 
 	if session.UserID != userID {
@@ -948,18 +1080,20 @@ func (s *Service) RevokeSession(ctx context.Context, userID, sessionID uuid.UUID
 // Audit Logging
 // ============================================================================
 
-func (s *Service) logLoginAttempt(ctx context.Context, user *models.User, ip string, success bool, reason string) {
+func (s *Service) logLoginAttempt(ctx context.Context, user *models.User, ip, userAgent string, success bool, reason string) {
 	if success {
 		s.logger.Info("login successful",
 			"user_id", user.ID,
 			"username", user.Username,
 			"ip", ip,
+			"user_agent", userAgent,
 		)
 	} else {
 		s.logger.Warn("login failed",
 			"user_id", user.ID,
 			"username", user.Username,
 			"ip", ip,
+			"user_agent", userAgent,
 			"reason", reason,
 		)
 	}
@@ -973,7 +1107,24 @@ func (s *Service) logLoginAttempt(ctx context.Context, user *models.User, ip str
 		if reason != "" {
 			errorMsg = &reason
 		}
-		audit.LogLogin(ctx, &user.ID, user.Username, ip, "", success, errorMsg)
+		audit.LogLogin(ctx, &user.ID, user.Username, ip, userAgent, success, errorMsg)
+	}
+}
+
+// LogLogoutEvent records a logout event in the audit log.
+// Called by handlers that have access to the request context (IP, UserAgent).
+func (s *Service) LogLogoutEvent(ctx context.Context, userID uuid.UUID, username, ip, userAgent string) {
+	s.logger.Info("user logged out",
+		"user_id", userID,
+		"username", username,
+		"ip", ip,
+	)
+
+	s.auditMu.RLock()
+	audit := s.auditSvc
+	s.auditMu.RUnlock()
+	if audit != nil {
+		audit.LogLogout(ctx, userID, username, ip, userAgent)
 	}
 }
 

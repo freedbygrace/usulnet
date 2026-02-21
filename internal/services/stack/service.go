@@ -6,8 +6,10 @@
 package stack
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,8 +25,6 @@ import (
 	apperrors "github.com/fr4nsys/usulnet/internal/pkg/errors"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
-	containerservice "github.com/fr4nsys/usulnet/internal/services/container"
-	hostservice "github.com/fr4nsys/usulnet/internal/services/host"
 )
 
 // ServiceConfig contains stack service configuration.
@@ -54,9 +54,9 @@ func DefaultConfig() ServiceConfig {
 
 // Service provides Docker Compose stack management operations.
 type Service struct {
-	repo             *postgres.StackRepository
-	hostService      *hostservice.Service
-	containerService *containerservice.Service
+	repo             StackRepository
+	hostService      HostService
+	containerService ContainerService
 	config           ServiceConfig
 	logger           *logger.Logger
 
@@ -66,9 +66,9 @@ type Service struct {
 
 // NewService creates a new stack service.
 func NewService(
-	repo *postgres.StackRepository,
-	hostService *hostservice.Service,
-	containerService *containerservice.Service,
+	repo StackRepository,
+	hostService HostService,
+	containerService ContainerService,
 	config ServiceConfig,
 	log *logger.Logger,
 ) *Service {
@@ -182,7 +182,7 @@ func (s *Service) GetByName(ctx context.Context, hostID uuid.UUID, name string) 
 func (s *Service) Update(ctx context.Context, id uuid.UUID, input *models.UpdateStackInput) (*models.Stack, error) {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get stack for update: %w", err)
 	}
 
 	// Apply updates
@@ -231,7 +231,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, input *models.Update
 func (s *Service) Delete(ctx context.Context, id uuid.UUID, removeVolumes bool) error {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get stack for delete: %w", err)
 	}
 
 	// Stop stack first if running
@@ -290,7 +290,7 @@ func (s *Service) Deploy(ctx context.Context, id uuid.UUID) (*DeployResult, erro
 
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get stack for deploy: %w", err)
 	}
 
 	// Update status
@@ -343,7 +343,7 @@ func (s *Service) Deploy(ctx context.Context, id uuid.UUID) (*DeployResult, erro
 func (s *Service) Stop(ctx context.Context, id uuid.UUID, removeVolumes bool) error {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get stack for stop: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "down")
@@ -375,7 +375,7 @@ func (s *Service) Stop(ctx context.Context, id uuid.UUID, removeVolumes bool) er
 func (s *Service) Start(ctx context.Context, id uuid.UUID) error {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get stack for start: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "start")
@@ -404,7 +404,7 @@ func (s *Service) Start(ctx context.Context, id uuid.UUID) error {
 func (s *Service) Restart(ctx context.Context, id uuid.UUID) error {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get stack for restart: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "restart")
@@ -431,7 +431,7 @@ func (s *Service) Restart(ctx context.Context, id uuid.UUID) error {
 func (s *Service) Pull(ctx context.Context, id uuid.UUID) (string, error) {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get stack for pull: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "pull")
@@ -457,7 +457,7 @@ func (s *Service) Pull(ctx context.Context, id uuid.UUID) (string, error) {
 func (s *Service) ScaleService(ctx context.Context, id uuid.UUID, service string, replicas int) error {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get stack for scale service: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "up", "-d", "--scale", fmt.Sprintf("%s=%d", service, replicas))
@@ -486,7 +486,7 @@ func (s *Service) ScaleService(ctx context.Context, id uuid.UUID, service string
 func (s *Service) RestartService(ctx context.Context, id uuid.UUID, service string) error {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("get stack for restart service: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "restart", service)
@@ -514,7 +514,7 @@ func (s *Service) RestartService(ctx context.Context, id uuid.UUID, service stri
 func (s *Service) GetServiceLogs(ctx context.Context, id uuid.UUID, service string, tail int) (string, error) {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get stack for service logs: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "logs", "--no-color")
@@ -540,7 +540,7 @@ func (s *Service) GetServiceLogs(ctx context.Context, id uuid.UUID, service stri
 func (s *Service) GetStatus(ctx context.Context, id uuid.UUID) (*models.StackStatusResponse, error) {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get stack for status: %w", err)
 	}
 
 	// FIX: Use StackStatusResponse instead of StackStatus (which is a string type)
@@ -593,7 +593,7 @@ func (s *Service) GetStatus(ctx context.Context, id uuid.UUID) (*models.StackSta
 func (s *Service) GetContainers(ctx context.Context, id uuid.UUID) ([]*models.Container, error) {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get stack for containers: %w", err)
 	}
 
 	// Get containers with the stack label
@@ -662,7 +662,7 @@ func (s *Service) ValidateCompose(ctx context.Context, hostID uuid.UUID, content
 func (s *Service) GetComposeConfig(ctx context.Context, id uuid.UUID) (string, error) {
 	stack, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get stack for compose config: %w", err)
 	}
 
 	args := s.buildComposeArgs(stack, "config")
@@ -684,7 +684,7 @@ func (s *Service) Redeploy(ctx context.Context, id uuid.UUID, input *models.Upda
 	// Update first
 	if input != nil && (input.ComposeFile != nil || input.EnvFile != nil) {
 		if _, err := s.Update(ctx, id, input); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("update stack for redeploy: %w", err)
 		}
 	}
 
@@ -766,6 +766,102 @@ func (s *Service) execCompose(ctx context.Context, stack *models.Stack, args ...
 	return string(output), err
 }
 
+// execComposeStream runs docker compose and streams each output line to logCh.
+// It returns the command error (nil on success).
+func (s *Service) execComposeStream(ctx context.Context, stack *models.Stack, logCh chan<- string, args ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, s.config.DefaultTimeout)
+	defer cancel()
+
+	cmdParts := strings.Fields(s.config.ComposeCommand)
+	cmdName := cmdParts[0]
+	cmdArgs := append(cmdParts[1:], args...)
+
+	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
+	cmd.Dir = s.stackDir(stack.ID)
+	cmd.Env = os.Environ()
+
+	host, err := s.hostService.Get(ctx, stack.HostID)
+	if err == nil && host.EndpointURL != nil {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("DOCKER_HOST=%s", *host.EndpointURL))
+	}
+
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		pw.Close()
+		pr.Close()
+		return err
+	}
+
+	// Read lines in a goroutine so cmd.Wait() can proceed independently.
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			select {
+			case logCh <- line:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	cmdErr := cmd.Wait()
+	pw.Close()
+	<-scanDone
+	pr.Close()
+	return cmdErr
+}
+
+// DeployWithStream creates (if needed) and deploys a stack, streaming log lines
+// to logCh. The channel is closed when the deploy finishes.
+// Returns the DeployResult; an error is only returned for infrastructure failures.
+func (s *Service) DeployWithStream(ctx context.Context, id uuid.UUID, logCh chan<- string) (*DeployResult, error) {
+	// Acquire deploy lock
+	if _, loaded := s.deployMu.LoadOrStore(id.String(), true); loaded {
+		return nil, apperrors.AlreadyExists("stack deployment already in progress")
+	}
+	defer s.deployMu.Delete(id.String())
+
+	stack, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get stack for deploy: %w", err)
+	}
+
+	s.repo.UpdateStatus(ctx, id, models.StackStatusUnknown)
+
+	result := &DeployResult{
+		StackID:   id,
+		StartedAt: time.Now().UTC(),
+	}
+
+	args := s.buildComposeArgs(stack, "up", "-d")
+	if s.config.PullBeforeDeploy {
+		args = append(args, "--pull", "always")
+	}
+
+	err = s.execComposeStream(ctx, stack, logCh, args...)
+	result.FinishedAt = time.Now().UTC()
+
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		s.repo.UpdateStatus(ctx, id, models.StackStatusError)
+		s.logger.Error("stack deploy failed (stream)", "id", id, "name", stack.Name, "error", err)
+		return result, nil
+	}
+
+	result.Success = true
+	s.repo.UpdateStatus(ctx, id, models.StackStatusActive)
+	go s.syncStackContainers(context.Background(), stack)
+	s.logger.Info("stack deployed (stream)", "id", id, "name", stack.Name)
+	return result, nil
+}
+
 func (s *Service) validateComposeContent(content string) error {
 	var compose map[string]interface{}
 	if err := yaml.Unmarshal([]byte(content), &compose); err != nil {
@@ -786,7 +882,7 @@ func (s *Service) parseServices(content string) ([]string, error) {
 	}
 
 	if err := yaml.Unmarshal([]byte(content), &compose); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse compose services: %w", err)
 	}
 
 	services := make([]string, 0, len(compose.Services))
@@ -1039,7 +1135,7 @@ var versionStore = struct {
 func (s *Service) CreateVersion(ctx context.Context, stackID uuid.UUID, comment string, userID *uuid.UUID) (*models.StackVersion, error) {
 	stack, err := s.repo.GetByID(ctx, stackID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get stack for version creation: %w", err)
 	}
 
 	versionStore.Lock()
@@ -1114,7 +1210,7 @@ func (s *Service) DiffVersions(ctx context.Context, stackID uuid.UUID, fromVersi
 		// Compare with current
 		stack, err := s.repo.GetByID(ctx, stackID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get stack for diff (from): %w", err)
 		}
 		fromCompose = stack.ComposeFile
 		fromEnv = stack.EnvFile
@@ -1131,7 +1227,7 @@ func (s *Service) DiffVersions(ctx context.Context, stackID uuid.UUID, fromVersi
 		// Compare with current
 		stack, err := s.repo.GetByID(ctx, stackID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get stack for diff (to): %w", err)
 		}
 		toCompose = stack.ComposeFile
 		toEnv = stack.EnvFile
@@ -1173,7 +1269,7 @@ func (s *Service) DiffVersions(ctx context.Context, stackID uuid.UUID, fromVersi
 func (s *Service) RestoreVersion(ctx context.Context, stackID uuid.UUID, version int, comment string, userID *uuid.UUID) (*models.Stack, error) {
 	v, err := s.GetVersion(ctx, stackID, version)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get version for restore: %w", err)
 	}
 
 	// Create a new version with current state before restoring
@@ -1368,7 +1464,7 @@ type DryRunResult struct {
 func (s *Service) DryRun(ctx context.Context, stackID uuid.UUID) (*DryRunResult, error) {
 	stack, err := s.repo.GetByID(ctx, stackID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get stack for dry run: %w", err)
 	}
 
 	result := &DryRunResult{Valid: true}

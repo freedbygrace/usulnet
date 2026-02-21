@@ -890,7 +890,8 @@ func (s *Scheduler) registerCronJob(job *models.ScheduledJob) error {
 	}
 
 	entryID, err := s.cron.AddFunc(schedule, func() {
-		ctx := context.Background()
+		ctx, cancel := s.callbackCtx()
+		defer cancel()
 		if _, err := s.createJobFromScheduled(ctx, job); err != nil {
 			s.logger.Error("failed to create job from schedule",
 				"scheduled_job_id", job.ID,
@@ -956,11 +957,15 @@ func (s *Scheduler) createJobFromScheduled(ctx context.Context, schedJob *models
 }
 
 func (s *Scheduler) calculateNextRun(schedule string) *time.Time {
-	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	sched, err := parser.Parse(schedule)
+	// Try standard 5-field format first (most common for user-facing input).
+	// The 6-field parser would silently accept 5-field expressions with
+	// incorrect semantics (e.g., "0 2 * * *" → second=0, minute=2 instead
+	// of minute=0, hour=2). This matches the order in backup/service.go.
+	sched, err := cron.ParseStandard(schedule)
 	if err != nil {
-		// Try standard format without seconds
-		sched, err = cron.ParseStandard(schedule)
+		// Fall back to 6-field format with seconds
+		parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		sched, err = parser.Parse(schedule)
 		if err != nil {
 			return nil
 		}

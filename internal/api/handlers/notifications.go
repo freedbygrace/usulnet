@@ -86,10 +86,10 @@ func (h *NotificationHandler) Routes() chi.Router {
 
 // SendNotificationRequest represents a send notification request.
 type SendNotificationRequest struct {
-	Type     string                 `json:"type"`
-	Title    string                 `json:"title,omitempty"`
-	Body     string                 `json:"body,omitempty"`
-	Priority string                 `json:"priority,omitempty"`
+	Type     string                 `json:"type" validate:"required"`
+	Title    string                 `json:"title,omitempty" validate:"omitempty,max=255"`
+	Body     string                 `json:"body,omitempty" validate:"omitempty,max=65536"`
+	Priority string                 `json:"priority,omitempty" validate:"omitempty,oneof=low normal high critical"`
 	Data     map[string]interface{} `json:"data,omitempty"`
 	Channels []string               `json:"channels,omitempty"`
 	Async    bool                   `json:"async,omitempty"`
@@ -97,8 +97,8 @@ type SendNotificationRequest struct {
 
 // RegisterChannelRequest represents a channel registration request.
 type RegisterChannelRequest struct {
-	Type     string                 `json:"type"`
-	Name     string                 `json:"name"`
+	Type     string                 `json:"type" validate:"required"`
+	Name     string                 `json:"name" validate:"required,min=1,max=255"`
 	Enabled  bool                   `json:"enabled"`
 	Settings map[string]interface{} `json:"settings,omitempty"`
 }
@@ -329,7 +329,7 @@ func (h *NotificationHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logs, err := h.notificationService.GetLogs(r.Context(), filter)
+	logs, total, err := h.notificationService.GetLogs(r.Context(), filter)
 	if err != nil {
 		h.HandleError(w, err)
 		return
@@ -362,7 +362,7 @@ func (h *NotificationHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.OK(w, resp)
+	h.OK(w, NewPaginatedResponse(resp, total, pagination))
 }
 
 // GetThrottleStats returns throttle statistics.

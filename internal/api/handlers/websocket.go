@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 
+	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 	"github.com/fr4nsys/usulnet/internal/services/container"
 )
@@ -43,8 +44,7 @@ var WebSocketUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// In production, validate origin against allowed list
-		return true
+		return isAllowedWebSocketOrigin(r)
 	},
 }
 
@@ -66,14 +66,17 @@ func NewWebSocketHandler(containerService *container.Service, log *logger.Logger
 func (h *WebSocketHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Container logs streaming
+	// Container logs streaming (viewer+)
 	r.Get("/containers/{hostID}/{containerID}/logs", h.ContainerLogs)
 
-	// Container stats streaming
+	// Container stats streaming (viewer+)
 	r.Get("/containers/{hostID}/{containerID}/stats", h.ContainerStats)
 
-	// Container exec (create exec instance and return ID)
-	r.Post("/containers/{hostID}/{containerID}/exec", h.ContainerExec)
+	// Container exec — operator+ (allows arbitrary command execution inside containers)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireOperator)
+		r.Post("/containers/{hostID}/{containerID}/exec", h.ContainerExec)
+	})
 
 	return r
 }
@@ -112,11 +115,11 @@ type StatsMessage struct {
 
 // WSExecRequest represents an exec request via WebSocket.
 type WSExecRequest struct {
-	Cmd        []string `json:"cmd"`
+	Cmd        []string `json:"cmd" validate:"required,min=1"`
 	Tty        bool     `json:"tty,omitempty"`
 	Env        []string `json:"env,omitempty"`
-	WorkingDir string   `json:"working_dir,omitempty"`
-	User       string   `json:"user,omitempty"`
+	WorkingDir string   `json:"working_dir,omitempty" validate:"omitempty,max=4096"`
+	User       string   `json:"user,omitempty" validate:"omitempty,max=255"`
 }
 
 // ============================================================================

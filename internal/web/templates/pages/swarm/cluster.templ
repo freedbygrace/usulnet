@@ -58,8 +58,6 @@ templ Cluster(data ClusterData) {
 				if !data.Active {
 					<button
 						hx-post="/swarm/init"
-						hx-target="#swarm-content"
-						hx-swap="outerHTML"
 						hx-confirm="Initialize Docker Swarm on this node? This will make it the cluster manager."
 						class="btn btn-primary"
 					>
@@ -218,8 +216,6 @@ templ clusterActive(data ClusterData) {
 										<button
 											hx-delete={ fmt.Sprintf("/swarm/nodes/%s", node.ID) }
 											hx-confirm={ fmt.Sprintf("Remove node '%s' from Swarm cluster?", node.Hostname) }
-											hx-target="closest tr"
-											hx-swap="outerHTML"
 											class="btn btn-sm btn-ghost text-red-400 hover:text-red-300"
 										>
 											<i class="fas fa-times"></i>
@@ -287,8 +283,6 @@ templ clusterActive(data ClusterData) {
 										<button
 											hx-delete={ fmt.Sprintf("/swarm/services/%s", svc.ID) }
 											hx-confirm={ fmt.Sprintf("Remove service '%s'? This will stop all replicas.", svc.Name) }
-											hx-target="closest tr"
-											hx-swap="outerHTML"
 											class="btn btn-sm btn-ghost text-red-400 hover:text-red-300"
 										>
 											<i class="fas fa-trash"></i>

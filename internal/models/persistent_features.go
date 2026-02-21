@@ -196,24 +196,40 @@ type ContainerTemplateRecord struct {
 
 // TrackedVulnRecord represents a tracked vulnerability.
 type TrackedVulnRecord struct {
-	ID             uuid.UUID  `db:"id"`
-	CVEID          string     `db:"cve_id"`
-	Title          string     `db:"title"`
-	Description    string     `db:"description"`
-	Severity       string     `db:"severity"`
-	CVSSScore      string     `db:"cvss_score"`
-	Package        string     `db:"package"`
-	InstalledVer   string     `db:"installed_ver"`
-	FixedVer       string     `db:"fixed_ver"`
-	AffectedImages []string   `db:"affected_images"`
-	ContainerCount int        `db:"container_count"`
-	Status         string     `db:"status"`
-	Priority       string     `db:"priority"`
-	SLADeadline    *time.Time `db:"sla_deadline"`
-	Assignee       string     `db:"assignee"`
-	Notes          string     `db:"notes"`
-	DetectedAt     time.Time  `db:"detected_at"`
-	ResolvedAt     *time.Time `db:"resolved_at"`
-	CreatedAt      time.Time  `db:"created_at"`
-	UpdatedAt      time.Time  `db:"updated_at"`
+	ID              uuid.UUID  `db:"id"`
+	CVEID           string     `db:"cve_id"`
+	Title           string     `db:"title"`
+	Description     string     `db:"description"`
+	Severity        string     `db:"severity"`
+	CVSSScore       string     `db:"cvss_score"`
+	Package         string     `db:"package"`
+	InstalledVer    string     `db:"installed_ver"`
+	FixedVer        string     `db:"fixed_ver"`
+	AffectedImages  []string   `db:"affected_images"`
+	ContainerCount  int        `db:"container_count"`
+	Status          string     `db:"status"`
+	Priority        string     `db:"priority"`
+	SLADeadline     *time.Time `db:"sla_deadline"`
+	Assignee        string     `db:"assignee"`
+	AssigneeID      *uuid.UUID `db:"assignee_id"`
+	Notes           string     `db:"notes"`
+	ResolutionNotes string     `db:"resolution_notes"`
+	ResolvedScanID  *uuid.UUID `db:"resolved_scan_id"`
+	DetectedAt      time.Time  `db:"detected_at"`
+	ResolvedAt      *time.Time `db:"resolved_at"`
+	CreatedAt       time.Time  `db:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at"`
+}
+
+// VulnWeeklyTrend represents a row from the vuln_weekly_trend view.
+type VulnWeeklyTrend struct {
+	Week             time.Time `db:"week" json:"week"`
+	Opened           int       `db:"opened" json:"opened"`
+	ResolvedSameWeek int       `db:"resolved_same_week" json:"resolved_same_week"`
+}
+
+// ImageVulnCount represents an image and its open vulnerability count.
+type ImageVulnCount struct {
+	Image string `json:"image"`
+	Count int    `json:"count"`
 }

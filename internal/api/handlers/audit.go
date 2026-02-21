@@ -67,20 +67,15 @@ func (h *AuditHandler) Routes() chi.Router {
 	return r
 }
 
-// ListResponse represents the response for listing audit logs
-type AuditListResponse struct {
-	Logs  any `json:"logs"`
-	Total int `json:"total"`
-	Limit int `json:"limit"`
-	Page  int `json:"page"`
-}
-
 // List handles GET /api/v1/audit
+// Supports standard pagination: ?page=N&per_page=N (defaults: page=1, per_page=20, max 100)
+// Also supports filters: ?user_id=, ?action=, ?resource_type=, ?resource_id=, ?since=, ?until=
 func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
-	// Parse query parameters
+	pagination := h.GetPagination(r)
+
 	opts := postgres.AuditLogListOptions{
-		Limit:  h.QueryParamInt(r, "limit", 50),
-		Offset: h.QueryParamInt(r, "offset", 0),
+		Limit:  pagination.PerPage,
+		Offset: pagination.Offset,
 	}
 
 	// Parse optional filters
@@ -120,17 +115,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := 1
-	if opts.Offset > 0 && opts.Limit > 0 {
-		page = (opts.Offset / opts.Limit) + 1
-	}
-
-	h.OK(w, AuditListResponse{
-		Logs:  logs,
-		Total: total,
-		Limit: opts.Limit,
-		Page:  page,
-	})
+	h.OK(w, NewPaginatedResponse(logs, int64(total), pagination))
 }
 
 // GetRecent handles GET /api/v1/audit/recent

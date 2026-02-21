@@ -20,6 +20,13 @@ type Dependencies struct {
 	MetricsService      MetricsService
 	InventoryService    InventoryService
 	NotificationService NotificationService
+	WebhookRepo         WebhookDeliveryRepo
+	RunbookRepo         RunbookRepo
+	ContainerService    ContainerActionService
+	RunbookNotifySvc    RunbookNotificationSender
+	AutoDeployRepo      AutoDeployRuleRepo
+	StackService        StackDeployService
+	TrackedVulnRepo     TrackedVulnRepository
 	Logger              *logger.Logger
 }
 
@@ -79,6 +86,26 @@ func RegisterDefaultWorkers(registry *WorkerRegistry, deps *Dependencies) {
 		registry.Register(NewNotificationWorker(deps.NotificationService, log))
 		registry.Register(NewAlertWorker(deps.NotificationService, log))
 	}
+
+	// Webhook dispatch worker
+	if deps.WebhookRepo != nil {
+		registry.Register(NewWebhookDispatchWorker(deps.WebhookRepo, log))
+	}
+
+	// Runbook execution worker
+	if deps.RunbookRepo != nil {
+		registry.Register(NewRunbookExecuteWorker(deps.RunbookRepo, deps.ContainerService, deps.RunbookNotifySvc, log))
+	}
+
+	// Auto-deploy worker
+	if deps.AutoDeployRepo != nil {
+		registry.Register(NewAutoDeployWorker(deps.AutoDeployRepo, deps.StackService, log))
+	}
+
+	// SLA breach detection worker
+	if deps.TrackedVulnRepo != nil {
+		registry.Register(NewSLABreachWorker(deps.TrackedVulnRepo, deps.NotificationService, log))
+	}
 }
 
 // WorkerInfo holds information about a registered worker
@@ -108,5 +135,9 @@ func GetWorkerDescriptions() []WorkerInfo {
 		{Type: "notification", Description: "Sends notifications through configured channels"},
 		{Type: "alert", Description: "Sends alert notifications based on severity"},
 		{Type: "retention", Description: "Cleans up old metrics, audit logs, sessions, and expired tokens"},
+		{Type: "webhook_dispatch", Description: "Sends HTTP requests for outgoing webhook deliveries"},
+		{Type: "runbook_execute", Description: "Executes runbook steps in background"},
+		{Type: "auto_deploy", Description: "Performs auto-deploy actions triggered by webhooks"},
+		{Type: "sla_breach", Description: "Checks for vulnerability SLA deadline breaches and notifies assignees"},
 	}
 }

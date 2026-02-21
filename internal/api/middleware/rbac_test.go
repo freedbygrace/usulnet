@@ -191,7 +191,7 @@ func TestRequireRoleMiddleware(t *testing.T) {
 			}))
 
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			ctx := context.WithValue(req.Context(), userContextKey, &UserClaims{
+			ctx := context.WithValue(req.Context(), UserContextKey, &UserClaims{
 				UserID: "test-user",
 				Role:   tt.userRole,
 			})
@@ -246,7 +246,7 @@ func TestRequirePermissionMiddleware(t *testing.T) {
 			}))
 
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			ctx := context.WithValue(req.Context(), userContextKey, &UserClaims{
+			ctx := context.WithValue(req.Context(), UserContextKey, &UserClaims{
 				UserID: "test-user",
 				Role:   tt.userRole,
 			})

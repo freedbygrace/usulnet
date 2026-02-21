@@ -71,6 +71,9 @@ func (c *Client) ImageList(ctx context.Context, opts ImageListOptions) ([]Image,
 		return nil, errors.New(errors.CodeDockerConnection, "client is closed")
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
 	// Build filters
 	f := filters.NewArgs()
 	for key, values := range opts.Filters {
@@ -109,6 +112,9 @@ func (c *Client) ImageGet(ctx context.Context, imageID string) (*ImageDetails, e
 	if c.closed {
 		return nil, errors.New(errors.CodeDockerConnection, "client is closed")
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 
 	inspect, _, err := c.cli.ImageInspectWithRaw(ctx, imageID)
 	if err != nil {

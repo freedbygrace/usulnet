@@ -82,10 +82,10 @@ func (h *VolumeHandler) Routes() chi.Router {
 
 // CreateVolumeRequest represents a volume creation request.
 type CreateVolumeRequest struct {
-	Name       string            `json:"name"`
-	Driver     string            `json:"driver,omitempty"`
-	DriverOpts map[string]string `json:"driver_opts,omitempty"`
-	Labels     map[string]string `json:"labels,omitempty"`
+	Name       string            `json:"name" validate:"required,min=1,max=255"`
+	Driver     string            `json:"driver,omitempty" validate:"omitempty,max=255"`
+	DriverOpts map[string]string `json:"driver_opts,omitempty" validate:"omitempty"`
+	Labels     map[string]string `json:"labels,omitempty" validate:"omitempty"`
 }
 
 // VolumeResponse represents a volume in API responses.
@@ -161,7 +161,7 @@ type VolumeFileContentResponse struct {
 
 // WriteFileRequest represents a file write request.
 type WriteFileRequest struct {
-	Content string `json:"content"`
+	Content string `json:"content" validate:"required"`
 }
 
 // ============================================================================
@@ -668,7 +668,7 @@ type OrphanVolumeResultResponse struct {
 
 // CleanupOrphanRequest represents a cleanup request.
 type CleanupOrphanRequest struct {
-	VolumeNames []string `json:"volume_names"`
+	VolumeNames []string `json:"volume_names" validate:"required,min=1"`
 	DryRun      bool     `json:"dry_run"`
 }
 

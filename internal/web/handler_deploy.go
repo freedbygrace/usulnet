@@ -7,6 +7,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -98,7 +99,7 @@ func (h *Handler) AgentDeployTempl(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("HX-Request") == "true" {
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`<div class="text-red-500">Deploy failed: ` + err.Error() + `</div>`))
+			w.Write([]byte(`<div class="text-red-500">Deploy failed: ` + html.EscapeString(err.Error()) + `</div>`))
 			return
 		}
 		http.Error(w, "Deploy failed: "+err.Error(), http.StatusBadRequest)
@@ -181,21 +182,21 @@ func writeDeployStatusHTML(w http.ResponseWriter, result *deploy.DeployResult) {
 
 	w.Write([]byte(`<div id="deploy-status" class="space-y-4">`))
 	w.Write([]byte(`<div class="flex items-center gap-2">`))
-	w.Write([]byte(`<span class="font-medium ` + statusColor + `">` + string(result.Status) + `</span>`))
+	w.Write([]byte(`<span class="font-medium ` + statusColor + `">` + html.EscapeString(string(result.Status)) + `</span>`))
 	if result.Step != "" {
-		w.Write([]byte(` - <span class="text-gray-400">` + result.Step + `</span>`))
+		w.Write([]byte(` - <span class="text-gray-400">` + html.EscapeString(result.Step) + `</span>`))
 	}
 	w.Write([]byte(`</div>`))
 
 	// Logs
 	w.Write([]byte(`<div class="bg-dark-800 rounded p-4 max-h-96 overflow-y-auto font-mono text-sm">`))
 	for _, log := range result.Logs {
-		w.Write([]byte(`<div class="text-gray-300">` + log + `</div>`))
+		w.Write([]byte(`<div class="text-gray-300">` + html.EscapeString(log) + `</div>`))
 	}
 	w.Write([]byte(`</div>`))
 
 	if result.Error != "" {
-		w.Write([]byte(`<div class="text-red-500 font-medium">Error: ` + result.Error + `</div>`))
+		w.Write([]byte(`<div class="text-red-500 font-medium">Error: ` + html.EscapeString(result.Error) + `</div>`))
 	}
 
 	// Auto-refresh while in progress
@@ -213,8 +214,8 @@ func writeDeployPageHTML(w http.ResponseWriter, result *deploy.DeployResult) {
 <link href="/static/css/style.css" rel="stylesheet">
 </head><body class="bg-dark-900 text-white p-8">
 <div class="max-w-3xl mx-auto">
-<h1 class="text-2xl font-bold mb-4">Agent Deployment: ` + result.HostName + `</h1>
-<div id="deploy-container" hx-get="?format=json" hx-trigger="every 2s" hx-swap="none">`))
+<h1 class="text-2xl font-bold mb-4">Agent Deployment: ` + html.EscapeString(result.HostName) + `</h1>
+<div id="deploy-container">`))
 
 	writeDeployStatusHTML(w, result)
 

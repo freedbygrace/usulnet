@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fr4nsys/usulnet/internal/models"
+	"github.com/fr4nsys/usulnet/internal/pkg/crypto"
 	"github.com/fr4nsys/usulnet/internal/pkg/errors"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
 )
@@ -835,12 +836,14 @@ func (s *Service) CreateWebhook(ctx context.Context, hostID uuid.UUID, targetTyp
 		return nil, err
 	}
 
+	tokenHash := crypto.HashToken(token)
+
 	webhook := &models.UpdateWebhook{
 		ID:         uuid.New(),
 		HostID:     hostID,
 		TargetType: targetType,
 		TargetID:   targetID,
-		Token:      token,
+		Token:      tokenHash,
 		IsEnabled:  true,
 		CreatedAt:  time.Now(),
 	}
@@ -849,12 +852,16 @@ func (s *Service) CreateWebhook(ctx context.Context, hostID uuid.UUID, targetTyp
 		return nil, err
 	}
 
+	// Return the raw token so the caller can display it once.
+	// The DB only stores the hash.
+	webhook.Token = token
 	return webhook, nil
 }
 
 // TriggerWebhook triggers an update via webhook
 func (s *Service) TriggerWebhook(ctx context.Context, token string) (*models.UpdateResult, error) {
-	webhook, err := s.repo.GetWebhookByToken(ctx, token)
+	tokenHash := crypto.HashToken(token)
+	webhook, err := s.repo.GetWebhookByToken(ctx, tokenHash)
 	if err != nil {
 		return nil, errors.New(errors.CodeUnauthorized, "invalid webhook token")
 	}
@@ -903,7 +910,15 @@ func (s *Service) GetPolicyByID(ctx context.Context, id uuid.UUID) (*models.Upda
 
 // ListWebhooks lists all webhooks for a host
 func (s *Service) ListWebhooks(ctx context.Context, hostID uuid.UUID) ([]*models.UpdateWebhook, error) {
-	return s.repo.ListWebhooks(ctx, hostID)
+	webhooks, err := s.repo.ListWebhooks(ctx, hostID)
+	if err != nil {
+		return nil, err
+	}
+	// Clear token hashes — callers must not see them.
+	for _, w := range webhooks {
+		w.Token = ""
+	}
+	return webhooks, nil
 }
 
 // DeleteWebhook deletes a webhook

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	apierrors "github.com/fr4nsys/usulnet/internal/api/errors"
 	"github.com/fr4nsys/usulnet/internal/api/handlers"
 	"github.com/fr4nsys/usulnet/internal/api/middleware"
 )
@@ -46,6 +47,18 @@ type RouterConfig struct {
 
 	// MetricsPath is the URL path for the Prometheus metrics endpoint (default "/metrics").
 	MetricsPath string
+
+	// TokenValidator is an optional function for additional JWT validation
+	// (e.g., checking if a token has been revoked via the Redis blacklist).
+	TokenValidator middleware.TokenValidatorFunc
+
+	// OTelTraceMiddleware is an optional OpenTelemetry tracing middleware.
+	// When set, it creates a span for every HTTP request.
+	OTelTraceMiddleware func(http.Handler) http.Handler
+
+	// OTelMetricsMiddleware is an optional OpenTelemetry metrics middleware.
+	// When set, it records HTTP server metrics for every request.
+	OTelMetricsMiddleware func(http.Handler) http.Handler
 }
 
 // DefaultRouterConfig returns a default router configuration.
@@ -89,11 +102,16 @@ type Handlers struct {
 	OpenAPI       *handlers.OpenAPIHandler
 	Settings      *handlers.SettingsHandler
 	License       *handlers.LicenseHandler
+	Registry      *handlers.RegistryHandler
+	Calendar      *handlers.CalendarHandler
 }
 
 // NewRouter creates a new chi router with all routes configured.
 func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 	r := chi.NewRouter()
+
+	// Apply configurable API rate limit globally.
+	middleware.SetAPIRateLimitPerMinute(config.RateLimitPerMinute)
 
 	// =========================================================================
 	// Global Middleware (applied to all routes)
@@ -104,6 +122,14 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 
 	// Real IP extraction from proxy headers
 	r.Use(middleware.RealIP)
+
+	// OpenTelemetry tracing and metrics (no-op when not configured)
+	if config.OTelTraceMiddleware != nil {
+		r.Use(config.OTelTraceMiddleware)
+	}
+	if config.OTelMetricsMiddleware != nil {
+		r.Use(config.OTelMetricsMiddleware)
+	}
 
 	// Request logging
 	if config.Logger != nil {
@@ -176,11 +202,6 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 				r.Mount("/password-reset", h.PasswordReset.Routes())
 			}
 
-			// Public system info
-			if h.System != nil {
-				r.Get("/system/version", h.System.Version)
-			}
-
 			// Public webhook trigger (auth via token in URL)
 			if h.Update != nil {
 				r.Post("/webhooks/update/{token}", h.Update.TriggerWebhook)
@@ -192,10 +213,14 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 		// -----------------------------------------------------------------
 		r.Group(func(r chi.Router) {
 			// JWT + API Key Authentication
+			// NOTE: query:token intentionally excluded from API routes — tokens in
+			// query strings leak into server logs, browser history, and Referer
+			// headers. Only WebSocket routes accept query:token (browser limitation).
 			r.Use(middleware.Auth(middleware.AuthConfig{
-				Secret:      config.JWTSecret,
-				TokenLookup: "header:Authorization,query:token,cookie:auth_token",
-				APIKeyAuth:  config.APIKeyAuth,
+				Secret:         config.JWTSecret,
+				TokenLookup:    "header:Authorization,cookie:auth_token",
+				APIKeyAuth:     config.APIKeyAuth,
+				TokenValidator: config.TokenValidator,
 			}))
 
 			// Standard API rate limiting
@@ -207,6 +232,7 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 			if h.System != nil {
 				r.Route("/system", func(r chi.Router) {
 					r.Use(middleware.RequireViewer)
+					r.Get("/version", h.System.Version)
 					r.Get("/info", h.System.Info)
 					r.Get("/health", h.System.Health)
 					r.Get("/metrics", h.System.Metrics)
@@ -214,11 +240,10 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 			}
 
 			// =============================================================
-			// Docker resource routes (viewer+)
+			// Docker resource routes (viewer+ at router level)
 			//
-			// All authenticated users can access reads. Handlers may
-			// enforce finer-grained RBAC internally via GetUserRole().
-			// Per-method middleware can be layered in a future pass.
+			// Read routes are viewer+. Each handler enforces operator+
+			// or admin+ on mutations internally via its own Routes().
 			// =============================================================
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireViewer)
@@ -261,6 +286,12 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 				}
 				if h.SSH != nil {
 					r.Mount("/ssh", h.SSH.Routes())
+				}
+				if h.Registry != nil {
+					r.Mount("/registries", h.Registry.Routes())
+				}
+				if h.Calendar != nil {
+					r.Mount("/calendar", h.Calendar.Routes())
 				}
 			})
 
@@ -317,8 +348,8 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 					r.Group(func(r chi.Router) {
 						r.Use(middleware.RequireOperator)
 						r.Post("/sync", h.Proxy.SyncToCaddy)
+						r.Get("/audit-logs", h.Proxy.ListAuditLogs)
 					})
-					r.Get("/audit-logs", h.Proxy.ListAuditLogs)
 				})
 			}
 
@@ -437,24 +468,38 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 		r.Route("/api/v1/ws", func(r chi.Router) {
 			// Apply authentication to WebSocket routes
 			r.Use(middleware.Auth(middleware.AuthConfig{
-				Secret:      config.JWTSecret,
-				TokenLookup: "header:Authorization,query:token,cookie:auth_token",
-				APIKeyAuth:  config.APIKeyAuth,
+				Secret:         config.JWTSecret,
+				TokenLookup:    "header:Authorization,query:token,cookie:auth_token",
+				APIKeyAuth:     config.APIKeyAuth,
+				TokenValidator: config.TokenValidator,
 			}))
 			r.Use(middleware.RequireViewer)
+			r.Use(middleware.WebSocketRateLimit())
 			r.Mount("/", h.WebSocket.Routes())
 		})
 	}
 
 	// =========================================================================
-	// Prometheus metrics (no auth for scraping)
+	// Prometheus metrics — behind admin auth
+	// The authenticated endpoint at /api/v1/system/metrics (viewer+) also
+	// serves metrics. This top-level endpoint requires admin for Prometheus
+	// scrapers (configure bearer_token in scrape config).
 	// =========================================================================
 	if h.System != nil && config.MetricsEnabled {
 		metricsPath := config.MetricsPath
 		if metricsPath == "" {
 			metricsPath = "/metrics"
 		}
-		r.Get(metricsPath, h.System.Metrics)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Auth(middleware.AuthConfig{
+				Secret:         config.JWTSecret,
+				TokenLookup:    "header:Authorization,cookie:auth_token",
+				APIKeyAuth:     config.APIKeyAuth,
+				TokenValidator: config.TokenValidator,
+			}))
+			r.Use(middleware.RequireAdmin)
+			r.Get(metricsPath, h.System.Metrics)
+		})
 	}
 
 	return r
@@ -462,7 +507,5 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 
 // notImplemented is a placeholder handler for routes not yet implemented.
 func notImplemented(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte(`{"success":false,"error":{"code":"NOT_IMPLEMENTED","message":"This endpoint is not yet implemented"}}`))
+	apierrors.WriteError(w, apierrors.NotImplemented(""))
 }

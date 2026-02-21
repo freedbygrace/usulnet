@@ -27,9 +27,9 @@
 
 ---
 
-> **v26.2.0 &mdash; First Public Beta Release**
+> **v26.2.4 &mdash; Latest Release**
 >
-> This is the first public release of usulnet. The platform is functional, but as a beta release, you may encounter bugs or incomplete features. We appreciate your feedback &mdash; please report any issues on [GitHub Issues](https://github.com/fr4nsys/usulnet/issues). Your reports help to improve usulnet for everyone.
+> We appreciate your feedback &mdash; please report any issues on [GitHub Issues](https://github.com/fr4nsys/usulnet/issues). Your reports help to improve usulnet for everyone.
 
 ---
 
@@ -134,7 +134,7 @@ Designed for **sysadmins**, **DevOps engineers**, and **platform teams** who nee
 | **RBAC** | Role-based access control with 44+ granular permissions. Custom roles. Team-based resource scoping. |
 | **2FA / TOTP** | Two-factor authentication with TOTP (Google Authenticator, Authy) and backup codes. |
 | **LDAP / OIDC** | Enterprise authentication via Active Directory, LDAP, OAuth2, and OIDC (GitHub, Google, Microsoft, custom). |
-| **Audit Logging** | Every user action logged with IP, timestamp, and details. Exportable as CSV, PDF, or JSON. |
+| **Audit Logging** | User actions persisted to PostgreSQL with IP, timestamp, and details. Exportable as CSV. In-memory cache for fast dashboard rendering. |
 | **Encrypted Secrets** | AES-256-GCM encryption for all sensitive configuration values (passwords, tokens, keys). |
 | **API Key Auth** | Programmatic access via `X-API-KEY` header alongside JWT authentication. |
 
@@ -147,7 +147,7 @@ Designed for **sysadmins**, **DevOps engineers**, and **platform teams** who nee
 | **11 Notification Channels** | Email, Slack, Discord, Telegram, Gotify, ntfy, PagerDuty, Opsgenie, Microsoft Teams, Generic Webhook, Custom. |
 | **Event Stream** | Real-time Docker event stream (container, image, volume, network events) with filtering. |
 | **Centralized Logs** | Aggregated container logs with search, filtering, and custom log file upload for analysis. |
-| **Prometheus Metrics** | Native `/metrics` endpoint for Prometheus scraping. Go runtime and process metrics included. |
+| **Prometheus Metrics** | Native `/metrics` endpoint for Prometheus scraping (admin auth required). Go runtime and process metrics included. |
 
 ### Backup & Recovery
 
@@ -221,7 +221,6 @@ Designed for **sysadmins**, **DevOps engineers**, and **platform teams** who nee
 | **REST API** | Full CRUD API at `/api/v1` with JWT and API key authentication. |
 | **OpenAPI 3.0** | Auto-generated specification at `/api/v1/openapi.json`. Swagger UI at `/docs/api`. |
 | **WebSocket API** | Real-time streams for logs, exec, stats, events, metrics, and terminal sessions. |
-| **Ansible Inventory** | Parse and browse Ansible inventory files (INI and YAML formats). |
 | **Network Capture** | Packet capture on container network interfaces for traffic analysis. |
 
 ---
@@ -497,8 +496,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - usulnet-data:/var/lib/usulnet
     environment:
-      - USULNET_DATABASE_URL=postgres://usulnet:secret@postgres:5432/usulnet?sslmode=disable
-      - USULNET_REDIS_URL=redis://redis:6379/0
+      # sslmode=require: encrypted connection (self-signed cert, no CA verification needed)
+      - USULNET_DATABASE_URL=postgres://usulnet:secret@postgres:5432/usulnet?sslmode=require
+      - USULNET_REDIS_URL=rediss://redis:6379/0
       - USULNET_NATS_URL=nats://nats:4222
       - USULNET_SECURITY_JWT_SECRET=your-secret-key-min-32-chars-long
       - USULNET_SECURITY_CONFIG_ENCRYPTION_KEY=your-64-hex-char-aes-256-key-here
@@ -527,8 +527,27 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    image: redis:8-alpine
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        apk add --no-cache openssl >/dev/null 2>&1
+        mkdir -p /tmp/redis-certs
+        openssl req -new -x509 -days 3650 -nodes \
+          -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+          -subj "/CN=redis/O=usulnet" \
+          -keyout /tmp/redis-certs/server.key \
+          -out /tmp/redis-certs/server.crt 2>/dev/null
+        chmod 600 /tmp/redis-certs/server.key
+        chmod 644 /tmp/redis-certs/server.crt
+        exec redis-server \
+          --tls-port 6379 --port 0 \
+          --tls-cert-file /tmp/redis-certs/server.crt \
+          --tls-key-file /tmp/redis-certs/server.key \
+          --tls-auth-clients no \
+          --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     restart: unless-stopped
@@ -624,12 +643,18 @@ server:
 
 ```yaml
 database:
-  url: postgres://usulnet:password@localhost:5432/usulnet?sslmode=disable
+  # sslmode=require — TLS-encrypted, no CA verification (default; works with self-signed cert).
+  # Use sslmode=verify-full and set USULNET_DATABASE_SSL_ROOTCERT for full cert verification.
+  url: postgres://usulnet:password@localhost:5432/usulnet?sslmode=require
   max_open_conns: 25
   max_idle_conns: 10
   conn_max_lifetime: 30m
   query_timeout: 30s
 ```
+
+> **PostgreSQL TLS:** All Docker Compose files ship with PostgreSQL TLS enabled by default. A self-signed ECDSA P-256 certificate is auto-generated on every container startup — no external cert files, no init containers. `sslmode=require` encrypts the connection without needing a CA cert. To verify the server certificate, use `sslmode=verify-full` and mount your CA cert, then set `USULNET_DATABASE_SSL_ROOTCERT=/path/to/ca.crt`.
+
+> **Redis TLS:** All Docker Compose files ship with Redis TLS enabled by default. A self-signed ECDSA P-256 certificate is auto-generated on every container startup. The `rediss://` URL scheme enables TLS automatically. To use your own certificate, mount `redis-server.crt` and `redis-server.key` into the container at `/certs-src/`. To verify the server certificate, set `tls_ca_file` in the Redis configuration and disable `tls_skip_verify`.
 
 ### Security
 
@@ -705,7 +730,7 @@ Any configuration key can be set via environment variable:
 USULNET_SERVER_PORT=9090
 USULNET_DATABASE_URL=postgres://...
 USULNET_SECURITY_JWT_SECRET=...
-USULNET_REDIS_URL=redis://...
+USULNET_REDIS_URL=rediss://...
 USULNET_NATS_URL=nats://...
 USULNET_TRIVY_ENABLED=true
 USULNET_MODE=standalone
@@ -884,7 +909,7 @@ Interactive API documentation is available at:
 | **Terminal** | [xterm.js](https://xtermjs.org) v5 |
 | **Editor** | [Monaco](https://microsoft.github.io/monaco-editor/) v0.52 + [Neovim](https://neovim.io) |
 | **Database** | PostgreSQL 16 ([pgx](https://github.com/jackc/pgx) + [sqlx](https://github.com/jmoiron/sqlx)) |
-| **Cache** | Redis 7 |
+| **Cache** | Redis 8 (TLS) |
 | **Messaging** | [NATS](https://nats.io) 2.10 with JetStream |
 | **Auth** | JWT + OAuth2/OIDC + LDAP + TOTP |
 | **Security** | [Trivy](https://trivy.dev) vulnerability scanner |
@@ -912,18 +937,18 @@ internal/
     github/             # GitHub Git provider
     gitlab/             # GitLab Git provider
     npm/                # Nginx Proxy Manager
-  models/               # Domain models and types (34 types)
+  models/               # Domain models and types
   nats/                 # NATS client with JetStream support
   pkg/                  # Shared packages
     crypto/             # AES-256-GCM encryption, password hashing
     logger/             # Structured logging (zap wrapper)
     validator/          # Request validation
   repository/           # Data access layer
-    postgres/           # PostgreSQL repositories (22 migrations)
-    redis/              # Redis session store
+    postgres/           # PostgreSQL repositories (36 migrations)
+    redis/              # Redis session store, JWT blacklist
   scheduler/            # Cron job scheduler
     workers/            # Job implementations (backup, scan, cleanup, metrics)
-  services/             # Business logic (30+ services)
+  services/             # Business logic (39 services)
     auth/               # JWT, OIDC, LDAP authentication
     backup/             # Backup creation, restore, scheduling
     container/          # Container lifecycle management
@@ -939,7 +964,7 @@ internal/
     storage/            # S3/local backup storage
     volume/             # Docker volume management
   web/                  # Web UI layer
-    templates/          # Templ templates (117 files)
+    templates/          # Templ templates (~135 files)
       components/       # Reusable UI components
       layouts/          # Page layouts (base, auth)
       pages/            # Full page templates
@@ -959,7 +984,7 @@ nvim/                   # Neovim editor configuration (lazy.nvim)
 
 ### Database Schema
 
-22 migrations managing tables for:
+36 migrations managing tables for:
 
 - Users, roles, permissions, teams
 - SSH connections, SSH keys
@@ -1110,6 +1135,8 @@ If you discover a security vulnerability, please report it responsibly:
 - [x] CSRF protection
 - [x] Secure cookie settings (HttpOnly, SameSite)
 - [x] TLS/HTTPS with auto-generated certificates
+- [x] Redis TLS encryption by default (ECDSA P-256 self-signed)
+- [x] PostgreSQL TLS encryption by default (ECDSA P-256 self-signed)
 - [x] mTLS for inter-node communication
 - [x] Rate limiting (configurable per endpoint)
 - [x] Comprehensive audit logging
@@ -1122,6 +1149,8 @@ If you discover a security vulnerability, please report it responsibly:
 
 ## License
 
+### Open-Source License (AGPL-3.0)
+
 usulnet is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
 
 This means you are free to use, modify, and distribute usulnet, provided that:
@@ -1130,13 +1159,33 @@ This means you are free to use, modify, and distribute usulnet, provided that:
 - The source code must be made available to users who interact with the software over a network
 - All copyright notices and license headers are preserved
 
-For commercial licensing options, contact [license@usulnet.com](mailto:license@usulnet.com).
+### Commercial Editions (Business / Enterprise)
+
+Paid editions are activated with a signed JWT license key obtained from the [License Portal](https://id.usulnet.com).
+
+**One instance per license key** — each key can be active on exactly one host at a time. Attempting to activate on a second host while another is active returns a conflict error.
+
+**How activation works:**
+
+1. Go to **Settings &rarr; License &rarr; Activate** and paste your JWT license key
+2. The application contacts `api.usulnet.com` to register the instance and receives a signed **Activation Receipt** — a short-lived JWT (7-day TTL) cryptographically bound to the instance fingerprint
+3. A background process renews the receipt every 6 hours
+4. If the server cannot be reached, the existing receipt remains valid for up to 14 days &mdash; after 7 days a sync warning is displayed in the dashboard; after 14 days the instance automatically downgrades to Community Edition
+
+**Releasing an instance remotely (via the portal):**
+
+1. Sign in at [id.usulnet.com](https://id.usulnet.com) with your purchase email
+2. Click **Release Instance** next to your active license
+3. The release takes effect on the next check-in cycle (up to 6 hours)
+4. Once released, the license can be activated on a different host
+
+For commercial licensing, contact [license@usulnet.com](mailto:license@usulnet.com).
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please read the contributing guidelines before submitting a pull request.
+Contributions are welcome. Please follow these steps to submit a pull request:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
@@ -1180,7 +1229,7 @@ usulnet is built on the shoulders of exceptional open-source projects:
 
 <p align="center">
   <sub>Built with care for the infrastructure community.</sub><br/>
-  <sub><strong>v26.2.0 Beta</strong> &mdash; Found a bug? <a href="https://github.com/fr4nsys/usulnet/issues/new">Report it here</a>. Your feedback makes usulnet better.</sub><br/><br/>
+  <sub><strong>v26.2.4</strong> &mdash; Found a bug? <a href="https://github.com/fr4nsys/usulnet/issues/new">Report it here</a>. Your feedback makes usulnet better.</sub><br/><br/>
   <a href="https://github.com/fr4nsys/usulnet">GitHub</a>&nbsp;&bull;
   <a href="https://github.com/fr4nsys/usulnet/issues">Issues</a>&nbsp;&bull;
   <a href="https://github.com/fr4nsys/usulnet/discussions">Discussions</a>

@@ -60,17 +60,20 @@ type Repository interface {
 // Service provides compliance framework management, automated assessment
 // execution, and report generation.
 type Service struct {
-	repo   Repository
-	logger *logger.Logger
+	repo      Repository
+	docker    DockerInspector // nil-safe: falls back to status-based evaluation
+	logger    *logger.Logger
 }
 
 // NewService creates a new compliance Service.
-func NewService(repo *postgres.ComplianceFrameworkRepository, log *logger.Logger) *Service {
+// docker may be nil — controls will fall back to implementation-status-based evaluation.
+func NewService(repo *postgres.ComplianceFrameworkRepository, docker DockerInspector, log *logger.Logger) *Service {
 	if log == nil {
 		log = logger.Nop()
 	}
 	return &Service{
 		repo:   repo,
+		docker: docker,
 		logger: log.Named("compliance"),
 	}
 }
@@ -219,9 +222,10 @@ func (s *Service) RunAssessment(ctx context.Context, frameworkID uuid.UUID, crea
 }
 
 // evaluateControl runs the automated check for a single control.  Controls
-// that carry a non-nil CheckQuery are evaluated; all others are flagged for
-// manual review.
-func (s *Service) evaluateControl(_ context.Context, ctrl *models.ComplianceControl) ControlResult {
+// with a CheckQuery that maps to a Docker inspection check are evaluated
+// against live container state.  Controls without automated checks are
+// flagged for manual review.
+func (s *Service) evaluateControl(ctx context.Context, ctrl *models.ComplianceControl) ControlResult {
 	result := ControlResult{
 		ControlID:   ctrl.ControlID,
 		ControlName: ctrl.Title,
@@ -239,18 +243,24 @@ func (s *Service) evaluateControl(_ context.Context, ctrl *models.ComplianceCont
 		return result
 	}
 
-	// Evaluate the check_query.  The query text acts as a declarative tag
-	// that the assessment engine can interpret.  In this implementation we
-	// treat controls whose implementation_status is "implemented" as passing
-	// the automated check, and everything else as failing.  A production
-	// deployment would wire this up to the Docker engine API or OPA
-	// evaluation results.
+	// Try Docker-based evaluation if inspector is available
+	if s.docker != nil {
+		status, details, handled := runDockerCheck(ctx, s.docker, *ctrl.CheckQuery)
+		if handled {
+			result.Status = status
+			result.Details = details
+			return result
+		}
+	}
+
+	// Fallback: checks not handled by Docker inspection (policy/documentation
+	// checks, or Docker inspector unavailable) use implementation status.
 	if ctrl.ImplementationStatus == models.ControlStatusImplemented {
 		result.Status = "pass"
-		result.Details = fmt.Sprintf("Automated check passed: %s", *ctrl.CheckQuery)
+		result.Details = fmt.Sprintf("Control verified via implementation status: %s", *ctrl.CheckQuery)
 	} else {
-		result.Status = "fail"
-		result.Details = fmt.Sprintf("Control not yet implemented. Expected: %s", *ctrl.CheckQuery)
+		result.Status = "manual_review_required"
+		result.Details = fmt.Sprintf("Automated Docker check not available for '%s'; manual review required (status: %s)", *ctrl.CheckQuery, ctrl.ImplementationStatus)
 	}
 
 	return result
@@ -351,9 +361,54 @@ func (s *Service) GenerateReport(ctx context.Context, assessmentID uuid.UUID, fo
 		return json.MarshalIndent(payload, "", "  ")
 	case "html":
 		return s.renderHTMLReport(payload)
+	case "pdf":
+		return s.renderPDFReport(payload)
 	default:
 		return nil, errors.InvalidInput(fmt.Sprintf("unsupported report format: %s", format))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// CRUD pass-through methods
+// ---------------------------------------------------------------------------
+
+// GetFramework returns a single compliance framework by ID.
+func (s *Service) GetFramework(ctx context.Context, id uuid.UUID) (*models.ComplianceFramework, error) {
+	return s.repo.GetFramework(ctx, id)
+}
+
+// ListControls returns all controls belonging to the given framework.
+func (s *Service) ListControls(ctx context.Context, frameworkID uuid.UUID) ([]*models.ComplianceControl, error) {
+	return s.repo.ListControls(ctx, frameworkID)
+}
+
+// UpdateControlStatus validates the new status and updates the control.
+func (s *Service) UpdateControlStatus(ctx context.Context, controlID uuid.UUID, status string) error {
+	validStatuses := map[string]bool{
+		models.ControlStatusNotStarted:    true,
+		models.ControlStatusInProgress:    true,
+		models.ControlStatusImplemented:   true,
+		models.ControlStatusNotApplicable: true,
+	}
+	if !validStatuses[status] {
+		return errors.InvalidInput(fmt.Sprintf("invalid control status: %s", status))
+	}
+	return s.repo.UpdateControlStatus(ctx, controlID, status)
+}
+
+// ListAssessments returns all assessments for the given framework.
+func (s *Service) ListAssessments(ctx context.Context, frameworkID uuid.UUID) ([]*models.ComplianceAssessment, error) {
+	return s.repo.ListAssessments(ctx, frameworkID)
+}
+
+// CreateEvidence stores a new piece of compliance evidence.
+func (s *Service) CreateEvidence(ctx context.Context, e *models.ComplianceEvidence) error {
+	return s.repo.CreateEvidence(ctx, e)
+}
+
+// ListEvidence returns all evidence attached to the given assessment.
+func (s *Service) ListEvidence(ctx context.Context, assessmentID uuid.UUID) ([]*models.ComplianceEvidence, error) {
+	return s.repo.ListEvidence(ctx, assessmentID)
 }
 
 // renderHTMLReport builds a self-contained HTML document for a compliance

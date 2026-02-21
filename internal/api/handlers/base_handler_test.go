@@ -6,11 +6,13 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	apierrors "github.com/fr4nsys/usulnet/internal/api/errors"
 	"github.com/fr4nsys/usulnet/internal/api/handlers"
 )
 
@@ -98,6 +100,16 @@ func TestBaseHandler_Forbidden(t *testing.T) {
 	h.Forbidden(w, "access denied")
 
 	assertStatus(t, w, http.StatusForbidden)
+}
+
+func TestBaseHandler_HandleError_WrappedAPIError(t *testing.T) {
+	h := handlers.NewBaseHandler(nil)
+
+	w := httptest.NewRecorder()
+	h.HandleError(w, fmt.Errorf("context: %w", apierrors.Forbidden("wrapped forbidden")))
+
+	assertStatus(t, w, http.StatusForbidden)
+	assertErrorCode(t, w, string(apierrors.ErrCodeForbidden))
 }
 
 func TestBaseHandler_ParseJSON_ValidInput(t *testing.T) {

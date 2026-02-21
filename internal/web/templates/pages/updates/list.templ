@@ -66,7 +66,7 @@ templ List(data UpdatesData) {
 					<p class="text-gray-400 mt-1">Manage container updates, auto-update policies, and rollbacks</p>
 				</div>
 				<div class="flex items-center gap-2">
-					<button hx-post="/updates/check-all" hx-swap="none" class="btn-secondary">
+					<button hx-post="/updates/check-all" hx-swap="none" hx-headers={ fmt.Sprintf(`{"X-CSRF-Token":"%s"}`, data.PageData.CSRFToken) } class="btn-secondary">
 						<i class="fas fa-sync mr-2"></i>Check All
 					</button>
 				</div>
@@ -111,7 +111,7 @@ templ updatesTab(data UpdatesData) {
 		<div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
 			<h2 class="font-medium text-white">Available Updates ({ fmt.Sprintf("%d", len(data.Available)) })</h2>
 			if len(data.Available) > 0 {
-				<button hx-post="/updates/apply-all" hx-confirm="Update all containers? Backups will be created automatically." class="text-sm text-primary-400 hover:text-primary-300">
+				<button hx-post="/updates/apply-all" hx-confirm="Update all containers? Backups will be created automatically." hx-headers={ fmt.Sprintf(`{"X-CSRF-Token":"%s"}`, data.PageData.CSRFToken) } class="text-sm text-primary-400 hover:text-primary-300">
 					Update All
 				</button>
 			}

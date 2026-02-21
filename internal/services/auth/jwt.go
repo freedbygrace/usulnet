@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -91,6 +92,7 @@ type RefreshClaims struct {
 
 // JWTService handles JWT token generation and validation.
 type JWTService struct {
+	mu     sync.RWMutex
 	config JWTConfig
 }
 
@@ -162,69 +164,24 @@ func (s *JWTService) GenerateTokenPair(user *models.User, sessionID uuid.UUID) (
 	}, nil
 }
 
+// UpdateSecret updates the signing secrets for key rotation.
+// Thread-safe: uses internal mutex to prevent races with token generation/validation.
+func (s *JWTService) UpdateSecret(secret string) {
+	s.mu.Lock()
+	s.config.Secret = secret
+	s.config.RefreshSecret = secret
+	s.mu.Unlock()
+}
+
 // GenerateAccessToken generates an access token for a user.
 func (s *JWTService) GenerateAccessToken(user *models.User) (string, time.Time, error) {
-	now := time.Now().UTC()
-	expiresAt := now.Add(s.config.AccessTokenTTL)
+	s.mu.RLock()
+	secret := s.config.Secret
+	ttl := s.config.AccessTokenTTL
+	issuer := s.config.Issuer
+	tokenIDGen := s.config.TokenIDGenerator
+	s.mu.RUnlock()
 
-	claims := &Claims{
-		UserID:   user.ID.String(),
-		Username: user.Username,
-		Role:     user.Role,
-		Type:     TokenTypeAccess,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ID:        s.config.TokenIDGenerator(),
-			Issuer:    s.config.Issuer,
-			Subject:   user.ID.String(),
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-			NotBefore: jwt.NewNumericDate(now),
-		},
-	}
-
-	if user.Email != nil {
-		claims.Email = *user.Email
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, err := token.SignedString([]byte(s.config.Secret))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
-	}
-
-	return signedToken, expiresAt, nil
-}
-
-// GenerateRefreshToken generates a refresh token for a session.
-func (s *JWTService) GenerateRefreshToken(userID, sessionID uuid.UUID) (string, time.Time, error) {
-	now := time.Now().UTC()
-	expiresAt := now.Add(s.config.RefreshTokenTTL)
-
-	claims := &RefreshClaims{
-		UserID:    userID.String(),
-		SessionID: sessionID.String(),
-		Type:      TokenTypeRefresh,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ID:        s.config.TokenIDGenerator(),
-			Issuer:    s.config.Issuer,
-			Subject:   userID.String(),
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-			NotBefore: jwt.NewNumericDate(now),
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, err := token.SignedString([]byte(s.config.RefreshSecret))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign refresh token: %w", err)
-	}
-
-	return signedToken, expiresAt, nil
-}
-
-// GenerateAccessTokenWithTTL generates an access token with custom TTL.
-func (s *JWTService) GenerateAccessTokenWithTTL(user *models.User, ttl time.Duration) (string, time.Time, error) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(ttl)
 
@@ -234,8 +191,8 @@ func (s *JWTService) GenerateAccessTokenWithTTL(user *models.User, ttl time.Dura
 		Role:     user.Role,
 		Type:     TokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ID:        s.config.TokenIDGenerator(),
-			Issuer:    s.config.Issuer,
+			ID:        tokenIDGen(),
+			Issuer:    issuer,
 			Subject:   user.ID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
@@ -248,7 +205,81 @@ func (s *JWTService) GenerateAccessTokenWithTTL(user *models.User, ttl time.Dura
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, err := token.SignedString([]byte(s.config.Secret))
+	signedToken, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
+	}
+
+	return signedToken, expiresAt, nil
+}
+
+// GenerateRefreshToken generates a refresh token for a session.
+func (s *JWTService) GenerateRefreshToken(userID, sessionID uuid.UUID) (string, time.Time, error) {
+	s.mu.RLock()
+	refreshSecret := s.config.RefreshSecret
+	ttl := s.config.RefreshTokenTTL
+	issuer := s.config.Issuer
+	tokenIDGen := s.config.TokenIDGenerator
+	s.mu.RUnlock()
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(ttl)
+
+	claims := &RefreshClaims{
+		UserID:    userID.String(),
+		SessionID: sessionID.String(),
+		Type:      TokenTypeRefresh,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        tokenIDGen(),
+			Issuer:    issuer,
+			Subject:   userID.String(),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			NotBefore: jwt.NewNumericDate(now),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signedToken, err := token.SignedString([]byte(refreshSecret))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign refresh token: %w", err)
+	}
+
+	return signedToken, expiresAt, nil
+}
+
+// GenerateAccessTokenWithTTL generates an access token with custom TTL.
+func (s *JWTService) GenerateAccessTokenWithTTL(user *models.User, ttl time.Duration) (string, time.Time, error) {
+	s.mu.RLock()
+	secret := s.config.Secret
+	issuer := s.config.Issuer
+	tokenIDGen := s.config.TokenIDGenerator
+	s.mu.RUnlock()
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(ttl)
+
+	claims := &Claims{
+		UserID:   user.ID.String(),
+		Username: user.Username,
+		Role:     user.Role,
+		Type:     TokenTypeAccess,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        tokenIDGen(),
+			Issuer:    issuer,
+			Subject:   user.ID.String(),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			NotBefore: jwt.NewNumericDate(now),
+		},
+	}
+
+	if user.Email != nil {
+		claims.Email = *user.Email
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signedToken, err := token.SignedString([]byte(secret))
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
 	}
@@ -262,12 +293,16 @@ func (s *JWTService) GenerateAccessTokenWithTTL(user *models.User, ttl time.Dura
 
 // ValidateAccessToken validates an access token and returns the claims.
 func (s *JWTService) ValidateAccessToken(tokenString string) (*Claims, error) {
+	s.mu.RLock()
+	secret := s.config.Secret
+	s.mu.RUnlock()
+
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		// Validate signing method
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(s.config.Secret), nil
+		return []byte(secret), nil
 	})
 
 	if err != nil {
@@ -289,11 +324,15 @@ func (s *JWTService) ValidateAccessToken(tokenString string) (*Claims, error) {
 
 // ValidateRefreshToken validates a refresh token and returns the claims.
 func (s *JWTService) ValidateRefreshToken(tokenString string) (*RefreshClaims, error) {
+	s.mu.RLock()
+	refreshSecret := s.config.RefreshSecret
+	s.mu.RUnlock()
+
 	token, err := jwt.ParseWithClaims(tokenString, &RefreshClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(s.config.RefreshSecret), nil
+		return []byte(refreshSecret), nil
 	})
 
 	if err != nil {
@@ -390,24 +429,47 @@ func (s *JWTService) GetUserIDFromToken(tokenString string) (uuid.UUID, error) {
 // Configuration Access
 // ============================================================================
 
+// GetSecret returns the current signing secret (thread-safe).
+func (s *JWTService) GetSecret() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config.Secret
+}
+
+// GetTokenGenerationConfig returns a snapshot of config fields needed for
+// external token generation (used by KeyRotationService).
+func (s *JWTService) GetTokenGenerationConfig() (ttl time.Duration, issuer string, tokenIDGen func() string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config.AccessTokenTTL, s.config.Issuer, s.config.TokenIDGenerator
+}
+
 // GetAccessTokenTTL returns the access token TTL.
 func (s *JWTService) GetAccessTokenTTL() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.config.AccessTokenTTL
 }
 
 // GetRefreshTokenTTL returns the refresh token TTL.
 func (s *JWTService) GetRefreshTokenTTL() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.config.RefreshTokenTTL
 }
 
 // SetAccessTokenTTL updates the access token TTL.
 func (s *JWTService) SetAccessTokenTTL(ttl time.Duration) {
+	s.mu.Lock()
 	s.config.AccessTokenTTL = ttl
+	s.mu.Unlock()
 }
 
 // SetRefreshTokenTTL updates the refresh token TTL.
 func (s *JWTService) SetRefreshTokenTTL(ttl time.Duration) {
+	s.mu.Lock()
 	s.config.RefreshTokenTTL = ttl
+	s.mu.Unlock()
 }
 
 // ============================================================================

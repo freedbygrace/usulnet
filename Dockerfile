@@ -93,16 +93,17 @@ LABEL org.opencontainers.image.title="usulnet" \
       org.opencontainers.image.vendor="usulnet" \
       org.opencontainers.image.licenses="AGPL-3.0"
 
-# All runtime packages in a single layer (includes nvim editor deps)
-# Minimized apk cache by combining all installs
+# Runtime packages (includes nvim editor deps)
 RUN apk add --no-cache \
     ca-certificates tzdata curl su-exec util-linux \
     docker-cli docker-cli-compose \
     neovim git ripgrep fd \
     musl-locales musl-locales-lang && \
-    # Install Trivy vulnerability scanner
-    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin && \
-    # Clean up curl caches
+    update-ca-certificates
+
+# Install Trivy vulnerability scanner (pinned version for reproducibility)
+ARG TRIVY_VERSION=0.69.1
+RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v${TRIVY_VERSION} && \
     rm -rf /tmp/* /var/cache/apk/*
 
 # Overwrite Alpine's docker-cli (27.x, API 1.47) with Docker 29.2.0 (API 1.53)

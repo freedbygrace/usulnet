@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,6 +179,8 @@ func (h *Handler) RunbookDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // RunbookExecute triggers manual execution of a runbook.
+// If the scheduler is available, execution is performed asynchronously via a
+// background job. Otherwise, falls back to synchronous execution.
 func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
@@ -206,9 +210,9 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse steps
-	var steps []models.RunbookStep
+	// Validate steps parse
 	if rb.Steps != nil {
+		var steps []models.RunbookStep
 		if err := json.Unmarshal(rb.Steps, &steps); err != nil {
 			slog.Error("Failed to parse runbook steps", "runbook", rb.Name, "error", err)
 			h.setFlash(w, r, "error", "Invalid runbook step configuration")
@@ -217,7 +221,7 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create execution record
+	// Create execution record in "running" state
 	exec := &models.RunbookExecution{
 		RunbookID: id,
 		Status:    "running",
@@ -225,13 +229,76 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 		StartedAt: time.Now(),
 	}
 
+	var executedBy *uuid.UUID
 	if user := GetUserFromContext(r.Context()); user != nil {
 		if uid, err := uuid.Parse(user.ID); err == nil {
 			exec.ExecutedBy = &uid
+			executedBy = &uid
 		}
 	}
 
-	// Execute steps sequentially
+	if err := h.runbookRepo.CreateExecution(r.Context(), exec); err != nil {
+		slog.Error("Failed to create runbook execution record", "id", id, "error", err)
+		h.setFlash(w, r, "error", "Failed to start runbook execution")
+		h.redirect(w, r, "/runbooks")
+		return
+	}
+
+	// Try async execution via scheduler
+	sched := h.services.Scheduler()
+	if sched != nil {
+		rbIDStr := id.String()
+		jobInput := models.CreateJobInput{
+			Type:       models.JobTypeRunbookExecute,
+			TargetID:   &rbIDStr,
+			TargetName: &rb.Name,
+			Payload: models.RunbookExecutePayload{
+				RunbookID:   id,
+				ExecutionID: exec.ID,
+				Trigger:     "manual",
+				ExecutedBy:  executedBy,
+			},
+			Priority:    models.JobPriorityHigh,
+			MaxAttempts: 1,
+		}
+
+		if _, err := sched.EnqueueJob(r.Context(), jobInput); err != nil {
+			slog.Warn("Failed to enqueue runbook job, falling back to sync",
+				"runbook", rb.Name, "error", err)
+			// Fall back to synchronous execution
+			h.runbookExecuteSync(r, rb, exec)
+		} else {
+			slog.Info("Runbook execution enqueued", "id", id, "name", rb.Name, "execution_id", exec.ID)
+			h.setFlash(w, r, "success", "Runbook '"+rb.Name+"' execution started (running in background)")
+			h.redirect(w, r, "/runbooks?tab=executions")
+			return
+		}
+	} else {
+		// No scheduler — synchronous execution
+		h.runbookExecuteSync(r, rb, exec)
+	}
+
+	// Flash based on final execution status
+	switch exec.Status {
+	case "completed":
+		h.setFlash(w, r, "success", "Runbook '"+rb.Name+"' executed successfully")
+	case "partial_failure":
+		h.setFlash(w, r, "warning", "Runbook '"+rb.Name+"' completed with step failures")
+	case models.ExecStatusWaitingApproval:
+		h.setFlash(w, r, "info", "Runbook '"+rb.Name+"' is waiting for approval")
+	default:
+		h.setFlash(w, r, "error", "Runbook '"+rb.Name+"' execution failed")
+	}
+	h.redirect(w, r, "/runbooks?tab=executions")
+}
+
+// runbookExecuteSync runs runbook steps synchronously (fallback when scheduler unavailable).
+func (h *Handler) runbookExecuteSync(r *http.Request, rb *models.Runbook, exec *models.RunbookExecution) {
+	var steps []models.RunbookStep
+	if rb.Steps != nil {
+		json.Unmarshal(rb.Steps, &steps)
+	}
+
 	stepResults := make([]map[string]interface{}, 0, len(steps))
 	execStatus := "completed"
 	hasStepFailures := false
@@ -256,6 +323,9 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 			if containerID == "" {
 				result["status"] = "skipped"
 				result["error"] = "missing container_id in step config"
+			} else if h.services == nil {
+				result["status"] = "failed"
+				result["error"] = "service registry not available"
 			} else {
 				ctx := r.Context()
 				var actionErr error
@@ -267,7 +337,6 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 				case "restart":
 					actionErr = h.services.Containers().Restart(ctx, containerID)
 				default:
-					// Default to restart for safety
 					actionErr = h.services.Containers().Restart(ctx, containerID)
 					result["note"] = "defaulted to restart action"
 				}
@@ -285,29 +354,69 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 				seconds = 5
 			}
 			if seconds > 60 {
-				seconds = 60 // Cap at 60 seconds for safety
+				seconds = 60
 			}
 			time.Sleep(time.Duration(seconds) * time.Second)
 			result["waited_seconds"] = seconds
 
 		case "notify":
-			var channel, message string
-			if step.Config != nil {
-				channel = step.Config["channel"]
-				message = step.Config["message"]
+			channel := step.Config["channel"]
+			message := step.Config["message"]
+			if message == "" {
+				message = fmt.Sprintf("Runbook '%s' notification from step '%s'", rb.Name, step.Name)
 			}
-			slog.Info("Runbook notification step executed",
-				"runbook", rb.Name,
-				"step", step.Name,
-				"channel", channel,
-				"message", message,
-			)
+
+			if h.notificationSvc != nil && channel != "" {
+				if notifyErr := h.notificationSvc.SendRunbookNotification(
+					r.Context(), rb.Name, step.Name, channel, message,
+				); notifyErr != nil {
+					slog.Warn("Runbook notification dispatch failed",
+						"runbook", rb.Name,
+						"step", step.Name,
+						"channel", channel,
+						"error", notifyErr,
+					)
+					result["status"] = "failed"
+					result["error"] = "notification dispatch failed: " + notifyErr.Error()
+				} else {
+					slog.Info("Runbook notification dispatched",
+						"runbook", rb.Name,
+						"step", step.Name,
+						"channel", channel,
+					)
+					result["channel"] = channel
+				}
+			} else {
+				slog.Info("Runbook notification step executed (no dispatcher)",
+					"runbook", rb.Name,
+					"step", step.Name,
+					"channel", channel,
+				)
+				result["note"] = "notification logged only (no dispatcher configured)"
+			}
 
 		case "condition":
 			result = h.executeConditionStep(r.Context(), step, result)
 
 		case "api_call":
 			result = h.executeAPICallStep(step, result)
+
+		case "approval":
+			result["status"] = "pending_approval"
+			result["note"] = "Approval step paused execution. Requires manual approval."
+			result["finished_at"] = time.Now().Format(time.RFC3339)
+			stepResults = append(stepResults, result)
+			execStatus = models.ExecStatusWaitingApproval
+			// Save partial results and return early -- execution is paused
+			if resultsJSON, err := json.Marshal(stepResults); err == nil {
+				exec.StepResults = resultsJSON
+			}
+			exec.Status = execStatus
+			if err := h.runbookRepo.UpdateExecution(r.Context(), exec); err != nil {
+				slog.Error("Failed to update runbook execution for approval", "error", err)
+			}
+			slog.Info("Runbook paused for approval (sync)", "name", rb.Name, "step", step.Name)
+			return
 
 		default:
 			result["status"] = "skipped"
@@ -317,7 +426,6 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 		result["finished_at"] = time.Now().Format(time.RFC3339)
 		stepResults = append(stepResults, result)
 
-		// Track step failures
 		if result["status"] == "failed" {
 			hasStepFailures = true
 			if step.OnFailure == "stop" {
@@ -327,7 +435,6 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Finalize execution
 	if hasStepFailures && execStatus != "failed" {
 		execStatus = "partial_failure"
 	}
@@ -339,22 +446,12 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 		exec.StepResults = resultsJSON
 	}
 
-	if err := h.runbookRepo.CreateExecution(r.Context(), exec); err != nil {
-		slog.Error("Failed to record runbook execution", "id", id, "error", err)
+	if err := h.runbookRepo.UpdateExecution(r.Context(), exec); err != nil {
+		slog.Error("Failed to update runbook execution", "error", err)
 	}
 
-	slog.Info("Runbook executed", "id", id, "name", rb.Name, "status", execStatus,
+	slog.Info("Runbook executed (sync)", "name", rb.Name, "status", execStatus,
 		"steps", len(steps), "results", len(stepResults))
-
-	switch execStatus {
-	case "completed":
-		h.setFlash(w, r, "success", "Runbook '"+rb.Name+"' executed successfully")
-	case "partial_failure":
-		h.setFlash(w, r, "warning", "Runbook '"+rb.Name+"' completed with step failures")
-	default:
-		h.setFlash(w, r, "error", "Runbook '"+rb.Name+"' execution failed")
-	}
-	h.redirect(w, r, "/runbooks?tab=executions")
 }
 
 // ============================================================================
@@ -365,14 +462,23 @@ func (h *Handler) RunbookExecute(w http.ResponseWriter, r *http.Request) {
 // Supported condition types:
 //   - container_status: checks if a container is in the expected state
 //   - compare: compares two string values with an operator (eq, neq, contains)
+//   - http_health: makes a GET request and checks the HTTP status code
+//   - dns_resolve: resolves a hostname and optionally checks for an expected IP
+//   - metric_threshold: compares a numeric metric value against a threshold
 //
 // Config keys:
-//   - condition_type: "container_status" or "compare"
+//   - condition_type: "container_status", "compare", "http_health", "dns_resolve", or "metric_threshold"
 //   - container_id: (for container_status) the container to check
 //   - expected_status: (for container_status) "running", "stopped", "exited", etc.
 //   - left_value: (for compare) left operand
-//   - operator: (for compare) "eq", "neq", "contains"
+//   - operator: (for compare / metric_threshold) "eq", "neq", "contains" / "gt", "gte", "lt", "lte", "eq"
 //   - right_value: (for compare) right operand
+//   - url: (for http_health) the URL to check
+//   - hostname: (for dns_resolve) the hostname to resolve
+//   - expected_ip: (for dns_resolve) optional expected IP address
+//   - metric: (for metric_threshold) metric name
+//   - threshold: (for metric_threshold) numeric threshold
+//   - value: (for metric_threshold) current metric value
 func (h *Handler) executeConditionStep(ctx context.Context, step models.RunbookStep, result map[string]interface{}) map[string]interface{} {
 	if step.Config == nil {
 		result["status"] = "failed"
@@ -446,6 +552,121 @@ func (h *Handler) executeConditionStep(ctx context.Context, step models.RunbookS
 			result["status"] = "failed"
 			result["error"] = fmt.Sprintf("condition failed: '%s' %s '%s'", leftVal, operator, rightVal)
 		}
+
+	case "http_health":
+		// HTTP health check: make GET request, check status code
+		url := step.Config["url"]
+		expectedStatus := step.Config["expected_status"]
+		if url == "" {
+			result["status"] = "failed"
+			result["error"] = "http_health condition requires 'url' config"
+			return result
+		}
+		if expectedStatus == "" {
+			expectedStatus = "200"
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get(url)
+		if err != nil {
+			result["status"] = "failed"
+			result["error"] = fmt.Sprintf("HTTP health check failed: %v", err)
+			return result
+		}
+		defer resp.Body.Close()
+		if strconv.Itoa(resp.StatusCode) != expectedStatus {
+			result["status"] = "failed"
+			result["error"] = fmt.Sprintf("expected status %s, got %d", expectedStatus, resp.StatusCode)
+			return result
+		}
+		result["status"] = "completed"
+		result["note"] = fmt.Sprintf("HTTP health check passed: %s returned %d", url, resp.StatusCode)
+
+	case "dns_resolve":
+		// DNS resolution check
+		hostname := step.Config["hostname"]
+		if hostname == "" {
+			result["status"] = "failed"
+			result["error"] = "dns_resolve condition requires 'hostname' config"
+			return result
+		}
+		addrs, err := net.LookupHost(hostname)
+		if err != nil {
+			result["status"] = "failed"
+			result["error"] = fmt.Sprintf("DNS resolution failed for %s: %v", hostname, err)
+			return result
+		}
+		expectedIP := step.Config["expected_ip"]
+		if expectedIP != "" {
+			found := false
+			for _, a := range addrs {
+				if a == expectedIP {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result["status"] = "failed"
+				result["error"] = fmt.Sprintf("DNS resolved %s to %v, expected %s", hostname, addrs, expectedIP)
+				return result
+			}
+		}
+		result["status"] = "completed"
+		result["note"] = fmt.Sprintf("DNS resolved %s to %v", hostname, addrs)
+
+	case "metric_threshold":
+		// Metric threshold check via metrics service
+		metricName := step.Config["metric"]
+		operator := step.Config["operator"]
+		thresholdStr := step.Config["threshold"]
+		if metricName == "" || operator == "" || thresholdStr == "" {
+			result["status"] = "failed"
+			result["error"] = "metric_threshold requires 'metric', 'operator', 'threshold' config"
+			return result
+		}
+		// For now, metric_threshold is a placeholder that evaluates simple numeric comparisons
+		// from config values. Full metrics integration would require a MetricsProvider.
+		threshold, err := strconv.ParseFloat(thresholdStr, 64)
+		if err != nil {
+			result["status"] = "failed"
+			result["error"] = fmt.Sprintf("invalid threshold: %s", thresholdStr)
+			return result
+		}
+		valueStr := step.Config["value"]
+		if valueStr == "" {
+			result["status"] = "failed"
+			result["error"] = "metric_threshold: no 'value' provided (metrics provider not connected)"
+			return result
+		}
+		value, err := strconv.ParseFloat(valueStr, 64)
+		if err != nil {
+			result["status"] = "failed"
+			result["error"] = fmt.Sprintf("invalid metric value: %s", valueStr)
+			return result
+		}
+		var passed bool
+		switch operator {
+		case "gt":
+			passed = value > threshold
+		case "gte":
+			passed = value >= threshold
+		case "lt":
+			passed = value < threshold
+		case "lte":
+			passed = value <= threshold
+		case "eq":
+			passed = value == threshold
+		default:
+			result["status"] = "failed"
+			result["error"] = fmt.Sprintf("unknown operator: %s", operator)
+			return result
+		}
+		if !passed {
+			result["status"] = "failed"
+			result["error"] = fmt.Sprintf("metric %s: value %.2f did not satisfy %s %.2f", metricName, value, operator, threshold)
+			return result
+		}
+		result["status"] = "completed"
+		result["note"] = fmt.Sprintf("metric %s: %.2f %s %.2f passed", metricName, value, operator, threshold)
 
 	default:
 		result["status"] = "failed"

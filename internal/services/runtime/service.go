@@ -323,7 +323,9 @@ func (s *Service) MonitorContainer(ctx context.Context, hostID uuid.UUID, contai
 			allEvents = append(allEvents, event)
 
 			// Increment the rule's hit counter.
-			_ = s.repo.IncrementRuleEventCount(ctx, rule.ID)
+			if incErr := s.repo.IncrementRuleEventCount(ctx, rule.ID); incErr != nil {
+				s.logger.Debug("failed to increment rule event count", "rule_id", rule.ID, "error", incErr)
+			}
 		}
 
 		// --- Baseline anomaly check ---

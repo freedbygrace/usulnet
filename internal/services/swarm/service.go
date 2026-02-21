@@ -140,7 +140,7 @@ func (s *Service) InitSwarm(ctx context.Context, hostID uuid.UUID, input *models
 func (s *Service) LeaveSwarm(ctx context.Context, hostID uuid.UUID, force bool) error {
 	client, err := s.getClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("leave swarm: get client for host %s: %w", hostID, err)
 	}
 
 	if err := client.SwarmLeave(ctx, force); err != nil {
@@ -192,7 +192,7 @@ func (s *Service) ListNodes(ctx context.Context, hostID uuid.UUID) ([]models.Swa
 func (s *Service) RemoveNode(ctx context.Context, hostID uuid.UUID, nodeID string, force bool) error {
 	client, err := s.getClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("remove node %s: get client for host %s: %w", nodeID, hostID, err)
 	}
 
 	if err := client.SwarmNodeRemove(ctx, nodeID, force); err != nil {
@@ -282,7 +282,7 @@ func (s *Service) CreateService(ctx context.Context, hostID uuid.UUID, input *mo
 func (s *Service) RemoveService(ctx context.Context, hostID uuid.UUID, serviceID string) error {
 	client, err := s.getClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("remove service %s: get client for host %s: %w", serviceID, hostID, err)
 	}
 
 	if err := client.SwarmServiceRemove(ctx, serviceID); err != nil {
@@ -297,7 +297,7 @@ func (s *Service) RemoveService(ctx context.Context, hostID uuid.UUID, serviceID
 func (s *Service) ScaleService(ctx context.Context, hostID uuid.UUID, serviceID string, replicas int) error {
 	client, err := s.getClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("scale service %s: get client for host %s: %w", serviceID, hostID, err)
 	}
 
 	if err := client.SwarmServiceScale(ctx, serviceID, uint64(replicas)); err != nil {

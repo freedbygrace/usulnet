@@ -101,6 +101,18 @@ func (a *statsAdapter) GetGlobalStats(ctx context.Context) (*GlobalStats, error)
 		stats.StacksCount = len(stacks)
 	}
 
+	// Hosts
+	if a.hostSvc != nil {
+		onlineHosts := a.hostSvc.GetOnlineHosts()
+		stats.HostsOnline = len(onlineHosts)
+		hostList, total, _ := a.hostSvc.List(ctx, postgres.HostListOptions{Limit: 1})
+		if total > 0 {
+			stats.HostsTotal = int(total)
+		} else {
+			stats.HostsTotal = len(hostList)
+		}
+	}
+
 	// Security
 	if a.securitySvc != nil {
 		secHostID := resolveHostID(ctx, a.hostID)

@@ -98,7 +98,7 @@ func (r *RegistryRepository) Update(ctx context.Context, id uuid.UUID, input mod
 
 	reg := &models.Registry{}
 	err := r.db.QueryRow(ctx, `
-		UPDATE registries SET name=$2, url=$3, username=$4, password=$5, is_default=$6
+		UPDATE registries SET name=$2, url=$3, username=$4, password=COALESCE($5, password), is_default=$6
 		WHERE id=$1
 		RETURNING id, name, url, username, password, is_default, created_at, updated_at`,
 		id, input.Name, input.URL, input.Username, input.Password, input.IsDefault,

@@ -450,7 +450,7 @@ func (h *Handler) DatabaseBrowserTempl(w http.ResponseWriter, r *http.Request) {
 		Page:         page,
 		PageSize:     pageSize,
 		TotalPages:   totalPages,
-		WriteEnabled: false, // Read-only by default
+		WriteEnabled: h.isDatabaseWriteMode(r, connIDStr), // Check cookie for write mode
 	}
 
 	h.renderTempl(w, r, connections.DatabaseBrowser(data))
@@ -536,6 +536,15 @@ func (h *Handler) DatabaseWriteModeToggle(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"write_mode": !current,
 	})
+}
+
+// isDatabaseWriteMode checks the cookie to determine if write mode is enabled for a connection.
+func (h *Handler) isDatabaseWriteMode(r *http.Request, connID string) bool {
+	cookieName := "db_write_mode_" + connID
+	if c, err := r.Cookie(cookieName); err == nil {
+		return c.Value == "true"
+	}
+	return false
 }
 
 // DatabaseQueryTempl renders the database query page.
@@ -1218,7 +1227,7 @@ func (h *Handler) RDPConnectionTest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{

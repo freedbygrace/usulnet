@@ -1,0 +1,78 @@
+{
+  "templates": [
+    {
+      "name": "Gitea",
+      "description": "Lightweight self-hosted Git service",
+      "image": "gitea/gitea:latest",
+      "ports": ["3000/tcp", "22/tcp"],
+      "volumes": [{"container": "/data"}, {"container": "/etc/timezone", "bind": "/etc/timezone", "readonly": true}],
+      "env": [
+        {"name": "GITEA__database__DB_TYPE", "label": "Database type", "default": "sqlite3"},
+        {"name": "GITEA__server__ROOT_URL", "label": "Root URL", "default": "http://localhost:3000/"}
+      ]
+    },
+    {
+      "name": "GitLab Runner",
+      "description": "CI/CD runner for GitLab pipelines",
+      "image": "gitlab/gitlab-runner:latest",
+      "volumes": [
+        {"container": "/etc/gitlab-runner"},
+        {"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock"}
+      ],
+      "note": "Register with: docker exec -it <container> gitlab-runner register"
+    },
+    {
+      "name": "Docker Registry",
+      "description": "Private container image registry",
+      "image": "registry:2",
+      "ports": ["5000/tcp"],
+      "volumes": [{"container": "/var/lib/registry"}]
+    },
+    {
+      "name": "Verdaccio",
+      "description": "Lightweight private NPM registry proxy",
+      "image": "verdaccio/verdaccio:latest",
+      "ports": ["4873/tcp"],
+      "volumes": [{"container": "/verdaccio/storage"}, {"container": "/verdaccio/conf"}]
+    },
+    {
+      "name": "SonarQube",
+      "description": "Continuous code quality inspection platform",
+      "image": "sonarqube:community",
+      "ports": ["9000/tcp"],
+      "volumes": [
+        {"container": "/opt/sonarqube/data"},
+        {"container": "/opt/sonarqube/logs"},
+        {"container": "/opt/sonarqube/extensions"}
+      ],
+      "note": "Default login: admin / admin. Requires vm.max_map_count=524288"
+    },
+    {
+      "name": "Drone CI",
+      "description": "Container-native continuous delivery platform",
+      "image": "drone/drone:latest",
+      "ports": ["80/tcp"],
+      "volumes": [{"container": "/data"}],
+      "env": [
+        {"name": "DRONE_GITEA_SERVER", "label": "Gitea server URL"},
+        {"name": "DRONE_GITEA_CLIENT_ID", "label": "OAuth client ID"},
+        {"name": "DRONE_GITEA_CLIENT_SECRET", "label": "OAuth client secret", "type": "password"},
+        {"name": "DRONE_RPC_SECRET", "label": "RPC secret", "required": true, "type": "password"},
+        {"name": "DRONE_SERVER_HOST", "label": "Server host"},
+        {"name": "DRONE_SERVER_PROTO", "label": "Server protocol", "default": "http"}
+      ]
+    },
+    {
+      "name": "code-server",
+      "description": "VS Code in the browser",
+      "image": "linuxserver/code-server:latest",
+      "ports": ["8443/tcp"],
+      "volumes": [{"container": "/config"}],
+      "env": [
+        {"name": "PUID", "label": "User ID", "default": "1000"},
+        {"name": "PGID", "label": "Group ID", "default": "1000"},
+        {"name": "PASSWORD", "label": "Access password", "type": "password"}
+      ]
+    }
+  ]
+}

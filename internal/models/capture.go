@@ -51,6 +51,41 @@ type CreateCaptureInput struct {
 	MaxDuration int    `json:"max_duration"` // seconds
 }
 
+// CaptureAnalysis holds the results of analyzing a completed PCAP file.
+type CaptureAnalysis struct {
+	TotalPackets  int              `json:"total_packets"`
+	TotalBytes    int64            `json:"total_bytes"`
+	Duration      string           `json:"duration"`
+	TopTalkers    []TrafficEntry   `json:"top_talkers"`
+	Protocols     []ProtocolStat   `json:"protocols"`
+	Connections   []ConnectionInfo `json:"connections"`
+	FirstPacketAt string           `json:"first_packet_at,omitempty"`
+	LastPacketAt  string           `json:"last_packet_at,omitempty"`
+}
+
+// TrafficEntry represents an IP address with its traffic volume.
+type TrafficEntry struct {
+	Address    string `json:"address"`
+	PacketsSrc int    `json:"packets_src"`
+	PacketsDst int    `json:"packets_dst"`
+	TotalPkts  int    `json:"total_pkts"`
+}
+
+// ProtocolStat represents a protocol with its packet count.
+type ProtocolStat struct {
+	Protocol string  `json:"protocol"`
+	Count    int     `json:"count"`
+	Percent  float64 `json:"percent"`
+}
+
+// ConnectionInfo represents a network connection (src:port -> dst:port).
+type ConnectionInfo struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Protocol    string `json:"protocol"`
+	Packets     int    `json:"packets"`
+}
+
 // Duration returns the elapsed time of the capture.
 func (c *PacketCapture) Duration() time.Duration {
 	if c.StoppedAt != nil {

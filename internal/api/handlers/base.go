@@ -7,6 +7,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 	apierrors "github.com/fr4nsys/usulnet/internal/api/errors"
 	"github.com/fr4nsys/usulnet/internal/api/middleware"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
+	"github.com/fr4nsys/usulnet/internal/pkg/validator"
 )
 
 // BaseHandler provides common functionality for all handlers.
@@ -100,21 +103,23 @@ func (h *BaseHandler) HandleError(w http.ResponseWriter, err error) {
 	}
 
 	// Check if it's already an API error
-	if apiErr, ok := err.(*apierrors.APIError); ok {
+	var apiErr *apierrors.APIError
+	if errors.As(err, &apiErr) {
 		apierrors.WriteError(w, apiErr)
 		return
 	}
 
 	// Convert from app error
-	apiErr := apierrors.FromError(err)
-	apierrors.WriteError(w, apiErr)
+	convertedErr := apierrors.FromError(err)
+	apierrors.WriteError(w, convertedErr)
 }
 
 // ============================================================================
 // Request parsing helpers
 // ============================================================================
 
-// ParseJSON decodes the request body as JSON into the given value.
+// ParseJSON decodes the request body as JSON into the given value
+// and validates struct tags (go-playground/validator).
 func (h *BaseHandler) ParseJSON(r *http.Request, v any) error {
 	if r.Body == nil {
 		return apierrors.InvalidInput("request body is empty")
@@ -133,6 +138,16 @@ func (h *BaseHandler) ParseJSON(r *http.Request, v any) error {
 			return apierrors.InvalidInput("request body is empty")
 		}
 		return apierrors.InvalidInput("invalid JSON: " + err.Error())
+	}
+
+	// Validate struct tags (e.g., validate:"required,oneof=...")
+	if err := validator.Validate(v); err != nil {
+		fieldErrors := validator.GetValidationErrors(err)
+		parts := make([]string, 0, len(fieldErrors))
+		for field, msg := range fieldErrors {
+			parts = append(parts, fmt.Sprintf("%s %s", field, msg))
+		}
+		return apierrors.InvalidInput("validation failed: " + strings.Join(parts, "; "))
 	}
 
 	return nil

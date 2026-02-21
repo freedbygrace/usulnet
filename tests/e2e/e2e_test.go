@@ -82,6 +82,21 @@ func (c *apiClient) get(path string) (*http.Response, error) {
 	return c.doRequest(http.MethodGet, path, nil)
 }
 
+func (c *apiClient) getWithHeaders(path string, headers map[string]string) (*http.Response, error) {
+	url := c.baseURL + path
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return c.httpClient.Do(req)
+}
+
 func (c *apiClient) post(path string, body any) (*http.Response, error) {
 	return c.doRequest(http.MethodPost, path, body)
 }
@@ -296,4 +311,53 @@ func TestE2E_BackupOperations(t *testing.T) {
 			t.Errorf("expected 401 or 404, got %d", resp.StatusCode)
 		}
 	})
+}
+
+// TestE2E_HTMXPartials_AuthRedirectFlow verifies critical HTMX partial auth behavior.
+func TestE2E_HTMXPartials_AuthRedirectFlow(t *testing.T) {
+	cfg := getTestConfig()
+	if cfg.APIURL == "" {
+		t.Skip("USULNET_TEST_API_URL not set, skipping E2E HTMX partial tests")
+	}
+
+	client := newAPIClient(cfg.APIURL)
+
+	paths := []string{
+		"/partials/containers?limit=5",
+		"/partials/events?limit=10",
+	}
+
+	for _, path := range paths {
+		t.Run("htmx unauth redirect "+path, func(t *testing.T) {
+			resp, err := client.getWithHeaders(path, map[string]string{
+				"HX-Request": "true",
+			})
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d", resp.StatusCode)
+			}
+			if got := resp.Header.Get("HX-Redirect"); got != "/login" {
+				t.Fatalf("expected HX-Redirect=/login, got %q", got)
+			}
+		})
+
+		t.Run("non-htmx unauth redirect "+path, func(t *testing.T) {
+			resp, err := client.get(path)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("expected 303, got %d", resp.StatusCode)
+			}
+			if location := resp.Header.Get("Location"); location == "" {
+				t.Fatal("expected redirect location header")
+			}
+		})
+	}
 }

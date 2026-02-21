@@ -111,7 +111,10 @@ func (a *configAdapter) CreateVariable(ctx context.Context, v *ConfigVarView) er
 	}
 
 	_, err := a.svc.CreateVariable(ctx, input, nil)
-	return err
+	if err != nil {
+		return fmt.Errorf("create config variable: %w", err)
+	}
+	return nil
 }
 
 func (a *configAdapter) UpdateVariable(ctx context.Context, v *ConfigVarView) error {
@@ -130,7 +133,10 @@ func (a *configAdapter) UpdateVariable(ctx context.Context, v *ConfigVarView) er
 	}
 
 	_, err = a.svc.UpdateVariable(ctx, uid, input, nil)
-	return err
+	if err != nil {
+		return fmt.Errorf("update config variable: %w", err)
+	}
+	return nil
 }
 
 func (a *configAdapter) DeleteVariable(ctx context.Context, id string) error {

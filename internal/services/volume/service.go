@@ -20,17 +20,21 @@ import (
 	"github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
-	hostservice "github.com/fr4nsys/usulnet/internal/services/host"
 )
+
+// HostClientProvider resolves a Docker client for a given host.
+type HostClientProvider interface {
+	GetClient(ctx context.Context, hostID uuid.UUID) (docker.ClientAPI, error)
+}
 
 // Service provides Docker volume management operations.
 type Service struct {
-	hostService *hostservice.Service
+	hostService HostClientProvider
 	logger      *logger.Logger
 }
 
 // NewService creates a new volume service.
-func NewService(hostService *hostservice.Service, log *logger.Logger) *Service {
+func NewService(hostService HostClientProvider, log *logger.Logger) *Service {
 	if log == nil {
 		log = logger.Nop()
 	}
@@ -44,7 +48,7 @@ func NewService(hostService *hostservice.Service, log *logger.Logger) *Service {
 func (s *Service) List(ctx context.Context, hostID uuid.UUID) ([]*models.Volume, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for list volumes on host %s: %w", hostID, err)
 	}
 
 	volumes, err := client.VolumeList(ctx, docker.VolumeListOptions{})
@@ -69,7 +73,7 @@ func (s *Service) List(ctx context.Context, hostID uuid.UUID) ([]*models.Volume,
 func (s *Service) ListByDriver(ctx context.Context, hostID uuid.UUID, driver string) ([]*models.Volume, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for list volumes by driver on host %s: %w", hostID, err)
 	}
 
 	volumes, err := client.VolumeList(ctx, docker.VolumeListOptions{
@@ -90,7 +94,7 @@ func (s *Service) ListByDriver(ctx context.Context, hostID uuid.UUID, driver str
 func (s *Service) ListByLabel(ctx context.Context, hostID uuid.UUID, labels map[string]string) ([]*models.Volume, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for list volumes by label on host %s: %w", hostID, err)
 	}
 
 	labelFilters := make([]string, 0, len(labels))
@@ -116,7 +120,7 @@ func (s *Service) ListByLabel(ctx context.Context, hostID uuid.UUID, labels map[
 func (s *Service) Get(ctx context.Context, hostID uuid.UUID, name string) (*models.Volume, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for volume %s on host %s: %w", name, hostID, err)
 	}
 
 	vol, err := client.VolumeGet(ctx, name)
@@ -131,7 +135,7 @@ func (s *Service) Get(ctx context.Context, hostID uuid.UUID, name string) (*mode
 func (s *Service) Create(ctx context.Context, hostID uuid.UUID, input *models.CreateVolumeInput) (*models.Volume, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for create volume on host %s: %w", hostID, err)
 	}
 
 	opts := docker.VolumeCreateOptions{
@@ -154,7 +158,7 @@ func (s *Service) Create(ctx context.Context, hostID uuid.UUID, input *models.Cr
 func (s *Service) Delete(ctx context.Context, hostID uuid.UUID, name string, force bool) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for delete volume %s on host %s: %w", name, hostID, err)
 	}
 
 	if err := client.VolumeRemove(ctx, name, force); err != nil {
@@ -169,7 +173,7 @@ func (s *Service) Delete(ctx context.Context, hostID uuid.UUID, name string, for
 func (s *Service) Prune(ctx context.Context, hostID uuid.UUID) (*models.PruneResult, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for prune volumes on host %s: %w", hostID, err)
 	}
 
 	spaceReclaimed, volumeNames, err := client.VolumePrune(ctx, nil)
@@ -188,7 +192,7 @@ func (s *Service) Prune(ctx context.Context, hostID uuid.UUID) (*models.PruneRes
 func (s *Service) GetStats(ctx context.Context, hostID uuid.UUID) (*models.VolumeStats, error) {
 	volumes, err := s.List(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list volumes for stats: %w", err)
 	}
 
 	stats := &models.VolumeStats{
@@ -217,7 +221,7 @@ func (s *Service) GetStats(ctx context.Context, hostID uuid.UUID) (*models.Volum
 func (s *Service) VolumeInfo(ctx context.Context, hostID uuid.UUID, name string) (*models.VolumeBackupInfo, error) {
 	vol, err := s.Get(ctx, hostID, name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get volume info for backup: %w", err)
 	}
 
 	var size int64
@@ -238,7 +242,7 @@ func (s *Service) VolumeInfo(ctx context.Context, hostID uuid.UUID, name string)
 func (s *Service) Exists(ctx context.Context, hostID uuid.UUID, name string) (bool, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("get client for volume exists check on host %s: %w", hostID, err)
 	}
 	return client.VolumeExists(ctx, name)
 }
@@ -247,7 +251,7 @@ func (s *Service) Exists(ctx context.Context, hostID uuid.UUID, name string) (bo
 func (s *Service) UsedBy(ctx context.Context, hostID uuid.UUID, name string) ([]string, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for volume used-by check on host %s: %w", hostID, err)
 	}
 	return client.VolumeUsedBy(ctx, name)
 }
@@ -277,7 +281,7 @@ func (s *Service) DetectOrphanVolumes(ctx context.Context, hostID uuid.UUID, min
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for orphan volume detection on host %s: %w", hostID, err)
 	}
 
 	// Get all volumes
@@ -389,7 +393,7 @@ func (s *Service) CleanupOrphanVolumes(ctx context.Context, hostID uuid.UUID, vo
 
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for orphan volume cleanup on host %s: %w", hostID, err)
 	}
 
 	var deleted []string
@@ -466,7 +470,7 @@ const (
 func (s *Service) BrowseVolume(ctx context.Context, hostID uuid.UUID, volumeName, path string) ([]VolumeFile, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for browse volume %s: %w", volumeName, err)
 	}
 
 	// Sanitize path
@@ -502,7 +506,7 @@ func (s *Service) BrowseVolume(ctx context.Context, hostID uuid.UUID, volumeName
 func (s *Service) ReadVolumeFile(ctx context.Context, hostID uuid.UUID, volumeName, path string, maxSize int64) (*VolumeFileContent, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get client for read volume file %s: %w", volumeName, err)
 	}
 
 	if maxSize <= 0 || maxSize > maxFileSize {
@@ -572,7 +576,7 @@ func (s *Service) ReadVolumeFile(ctx context.Context, hostID uuid.UUID, volumeNa
 func (s *Service) WriteVolumeFile(ctx context.Context, hostID uuid.UUID, volumeName, path, content string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for write volume file %s: %w", volumeName, err)
 	}
 
 	path = filepath.Clean("/" + path)
@@ -602,7 +606,7 @@ func (s *Service) WriteVolumeFile(ctx context.Context, hostID uuid.UUID, volumeN
 func (s *Service) DeleteVolumeFile(ctx context.Context, hostID uuid.UUID, volumeName, path string, recursive bool) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for delete volume file %s: %w", volumeName, err)
 	}
 
 	path = filepath.Clean("/" + path)
@@ -638,7 +642,7 @@ func (s *Service) DeleteVolumeFile(ctx context.Context, hostID uuid.UUID, volume
 func (s *Service) CreateVolumeDirectory(ctx context.Context, hostID uuid.UUID, volumeName, path string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get client for create volume directory %s: %w", volumeName, err)
 	}
 
 	path = filepath.Clean("/" + path)
@@ -664,7 +668,7 @@ func (s *Service) CreateVolumeDirectory(ctx context.Context, hostID uuid.UUID, v
 func (s *Service) DownloadVolumeFile(ctx context.Context, hostID uuid.UUID, volumeName, path string) (io.ReadCloser, int64, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("get client for download volume file %s: %w", volumeName, err)
 	}
 
 	path = filepath.Clean("/" + path)
@@ -729,10 +733,10 @@ func (s *Service) createBrowserContainer(ctx context.Context, client docker.Clie
 				},
 			})
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("create browser container after image pull: %w", err)
 			}
 		} else {
-			return "", err
+			return "", fmt.Errorf("create browser container: %w", err)
 		}
 	}
 
@@ -758,18 +762,18 @@ func (s *Service) execInContainer(ctx context.Context, client docker.ClientAPI, 
 		AttachStderr: true,
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create exec in container %s: %w", containerID, err)
 	}
 
 	hijacked, err := client.ExecAttach(ctx, execResp.ID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("attach exec in container %s: %w", containerID, err)
 	}
 	defer hijacked.Close()
 
 	output, err := io.ReadAll(hijacked.Reader)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read exec output from container %s: %w", containerID, err)
 	}
 
 	// Remove Docker stream header bytes if present
@@ -922,7 +926,10 @@ func (r *cleanupReader) Close() error {
 		if r.cleanup != nil {
 			r.cleanup()
 		}
-		return err
+		if err != nil {
+			return fmt.Errorf("cleanupReader: close: %w", err)
+		}
+		return nil
 	}
 	return nil
 }

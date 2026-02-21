@@ -91,6 +91,9 @@ func (c *Client) ContainerList(ctx context.Context, opts ContainerListOptions) (
 		return nil, errors.New(errors.CodeDockerConnection, "client is closed")
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
 	// Build filters
 	f := filters.NewArgs()
 	for key, values := range opts.Filters {
@@ -132,6 +135,9 @@ func (c *Client) ContainerGet(ctx context.Context, containerID string) (*Contain
 		return nil, errors.New(errors.CodeDockerConnection, "client is closed")
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
 	inspect, err := c.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
 		if client.IsErrNotFound(err) {
@@ -155,6 +161,9 @@ func (c *Client) ContainerInspectRaw(ctx context.Context, containerID string) (t
 	if c.closed {
 		return types.ContainerJSON{}, errors.New(errors.CodeDockerConnection, "client is closed")
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 
 	inspect, err := c.cli.ContainerInspect(ctx, containerID)
 	if err != nil {

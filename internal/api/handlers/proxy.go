@@ -6,6 +6,8 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -19,15 +21,52 @@ import (
 // ProxyHandler handles reverse proxy API endpoints.
 type ProxyHandler struct {
 	BaseHandler
-	proxyService *proxy.Service
+	proxyService ProxyService
 }
 
+// ProxyService defines the service contract used by ProxyHandler.
+type ProxyService interface {
+	ListHosts(ctx context.Context) ([]*models.ProxyHost, error)
+	GetHost(ctx context.Context, id uuid.UUID) (*models.ProxyHost, error)
+	CreateHost(ctx context.Context, input *models.CreateProxyHostInput, userID *uuid.UUID) (*models.ProxyHost, error)
+	UpdateHost(ctx context.Context, id uuid.UUID, input *models.UpdateProxyHostInput, userID *uuid.UUID) (*models.ProxyHost, error)
+	DeleteHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
+	EnableHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
+	DisableHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
+	SetCustomHeaders(ctx context.Context, proxyHostID uuid.UUID, headers []models.ProxyHeader) error
+	ListCertificates(ctx context.Context) ([]*models.ProxyCertificate, error)
+	UploadCertificate(ctx context.Context, name string, domains []string, certPEM, keyPEM, chainPEM string, userID *uuid.UUID) (*models.ProxyCertificate, error)
+	DeleteCertificate(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
+	ListDNSProviders(ctx context.Context) ([]*models.ProxyDNSProvider, error)
+	CreateDNSProvider(ctx context.Context, name, provider, apiToken, zone string, propagation int, isDefault bool, userID *uuid.UUID) (*models.ProxyDNSProvider, error)
+	DeleteDNSProvider(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
+	SyncToCaddy(ctx context.Context) error
+	CaddyHealthy(ctx context.Context) (bool, error)
+	UpstreamStatus(ctx context.Context) (interface{}, error)
+	ListAuditLogs(ctx context.Context, limit, offset int) ([]*models.ProxyAuditLog, int, error)
+}
+
+var _ ProxyService = (*proxy.Service)(nil)
+
 // NewProxyHandler creates a new proxy handler.
-func NewProxyHandler(proxyService *proxy.Service, log *logger.Logger) *ProxyHandler {
+func NewProxyHandler(proxyService ProxyService, log *logger.Logger) *ProxyHandler {
 	return &ProxyHandler{
 		BaseHandler:  NewBaseHandler(log),
 		proxyService: proxyService,
 	}
+}
+
+func (h *ProxyHandler) parseUUIDParam(w http.ResponseWriter, r *http.Request, key, badRequestMsg string) (uuid.UUID, error) {
+	id, err := uuid.Parse(chi.URLParam(r, key))
+	if err != nil {
+		h.BadRequest(w, badRequestMsg)
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
+func (h *ProxyHandler) handleServiceError(w http.ResponseWriter, action string, err error) {
+	h.HandleError(w, fmt.Errorf("%s: %w", action, err))
 }
 
 // =============================================================================
@@ -41,7 +80,7 @@ func (h *ProxyHandler) ListHosts(w http.ResponseWriter, r *http.Request) {
 
 	hosts, err := h.proxyService.ListHosts(ctx)
 	if err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, "list proxy hosts", err)
 		return
 	}
 
@@ -53,15 +92,14 @@ func (h *ProxyHandler) ListHosts(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) GetHost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := h.parseUUIDParam(w, r, "id", "invalid proxy host ID")
 	if err != nil {
-		h.BadRequest(w, "invalid proxy host ID")
 		return
 	}
 
 	host, err := h.proxyService.GetHost(ctx, id)
 	if err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, fmt.Sprintf("get proxy host %s", id), err)
 		return
 	}
 
@@ -70,25 +108,25 @@ func (h *ProxyHandler) GetHost(w http.ResponseWriter, r *http.Request) {
 
 // CreateProxyHostRequest is the request body for creating a proxy host.
 type CreateProxyHostRequest struct {
-	Name                string                     `json:"name"`
-	Domains             []string                   `json:"domains"`
-	UpstreamScheme      models.ProxyUpstreamScheme `json:"upstream_scheme"`
-	UpstreamHost        string                     `json:"upstream_host"`
-	UpstreamPort        int                        `json:"upstream_port"`
-	UpstreamPath        string                     `json:"upstream_path,omitempty"`
-	SSLMode             models.ProxySSLMode        `json:"ssl_mode"`
+	Name                string                     `json:"name" validate:"required,min=1,max=253"`
+	Domains             []string                   `json:"domains" validate:"required,min=1,dive,required,min=1,max=253"`
+	UpstreamScheme      models.ProxyUpstreamScheme `json:"upstream_scheme" validate:"omitempty,oneof=http https h2c"`
+	UpstreamHost        string                     `json:"upstream_host" validate:"required,min=1,max=253"`
+	UpstreamPort        int                        `json:"upstream_port" validate:"required,min=1,max=65535"`
+	UpstreamPath        string                     `json:"upstream_path,omitempty" validate:"omitempty,max=2048"`
+	SSLMode             models.ProxySSLMode        `json:"ssl_mode" validate:"omitempty,oneof=none auto dns custom internal"`
 	SSLForceHTTPS       bool                       `json:"ssl_force_https"`
-	CertificateID       *uuid.UUID                 `json:"certificate_id,omitempty"`
-	DNSProviderID       *uuid.UUID                 `json:"dns_provider_id,omitempty"`
+	CertificateID       *uuid.UUID                 `json:"certificate_id,omitempty" validate:"omitempty,uuid"`
+	DNSProviderID       *uuid.UUID                 `json:"dns_provider_id,omitempty" validate:"omitempty,uuid"`
 	EnableWebSocket     bool                       `json:"enable_websocket"`
 	EnableCompression   bool                       `json:"enable_compression"`
 	EnableHSTS          bool                       `json:"enable_hsts"`
 	EnableHTTP2         bool                       `json:"enable_http2"`
 	HealthCheckEnabled  bool                       `json:"health_check_enabled"`
-	HealthCheckPath     string                     `json:"health_check_path,omitempty"`
-	HealthCheckInterval int                        `json:"health_check_interval,omitempty"`
-	ContainerID         string                     `json:"container_id,omitempty"`
-	ContainerName       string                     `json:"container_name,omitempty"`
+	HealthCheckPath     string                     `json:"health_check_path,omitempty" validate:"omitempty,max=2048"`
+	HealthCheckInterval int                        `json:"health_check_interval,omitempty" validate:"omitempty,min=1,max=86400"`
+	ContainerID         string                     `json:"container_id,omitempty" validate:"omitempty,max=128"`
+	ContainerName       string                     `json:"container_name,omitempty" validate:"omitempty,max=253"`
 }
 
 // CreateHost creates a new proxy host.
@@ -154,7 +192,7 @@ func (h *ProxyHandler) CreateHost(w http.ResponseWriter, r *http.Request) {
 
 	host, err := h.proxyService.CreateHost(ctx, input, &userID)
 	if err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, "create proxy host", err)
 		return
 	}
 
@@ -163,24 +201,24 @@ func (h *ProxyHandler) CreateHost(w http.ResponseWriter, r *http.Request) {
 
 // UpdateProxyHostRequest is the request body for updating a proxy host.
 type UpdateProxyHostRequest struct {
-	Name                *string                     `json:"name,omitempty"`
-	Domains             []string                    `json:"domains,omitempty"`
-	UpstreamScheme      *models.ProxyUpstreamScheme `json:"upstream_scheme,omitempty"`
-	UpstreamHost        *string                     `json:"upstream_host,omitempty"`
-	UpstreamPort        *int                        `json:"upstream_port,omitempty"`
-	UpstreamPath        *string                     `json:"upstream_path,omitempty"`
-	SSLMode             *models.ProxySSLMode        `json:"ssl_mode,omitempty"`
+	Name                *string                     `json:"name,omitempty" validate:"omitempty,min=1,max=253"`
+	Domains             []string                    `json:"domains,omitempty" validate:"omitempty,min=1,dive,required,min=1,max=253"`
+	UpstreamScheme      *models.ProxyUpstreamScheme `json:"upstream_scheme,omitempty" validate:"omitempty,oneof=http https h2c"`
+	UpstreamHost        *string                     `json:"upstream_host,omitempty" validate:"omitempty,min=1,max=253"`
+	UpstreamPort        *int                        `json:"upstream_port,omitempty" validate:"omitempty,min=1,max=65535"`
+	UpstreamPath        *string                     `json:"upstream_path,omitempty" validate:"omitempty,max=2048"`
+	SSLMode             *models.ProxySSLMode        `json:"ssl_mode,omitempty" validate:"omitempty,oneof=none auto dns custom internal"`
 	SSLForceHTTPS       *bool                       `json:"ssl_force_https,omitempty"`
-	CertificateID       *uuid.UUID                  `json:"certificate_id,omitempty"`
-	DNSProviderID       *uuid.UUID                  `json:"dns_provider_id,omitempty"`
+	CertificateID       *uuid.UUID                  `json:"certificate_id,omitempty" validate:"omitempty,uuid"`
+	DNSProviderID       *uuid.UUID                  `json:"dns_provider_id,omitempty" validate:"omitempty,uuid"`
 	Enabled             *bool                       `json:"enabled,omitempty"`
 	EnableWebSocket     *bool                       `json:"enable_websocket,omitempty"`
 	EnableCompression   *bool                       `json:"enable_compression,omitempty"`
 	EnableHSTS          *bool                       `json:"enable_hsts,omitempty"`
 	EnableHTTP2         *bool                       `json:"enable_http2,omitempty"`
 	HealthCheckEnabled  *bool                       `json:"health_check_enabled,omitempty"`
-	HealthCheckPath     *string                     `json:"health_check_path,omitempty"`
-	HealthCheckInterval *int                        `json:"health_check_interval,omitempty"`
+	HealthCheckPath     *string                     `json:"health_check_path,omitempty" validate:"omitempty,max=2048"`
+	HealthCheckInterval *int                        `json:"health_check_interval,omitempty" validate:"omitempty,min=1,max=86400"`
 }
 
 // UpdateHost updates an existing proxy host.
@@ -188,9 +226,8 @@ type UpdateProxyHostRequest struct {
 func (h *ProxyHandler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := h.parseUUIDParam(w, r, "id", "invalid proxy host ID")
 	if err != nil {
-		h.BadRequest(w, "invalid proxy host ID")
 		return
 	}
 
@@ -225,7 +262,7 @@ func (h *ProxyHandler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 
 	host, err := h.proxyService.UpdateHost(ctx, id, input, &userID)
 	if err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, fmt.Sprintf("update proxy host %s", id), err)
 		return
 	}
 
@@ -237,16 +274,15 @@ func (h *ProxyHandler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) DeleteHost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := h.parseUUIDParam(w, r, "id", "invalid proxy host ID")
 	if err != nil {
-		h.BadRequest(w, "invalid proxy host ID")
 		return
 	}
 
 	userID, _ := h.GetUserID(r)
 
 	if err := h.proxyService.DeleteHost(ctx, id, &userID); err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, fmt.Sprintf("delete proxy host %s", id), err)
 		return
 	}
 
@@ -258,16 +294,15 @@ func (h *ProxyHandler) DeleteHost(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) EnableHost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := h.parseUUIDParam(w, r, "id", "invalid proxy host ID")
 	if err != nil {
-		h.BadRequest(w, "invalid proxy host ID")
 		return
 	}
 
 	userID, _ := h.GetUserID(r)
 
 	if err := h.proxyService.EnableHost(ctx, id, &userID); err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, fmt.Sprintf("enable proxy host %s", id), err)
 		return
 	}
 
@@ -279,16 +314,15 @@ func (h *ProxyHandler) EnableHost(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) DisableHost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := h.parseUUIDParam(w, r, "id", "invalid proxy host ID")
 	if err != nil {
-		h.BadRequest(w, "invalid proxy host ID")
 		return
 	}
 
 	userID, _ := h.GetUserID(r)
 
 	if err := h.proxyService.DisableHost(ctx, id, &userID); err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, fmt.Sprintf("disable proxy host %s", id), err)
 		return
 	}
 
@@ -301,7 +335,7 @@ func (h *ProxyHandler) DisableHost(w http.ResponseWriter, r *http.Request) {
 
 // SetHeadersRequest is the request body for setting custom headers.
 type SetHeadersRequest struct {
-	Headers []models.ProxyHeader `json:"headers"`
+	Headers []models.ProxyHeader `json:"headers" validate:"required,dive"`
 }
 
 // SetHeaders sets custom headers for a proxy host.
@@ -309,9 +343,8 @@ type SetHeadersRequest struct {
 func (h *ProxyHandler) SetHeaders(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	id, err := h.parseUUIDParam(w, r, "id", "invalid proxy host ID")
 	if err != nil {
-		h.BadRequest(w, "invalid proxy host ID")
 		return
 	}
 
@@ -330,7 +363,7 @@ func (h *ProxyHandler) SetHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.proxyService.SetCustomHeaders(ctx, id, req.Headers); err != nil {
-		h.HandleError(w, err)
+		h.handleServiceError(w, fmt.Sprintf("set proxy host headers %s", id), err)
 		return
 	}
 
@@ -357,11 +390,11 @@ func (h *ProxyHandler) ListCertificates(w http.ResponseWriter, r *http.Request) 
 
 // UploadCertificateRequest is the request body for uploading a certificate.
 type UploadCertificateRequest struct {
-	Name     string   `json:"name"`
-	Domains  []string `json:"domains"`
-	CertPEM  string   `json:"cert_pem"`
-	KeyPEM   string   `json:"key_pem"`
-	ChainPEM string   `json:"chain_pem,omitempty"`
+	Name     string   `json:"name" validate:"required,min=1,max=253"`
+	Domains  []string `json:"domains" validate:"required,min=1,dive,required,min=1,max=253"`
+	CertPEM  string   `json:"cert_pem" validate:"required"`
+	KeyPEM   string   `json:"key_pem" validate:"required"`
+	ChainPEM string   `json:"chain_pem,omitempty" validate:"omitempty"`
 }
 
 // UploadCertificate uploads a custom certificate.
@@ -440,11 +473,11 @@ func (h *ProxyHandler) ListDNSProviders(w http.ResponseWriter, r *http.Request) 
 
 // CreateDNSProviderRequest is the request body for creating a DNS provider.
 type CreateDNSProviderRequest struct {
-	Name        string `json:"name"`
-	Provider    string `json:"provider"`
-	APIToken    string `json:"api_token"`
-	Zone        string `json:"zone,omitempty"`
-	Propagation int    `json:"propagation,omitempty"`
+	Name        string `json:"name" validate:"required,min=1,max=253"`
+	Provider    string `json:"provider" validate:"required,min=1,max=64"`
+	APIToken    string `json:"api_token" validate:"required,min=1"`
+	Zone        string `json:"zone,omitempty" validate:"omitempty,max=253"`
+	Propagation int    `json:"propagation,omitempty" validate:"omitempty,min=0,max=3600"`
 	IsDefault   bool   `json:"is_default"`
 }
 

@@ -60,10 +60,10 @@ func (h *NPMHandler) GetConnection(w http.ResponseWriter, r *http.Request) {
 
 // ConfigureConnectionRequest is the request body for configuring NPM connection.
 type ConfigureConnectionRequest struct {
-	HostID        string `json:"host_id"`
-	BaseURL       string `json:"base_url"`
-	AdminEmail    string `json:"admin_email"`
-	AdminPassword string `json:"admin_password"`
+	HostID        string `json:"host_id" validate:"required,uuid"`
+	BaseURL       string `json:"base_url" validate:"required,url"`
+	AdminEmail    string `json:"admin_email" validate:"required,email"`
+	AdminPassword string `json:"admin_password" validate:"required,min=1"`
 }
 
 // ConfigureConnection configures an NPM connection for a host.
@@ -114,9 +114,9 @@ func (h *NPMHandler) ConfigureConnection(w http.ResponseWriter, r *http.Request)
 
 // UpdateConnectionRequest is the request body for updating NPM connection.
 type UpdateConnectionRequest struct {
-	BaseURL       *string `json:"base_url,omitempty"`
-	AdminEmail    *string `json:"admin_email,omitempty"`
-	AdminPassword *string `json:"admin_password,omitempty"`
+	BaseURL       *string `json:"base_url,omitempty" validate:"omitempty,url"`
+	AdminEmail    *string `json:"admin_email,omitempty" validate:"omitempty,email"`
+	AdminPassword *string `json:"admin_password,omitempty" validate:"omitempty,min=1"`
 	IsEnabled     *bool   `json:"is_enabled,omitempty"`
 }
 
@@ -187,9 +187,9 @@ func (h *NPMHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 
 	healthy, err := h.npmService.CheckHealth(ctx, hostID)
 	if err != nil {
+		h.logger.Warn("NPM health check failed", "host_id", hostID, "error", err)
 		h.OK(w, map[string]interface{}{
 			"healthy": false,
-			"error":   err.Error(),
 		})
 		return
 	}
@@ -413,8 +413,8 @@ func (h *NPMHandler) ListCertificates(w http.ResponseWriter, r *http.Request) {
 
 // RequestLetsEncryptCertificateRequest is the request body for requesting a Let's Encrypt certificate.
 type RequestLetsEncryptCertificateRequest struct {
-	DomainNames []string `json:"domain_names"`
-	Email       string   `json:"email"`
+	DomainNames []string `json:"domain_names" validate:"required,min=1"`
+	Email       string   `json:"email" validate:"required,email"`
 }
 
 // RequestLetsEncryptCertificate requests a new Let's Encrypt certificate in NPM.

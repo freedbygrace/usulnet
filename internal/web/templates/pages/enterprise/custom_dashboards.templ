@@ -1,0 +1,552 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2024-2026 usulnet contributors
+// https://github.com/fr4nsys/usulnet
+
+package enterprise
+
+import "github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+
+// CustomDashboardsData holds all data for the custom dashboards page.
+type CustomDashboardsData struct {
+	PageData layouts.PageData
+}
+
+templ CustomDashboards(data CustomDashboardsData) {
+	@layouts.Base(data.PageData) {
+		<div
+			x-data={ dashboardsApp(data.PageData.CSRFToken) }
+			x-init="init()"
+			class="space-y-6"
+		>
+			<!-- List View -->
+			<div x-show="!selectedLayout" x-cloak>
+				<!-- Header -->
+				<div class="flex items-center justify-between mb-6">
+					<div>
+						<h1 class="text-2xl font-display font-bold text-white">Custom Dashboards</h1>
+						<p class="text-gray-400 mt-1">Create and manage personalized dashboard layouts</p>
+					</div>
+					<button
+						@click="showCreateModal = true"
+						class="btn-primary flex items-center gap-2"
+					>
+						<i class="fas fa-plus"></i>
+						New Dashboard
+					</button>
+				</div>
+
+				<!-- Loading -->
+				<div x-show="layoutsLoading" class="card p-12 text-center">
+					<i class="fas fa-spinner fa-spin text-2xl text-gray-400 mb-3"></i>
+					<p class="text-gray-400">Loading dashboards...</p>
+				</div>
+
+				<!-- Empty State -->
+				<div x-show="!layoutsLoading && layouts.length === 0" x-cloak class="card p-12 text-center">
+					<i class="fas fa-th-large text-4xl text-gray-400 mb-4"></i>
+					<h3 class="text-lg font-medium text-white mb-2">No Dashboards</h3>
+					<p class="text-gray-400 mb-4">Create a custom dashboard to arrange widgets for monitoring your infrastructure</p>
+					<button
+						@click="showCreateModal = true"
+						class="btn-primary inline-flex items-center gap-2"
+					>
+						<i class="fas fa-plus"></i>
+						Create Dashboard
+					</button>
+				</div>
+
+				<!-- Layout Cards -->
+				<div x-show="!layoutsLoading && layouts.length > 0" x-cloak class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+					<template x-for="layout in layouts" :key="layout.id">
+						<div class="card p-5 hover:border-primary-500/50 transition-colors">
+							<div class="flex items-start justify-between mb-3">
+								<div class="flex items-center gap-2">
+									<div class="w-10 h-10 rounded-lg bg-primary-500/20 flex items-center justify-center">
+										<i class="fas fa-th-large text-primary-400"></i>
+									</div>
+									<div>
+										<h3 class="font-medium text-white" x-text="layout.name"></h3>
+										<p class="text-xs text-gray-500">Dashboard</p>
+									</div>
+								</div>
+								<template x-if="layout.is_default">
+									<span class="px-2 py-0.5 text-xs bg-primary-500/20 text-primary-400 rounded">Default</span>
+								</template>
+							</div>
+							<p class="text-sm text-gray-400 mb-4 line-clamp-2" x-text="layout.description || 'No description'"></p>
+							<div class="flex items-center justify-between">
+								<button
+									@click="openLayout(layout)"
+									class="text-sm text-primary-400 hover:text-primary-300 transition-colors flex items-center gap-1"
+								>
+									<i class="fas fa-edit text-xs"></i>
+									Edit Layout
+								</button>
+								<button
+									@click="deleteLayout(layout.id)"
+									class="text-sm text-gray-500 hover:text-red-400 transition-colors flex items-center gap-1"
+								>
+									<i class="fas fa-trash text-xs"></i>
+									Delete
+								</button>
+							</div>
+						</div>
+					</template>
+				</div>
+			</div>
+
+			<!-- Layout Detail / Edit View -->
+			<div x-show="selectedLayout" x-cloak>
+				<!-- Header -->
+				<div class="flex items-center justify-between mb-6">
+					<div class="flex items-center gap-4">
+						<button
+							@click="selectedLayout = null; widgets = []"
+							class="p-2 text-gray-400 hover:text-white hover:bg-dark-700 rounded-lg transition-colors"
+						>
+							<i class="fas fa-arrow-left"></i>
+						</button>
+						<div>
+							<h1 class="text-2xl font-display font-bold text-white" x-text="selectedLayout ? selectedLayout.name : ''"></h1>
+							<p class="text-gray-400 mt-0.5 text-sm" x-text="selectedLayout ? (selectedLayout.description || 'No description') : ''"></p>
+						</div>
+					</div>
+					<button
+						@click="showWidgetModal = true"
+						class="btn-primary flex items-center gap-2"
+					>
+						<i class="fas fa-plus"></i>
+						Add Widget
+					</button>
+				</div>
+
+				<!-- Widgets Loading -->
+				<div x-show="widgetsLoading" class="card p-12 text-center">
+					<i class="fas fa-spinner fa-spin text-2xl text-gray-400 mb-3"></i>
+					<p class="text-gray-400">Loading widgets...</p>
+				</div>
+
+				<!-- Empty Widgets -->
+				<div x-show="!widgetsLoading && widgets.length === 0" x-cloak class="card p-12 text-center">
+					<i class="fas fa-puzzle-piece text-4xl text-gray-400 mb-4"></i>
+					<h3 class="text-lg font-medium text-white mb-2">No Widgets</h3>
+					<p class="text-gray-400 mb-4">Add widgets to populate this dashboard</p>
+					<button
+						@click="showWidgetModal = true"
+						class="btn-primary inline-flex items-center gap-2"
+					>
+						<i class="fas fa-plus"></i>
+						Add Widget
+					</button>
+				</div>
+
+				<!-- Widgets Grid -->
+				<div x-show="!widgetsLoading && widgets.length > 0" x-cloak class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+					<template x-for="widget in widgets" :key="widget.id">
+						<div class="bg-dark-800 border border-dark-700 rounded-xl overflow-hidden group">
+							<!-- Drag Handle + Header -->
+							<div class="flex items-center justify-between px-4 py-3 border-b border-dark-700 bg-dark-800">
+								<div class="flex items-center gap-2">
+									<i class="fas fa-grip-vertical text-gray-600 cursor-move"></i>
+									<span class="text-sm font-medium text-white" x-text="widget.title"></span>
+								</div>
+								<div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+									<span
+										class="px-1.5 py-0.5 text-[10px] rounded bg-dark-600 text-gray-400"
+										x-text="formatWidgetType(widget.widget_type)"
+									></span>
+									<button
+										@click="removeWidget(widget.id)"
+										class="p-1 text-gray-500 hover:text-red-400 transition-colors"
+										title="Remove widget"
+									>
+										<i class="fas fa-times text-xs"></i>
+									</button>
+								</div>
+							</div>
+							<!-- Widget Body -->
+							<div class="p-4 min-h-[120px] flex items-center justify-center">
+								<div class="text-center">
+									<i :class="widgetIcon(widget.widget_type)" class="text-2xl text-gray-500 mb-2"></i>
+									<p class="text-xs text-gray-500" x-text="widget.widget_type"></p>
+									<p class="text-[10px] text-gray-600 mt-1" x-text="'Pos: ' + (widget.position_x || 0) + ',' + (widget.position_y || 0) + ' (' + (widget.width || 0) + 'x' + (widget.height || 0) + ')'"></p>
+								</div>
+							</div>
+						</div>
+					</template>
+				</div>
+			</div>
+
+			<!-- Create Layout Modal -->
+			<div
+				x-show="showCreateModal"
+				x-cloak
+				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+			>
+				<div class="bg-dark-800 rounded-xl shadow-xl border border-dark-600 w-full max-w-lg mx-4">
+					<div class="flex items-center justify-between p-6 border-b border-dark-600">
+						<h2 class="text-lg font-display font-bold text-white">Create Dashboard</h2>
+						<button @click="showCreateModal = false" class="text-gray-400 hover:text-white">
+							<i class="fas fa-times"></i>
+						</button>
+					</div>
+					<div class="p-6 space-y-4">
+						<div>
+							<label class="block text-sm font-medium text-gray-300 mb-1">Name</label>
+							<input
+								type="text"
+								x-model="newLayout.name"
+								class="input w-full"
+								placeholder="e.g. Production Overview"
+							/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium text-gray-300 mb-1">Description</label>
+							<textarea
+								x-model="newLayout.description"
+								rows="2"
+								class="input w-full"
+								placeholder="Dashboard description"
+							></textarea>
+						</div>
+						<label class="flex items-center gap-2">
+							<input
+								type="checkbox"
+								x-model="newLayout.is_default"
+								class="form-checkbox rounded bg-dark-700 border-dark-500"
+							/>
+							<span class="text-sm text-gray-300">Set as default dashboard</span>
+						</label>
+						<div class="flex justify-end gap-3 pt-4 border-t border-dark-600">
+							<button @click="showCreateModal = false" class="btn-secondary">Cancel</button>
+							<button
+								@click="createLayout()"
+								:disabled="!newLayout.name.trim() || createLoading"
+								class="btn-primary disabled:opacity-50"
+							>
+								<i class="fas fa-plus mr-2"></i>Create
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Add Widget Modal -->
+			<div
+				x-show="showWidgetModal"
+				x-cloak
+				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+			>
+				<div class="bg-dark-800 rounded-xl shadow-xl border border-dark-600 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+					<div class="flex items-center justify-between p-6 border-b border-dark-600 sticky top-0 bg-dark-800 z-10">
+						<h2 class="text-lg font-display font-bold text-white">Add Widget</h2>
+						<button @click="showWidgetModal = false" class="text-gray-400 hover:text-white">
+							<i class="fas fa-times"></i>
+						</button>
+					</div>
+					<div class="p-6 space-y-4">
+						<div>
+							<label class="block text-sm font-medium text-gray-300 mb-1">Widget Type</label>
+							<select x-model="newWidget.type" class="input w-full">
+								<option value="">-- Select type --</option>
+								<option value="cpu_gauge">CPU Gauge</option>
+								<option value="memory_gauge">Memory Gauge</option>
+								<option value="disk_gauge">Disk Gauge</option>
+								<option value="cpu_chart">CPU Chart</option>
+								<option value="memory_chart">Memory Chart</option>
+								<option value="network_chart">Network Chart</option>
+								<option value="container_table">Container Table</option>
+								<option value="container_count">Container Count</option>
+								<option value="alert_feed">Alert Feed</option>
+								<option value="log_stream">Log Stream</option>
+								<option value="security_score">Security Score</option>
+								<option value="compliance_status">Compliance Status</option>
+								<option value="top_containers">Top Containers</option>
+								<option value="host_info">Host Info</option>
+								<option value="custom_metric">Custom Metric</option>
+							</select>
+						</div>
+						<div>
+							<label class="block text-sm font-medium text-gray-300 mb-1">Title</label>
+							<input
+								type="text"
+								x-model="newWidget.title"
+								class="input w-full"
+								placeholder="Widget title"
+							/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium text-gray-300 mb-1">Config (JSON)</label>
+							<textarea
+								x-model="newWidget.config"
+								rows="3"
+								class="input w-full font-mono text-sm"
+								placeholder='{"key": "value"}'
+							></textarea>
+						</div>
+						<div class="grid grid-cols-2 gap-4">
+							<div>
+								<label class="block text-sm font-medium text-gray-300 mb-1">Position X</label>
+								<input
+									type="number"
+									x-model.number="newWidget.position_x"
+									class="input w-full"
+									min="0"
+								/>
+							</div>
+							<div>
+								<label class="block text-sm font-medium text-gray-300 mb-1">Position Y</label>
+								<input
+									type="number"
+									x-model.number="newWidget.position_y"
+									class="input w-full"
+									min="0"
+								/>
+							</div>
+							<div>
+								<label class="block text-sm font-medium text-gray-300 mb-1">Width</label>
+								<input
+									type="number"
+									x-model.number="newWidget.width"
+									class="input w-full"
+									min="1"
+								/>
+							</div>
+							<div>
+								<label class="block text-sm font-medium text-gray-300 mb-1">Height</label>
+								<input
+									type="number"
+									x-model.number="newWidget.height"
+									class="input w-full"
+									min="1"
+								/>
+							</div>
+						</div>
+						<div class="flex justify-end gap-3 pt-4 border-t border-dark-600">
+							<button @click="showWidgetModal = false" class="btn-secondary">Cancel</button>
+							<button
+								@click="addWidget()"
+								:disabled="!newWidget.type || !newWidget.title.trim() || addWidgetLoading"
+								class="btn-primary disabled:opacity-50"
+							>
+								<i class="fas fa-plus mr-2"></i>Add Widget
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+func dashboardsApp(csrfToken string) string {
+	return `{
+		layouts: [],
+		layoutsLoading: false,
+		selectedLayout: null,
+		widgets: [],
+		widgetsLoading: false,
+		showCreateModal: false,
+		showWidgetModal: false,
+		createLoading: false,
+		addWidgetLoading: false,
+		csrfToken: '` + csrfToken + `',
+		newLayout: { name: '', description: '', is_default: false },
+		newWidget: {
+			type: '',
+			title: '',
+			config: '',
+			position_x: 0,
+			position_y: 0,
+			width: 4,
+			height: 3,
+		},
+
+		async init() {
+			await this.loadLayouts();
+		},
+
+		async loadLayouts() {
+			this.layoutsLoading = true;
+			try {
+				const resp = await fetch('/api/v1/dashboards/layouts');
+				if (!resp.ok) {
+					const body = await resp.json().catch(() => null);
+					throw new Error((body && body.error) || 'Failed to load dashboards');
+				}
+				const body = await resp.json();
+				this.layouts = body.layouts || body.data || body || [];
+				if (!Array.isArray(this.layouts)) this.layouts = [];
+			} catch (err) {
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast(err.message, 'error'); }
+			} finally {
+				this.layoutsLoading = false;
+			}
+		},
+
+		async createLayout() {
+			if (!this.newLayout.name.trim()) return;
+			this.createLoading = true;
+			try {
+				const resp = await fetch('/api/v1/dashboards/layouts', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'X-CSRF-Token': this.csrfToken,
+					},
+					body: JSON.stringify({
+						name: this.newLayout.name,
+						description: this.newLayout.description,
+						is_default: this.newLayout.is_default,
+					}),
+				});
+				if (!resp.ok) {
+					const body = await resp.json().catch(() => null);
+					throw new Error((body && body.error) || 'Failed to create dashboard');
+				}
+				this.showCreateModal = false;
+				this.newLayout = { name: '', description: '', is_default: false };
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Dashboard created', 'success'); }
+				await this.loadLayouts();
+			} catch (err) {
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast(err.message, 'error'); }
+			} finally {
+				this.createLoading = false;
+			}
+		},
+
+		async deleteLayout(layoutId) {
+			if (!confirm('Delete this dashboard and all its widgets?')) return;
+			try {
+				const resp = await fetch('/api/v1/dashboards/layouts/' + layoutId, {
+					method: 'DELETE',
+					headers: { 'X-CSRF-Token': this.csrfToken },
+				});
+				if (!resp.ok) {
+					const body = await resp.json().catch(() => null);
+					throw new Error((body && body.error) || 'Failed to delete dashboard');
+				}
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Dashboard deleted', 'success'); }
+				await this.loadLayouts();
+			} catch (err) {
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast(err.message, 'error'); }
+			}
+		},
+
+		async openLayout(layout) {
+			this.selectedLayout = layout;
+			this.widgetsLoading = true;
+			try {
+				const resp = await fetch('/api/v1/dashboards/layouts/' + layout.id + '/widgets');
+				if (!resp.ok) {
+					const body = await resp.json().catch(() => null);
+					throw new Error((body && body.error) || 'Failed to load widgets');
+				}
+				const body = await resp.json();
+				this.widgets = body.widgets || body.data || body || [];
+				if (!Array.isArray(this.widgets)) this.widgets = [];
+			} catch (err) {
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast(err.message, 'error'); }
+			} finally {
+				this.widgetsLoading = false;
+			}
+		},
+
+		async addWidget() {
+			if (!this.selectedLayout || !this.newWidget.type || !this.newWidget.title.trim()) return;
+			this.addWidgetLoading = true;
+			let configObj = {};
+			if (this.newWidget.config.trim()) {
+				try {
+					configObj = JSON.parse(this.newWidget.config);
+				} catch (e) {
+					if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Invalid JSON in config field', 'error'); }
+					this.addWidgetLoading = false;
+					return;
+				}
+			}
+			try {
+				const resp = await fetch('/api/v1/dashboards/layouts/' + this.selectedLayout.id + '/widgets', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'X-CSRF-Token': this.csrfToken,
+					},
+					body: JSON.stringify({
+						widget_type: this.newWidget.type,
+						title: this.newWidget.title,
+						config: configObj,
+						position_x: this.newWidget.position_x,
+						position_y: this.newWidget.position_y,
+						width: this.newWidget.width,
+						height: this.newWidget.height,
+					}),
+				});
+				if (!resp.ok) {
+					const body = await resp.json().catch(() => null);
+					throw new Error((body && body.error) || 'Failed to add widget');
+				}
+				this.showWidgetModal = false;
+				this.newWidget = {
+					type: '',
+					title: '',
+					config: '',
+					position_x: 0,
+					position_y: 0,
+					width: 4,
+					height: 3,
+				};
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Widget added', 'success'); }
+				await this.openLayout(this.selectedLayout);
+			} catch (err) {
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast(err.message, 'error'); }
+			} finally {
+				this.addWidgetLoading = false;
+			}
+		},
+
+		async removeWidget(widgetId) {
+			if (!confirm('Remove this widget?')) return;
+			try {
+				const resp = await fetch('/api/v1/dashboards/widgets/' + widgetId, {
+					method: 'DELETE',
+					headers: { 'X-CSRF-Token': this.csrfToken },
+				});
+				if (!resp.ok) {
+					const body = await resp.json().catch(() => null);
+					throw new Error((body && body.error) || 'Failed to remove widget');
+				}
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast('Widget removed', 'success'); }
+				await this.openLayout(this.selectedLayout);
+			} catch (err) {
+				if (window.usulnet && window.usulnet.toast) { window.usulnet.toast(err.message, 'error'); }
+			}
+		},
+
+		formatWidgetType(type) {
+			if (!type) return '';
+			return type.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+		},
+
+		widgetIcon(type) {
+			var icons = {
+				cpu_gauge: 'fas fa-tachometer-alt',
+				memory_gauge: 'fas fa-tachometer-alt',
+				disk_gauge: 'fas fa-hdd',
+				cpu_chart: 'fas fa-microchip',
+				memory_chart: 'fas fa-memory',
+				network_chart: 'fas fa-project-diagram',
+				container_table: 'fas fa-cubes',
+				container_count: 'fas fa-chart-bar',
+				alert_feed: 'fas fa-bell',
+				log_stream: 'fas fa-scroll',
+				security_score: 'fas fa-shield-alt',
+				compliance_status: 'fas fa-heartbeat',
+				top_containers: 'fas fa-layer-group',
+				host_info: 'fas fa-server',
+				custom_metric: 'fas fa-chart-line',
+			};
+			return icons[type] || 'fas fa-puzzle-piece';
+		},
+	}`
+}

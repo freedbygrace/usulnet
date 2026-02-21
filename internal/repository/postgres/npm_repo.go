@@ -255,7 +255,7 @@ func (r *NPMAuditLogRepository) Create(ctx context.Context, log *models.NPMAudit
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	_, err = r.db.Exec(ctx, query,
 		log.ID, log.HostID, log.UserID, log.Operation, log.ResourceType,
-		log.ResourceID, log.ResourceName, detailsJSON, log.CreatedAt,
+		log.ResourceID, log.ResourceName, string(detailsJSON), log.CreatedAt,
 	)
 	if err != nil {
 		return errors.Wrap(err, errors.CodeDatabaseError, "failed to create NPM audit log")

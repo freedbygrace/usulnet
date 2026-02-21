@@ -28,10 +28,21 @@ type Restorer struct {
 	repo              Repository
 	volumeProvider    VolumeProvider
 	containerProvider ContainerProvider
+	stackProvider     StackProvider
 	archiver          Archiver
 	encryptor         *crypto.AESEncryptor
 	config            Config
 	logger            *logger.Logger
+}
+
+// RestorerOption configures the Restorer.
+type RestorerOption func(*Restorer)
+
+// WithRestorerStackProvider sets the stack provider for stack restores.
+func WithRestorerStackProvider(sp StackProvider) RestorerOption {
+	return func(r *Restorer) {
+		r.stackProvider = sp
+	}
 }
 
 // NewRestorer creates a new backup restorer.
@@ -42,6 +53,7 @@ func NewRestorer(
 	containerProvider ContainerProvider,
 	config Config,
 	log *logger.Logger,
+	opts ...RestorerOption,
 ) (*Restorer, error) {
 	restorer := &Restorer{
 		storage:           storage,
@@ -51,6 +63,11 @@ func NewRestorer(
 		archiver:          NewTarArchiver(),
 		config:            config,
 		logger:            log.Named("backup.restorer"),
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(restorer)
 	}
 
 	// Initialize encryptor if key is provided
@@ -118,16 +135,29 @@ func (r *Restorer) Restore(ctx context.Context, opts RestoreOptions) (*RestoreRe
 		err = errors.New(errors.CodeRestoreFailed, "unsupported backup type")
 	}
 
-	// Restore backup status
-	backup.Status = models.BackupStatusCompleted
-	r.repo.Update(ctx, backup)
-
 	if err != nil {
 		r.logger.Error("restore failed",
 			"backup_id", backup.ID,
 			"error", err,
 		)
+		// Mark backup status back to completed (not restoring) even on failure
+		backup.Status = models.BackupStatusCompleted
+		if updateErr := r.repo.Update(ctx, backup); updateErr != nil {
+			r.logger.Error("failed to update backup status after restore failure",
+				"backup_id", backup.ID,
+				"error", updateErr,
+			)
+		}
 		return nil, err
+	}
+
+	// Restore succeeded — mark backup status back to completed
+	backup.Status = models.BackupStatusCompleted
+	if updateErr := r.repo.Update(ctx, backup); updateErr != nil {
+		r.logger.Error("failed to update backup status after restore",
+			"backup_id", backup.ID,
+			"error", updateErr,
+		)
 	}
 
 	result.BackupID = backup.ID
@@ -363,7 +393,185 @@ func (r *Restorer) restoreContainer(ctx context.Context, backup *models.Backup, 
 
 // restoreStack restores a stack backup.
 func (r *Restorer) restoreStack(ctx context.Context, backup *models.Backup, opts RestoreOptions) (*RestoreResult, error) {
-	return nil, errors.New(errors.CodeRestoreFailed, "stack restore not yet implemented")
+	if r.stackProvider == nil {
+		return nil, errors.New(errors.CodeRestoreFailed, "stack provider not configured")
+	}
+
+	// Create temporary directory for extraction
+	tmpDir, err := os.MkdirTemp("", "stack-restore-*")
+	if err != nil {
+		return nil, errors.Wrap(err, errors.CodeRestoreFailed, "failed to create temp directory")
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Report progress
+	if opts.ProgressCallback != nil {
+		opts.ProgressCallback(Progress{
+			Phase:   "extracting",
+			Percent: 10,
+			Message: "Downloading and extracting stack backup...",
+		})
+	}
+
+	// Extract backup archive
+	extractResult, err := r.extractBackup(ctx, backup, tmpDir, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read metadata
+	metaPath := filepath.Join(tmpDir, "backup_metadata.json")
+	metaData, err := os.ReadFile(metaPath)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.CodeBackupCorrupted, "stack backup metadata not found")
+	}
+
+	var meta struct {
+		StackID   string   `json:"stack_id"`
+		StackName string   `json:"stack_name"`
+		HostID    string   `json:"host_id"`
+		Volumes   []string `json:"volumes"`
+	}
+	if err := json.Unmarshal(metaData, &meta); err != nil {
+		return nil, errors.Wrap(err, errors.CodeBackupCorrupted, "invalid stack backup metadata")
+	}
+
+	// Determine stack name
+	stackName := opts.TargetName
+	if stackName == "" {
+		stackName = meta.StackName
+	}
+
+	r.logger.Info("restoring stack",
+		"backup_id", backup.ID,
+		"stack_name", stackName,
+		"volumes", len(meta.Volumes),
+	)
+
+	// Read compose file from backup
+	composePath := filepath.Join(tmpDir, "_stack_config", "docker-compose.yml")
+	composeData, err := os.ReadFile(composePath)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.CodeBackupCorrupted, "compose file not found in backup")
+	}
+	composeFile := string(composeData)
+
+	// Read env file if present
+	var envFile *string
+	envPath := filepath.Join(tmpDir, "_stack_config", ".env")
+	if envData, readErr := os.ReadFile(envPath); readErr == nil && len(envData) > 0 {
+		envStr := string(envData)
+		envFile = &envStr
+	}
+
+	// If an existing stack should be stopped, try to stop it
+	if opts.StopContainers {
+		if origID, parseErr := uuid.Parse(meta.StackID); parseErr == nil {
+			if opts.ProgressCallback != nil {
+				opts.ProgressCallback(Progress{
+					Phase:   "preparing",
+					Percent: 25,
+					Message: "Stopping existing stack...",
+				})
+			}
+			if stopErr := r.stackProvider.StopStack(ctx, origID); stopErr != nil {
+				r.logger.Warn("failed to stop existing stack (may not exist)",
+					"stack_id", meta.StackID,
+					"error", stopErr,
+				)
+			}
+		}
+	}
+
+	// Restore volumes
+	if opts.ProgressCallback != nil {
+		opts.ProgressCallback(Progress{
+			Phase:   "restoring",
+			Percent: 30,
+			Message: "Restoring stack volumes...",
+		})
+	}
+
+	volumesDir := filepath.Join(tmpDir, "volumes")
+	for i, volumeName := range meta.Volumes {
+		volumeDataDir := filepath.Join(volumesDir, volumeName)
+		if _, statErr := os.Stat(volumeDataDir); os.IsNotExist(statErr) {
+			r.logger.Info("volume data not in backup, skipping", "volume", volumeName)
+			continue
+		}
+
+		// Check if volume exists
+		exists, _ := r.volumeProvider.VolumeExists(ctx, backup.HostID, volumeName)
+		if !exists {
+			createOpts := CreateVolumeOptions{
+				Name:   volumeName,
+				Driver: "local",
+			}
+			if _, createErr := r.volumeProvider.CreateVolume(ctx, backup.HostID, createOpts); createErr != nil {
+				r.logger.Warn("failed to create volume",
+					"volume", volumeName,
+					"error", createErr,
+				)
+				continue
+			}
+		} else if !opts.OverwriteExisting {
+			r.logger.Info("skipping existing volume", "volume", volumeName)
+			continue
+		}
+
+		volumePath, pathErr := r.volumeProvider.GetVolumeMountpoint(ctx, backup.HostID, volumeName)
+		if pathErr != nil {
+			r.logger.Warn("failed to get volume mountpoint",
+				"volume", volumeName,
+				"error", pathErr,
+			)
+			continue
+		}
+
+		if copyErr := copyDir(volumeDataDir, volumePath); copyErr != nil {
+			return nil, errors.Wrap(copyErr, errors.CodeRestoreFailed,
+				fmt.Sprintf("failed to restore volume %s", volumeName))
+		}
+
+		if opts.ProgressCallback != nil {
+			percent := 30 + float64(i+1)/float64(len(meta.Volumes))*40 // 30-70%
+			opts.ProgressCallback(Progress{
+				Phase:   "restoring",
+				Percent: percent,
+				Message: fmt.Sprintf("Restored volume %s (%d/%d)", volumeName, i+1, len(meta.Volumes)),
+			})
+		}
+	}
+
+	// Deploy the stack
+	if opts.ProgressCallback != nil {
+		opts.ProgressCallback(Progress{
+			Phase:   "deploying",
+			Percent: 75,
+			Message: fmt.Sprintf("Deploying stack %s...", stackName),
+		})
+	}
+
+	stackID, deployErr := r.stackProvider.DeployStack(ctx, backup.HostID, stackName, composeFile, envFile)
+	if deployErr != nil {
+		return nil, errors.Wrap(deployErr, errors.CodeRestoreFailed,
+			fmt.Sprintf("failed to deploy stack %s", stackName))
+	}
+
+	if opts.ProgressCallback != nil {
+		opts.ProgressCallback(Progress{
+			Phase:   "completed",
+			Percent: 100,
+			Message: "Stack restore completed",
+		})
+	}
+
+	return &RestoreResult{
+		TargetID:     stackID.String(),
+		TargetName:   stackName,
+		BytesWritten: extractResult.BytesWritten,
+		FileCount:    extractResult.FileCount,
+	}, nil
 }
 
 // extractBackup extracts a backup to a destination path.

@@ -266,7 +266,7 @@ func (c *Creator) createContainerBackup(ctx context.Context, backup *models.Back
 	if opts.StopContainer {
 		wasRunning, err = c.containerProvider.IsContainerRunning(ctx, opts.HostID, opts.TargetID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("check container running state: %w", err)
 		}
 
 		if wasRunning {
@@ -646,7 +646,7 @@ func (c *Creator) createArchive(ctx context.Context, backup *models.Backup, sour
 	if err := <-errCh; err != nil {
 		// Clean up partial backup
 		c.storage.Delete(ctx, backup.Path)
-		return nil, err
+		return nil, fmt.Errorf("create archive: %w", err)
 	}
 
 	// Get final size from storage
@@ -699,13 +699,13 @@ func (c *Creator) encryptStream(reader io.Reader) ([]byte, error) {
 	// Read all data
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read stream for encryption: %w", err)
 	}
 
 	// Encrypt
 	encrypted, err := c.encryptor.Encrypt(data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encrypt backup data: %w", err)
 	}
 
 	return []byte(encrypted), nil
@@ -716,14 +716,14 @@ func (c *Creator) verifyBackup(ctx context.Context, backup *models.Backup) (bool
 	// Read backup
 	reader, err := c.storage.Read(ctx, backup.Path)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("read backup for verification: %w", err)
 	}
 	defer reader.Close()
 
 	// Calculate checksum
 	hash := sha256.New()
 	if _, err := io.Copy(hash, reader); err != nil {
-		return false, err
+		return false, fmt.Errorf("calculate verification checksum: %w", err)
 	}
 
 	checksum := hex.EncodeToString(hash.Sum(nil))
@@ -795,13 +795,13 @@ func sanitizeFilename(name string) string {
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return fmt.Errorf("copyDir: walk %q: %w", path, err)
 		}
 
 		// Get relative path
 		relPath, err := filepath.Rel(src, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("copyDir: relative path for %q: %w", path, err)
 		}
 
 		dstPath := filepath.Join(dst, relPath)
@@ -819,16 +819,18 @@ func copyDir(src, dst string) error {
 func copyFile(src, dst string, mode os.FileMode) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("copyFile: open source %q: %w", src, err)
 	}
 	defer srcFile.Close()
 
 	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
-		return err
+		return fmt.Errorf("copyFile: create destination %q: %w", dst, err)
 	}
 	defer dstFile.Close()
 
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("copyFile: copy %q to %q: %w", src, dst, err)
+	}
+	return nil
 }

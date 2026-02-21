@@ -244,7 +244,7 @@ func buildReverseProxy(h *models.ProxyHost) ReverseProxyHandler {
 	case models.ProxyUpstreamHTTPS:
 		rp.Transport = &HTTPTransport{
 			Module: "http",
-			TLS:    &UpstreamTLS{InsecureSkipVerify: true}, // Common for internal backends
+			TLS:    &UpstreamTLS{InsecureSkipVerify: false},
 		}
 	case models.ProxyUpstreamH2C:
 		rp.Transport = &HTTPTransport{

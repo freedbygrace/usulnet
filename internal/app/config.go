@@ -5,7 +5,10 @@
 package app
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -27,6 +30,7 @@ type Config struct {
 	Trivy    TrivyConfig    `mapstructure:"trivy"`
 	NPM      NPMConfig      `mapstructure:"npm"`
 	Caddy    CaddyConfig    `mapstructure:"caddy"`
+	Nginx    NginxConfig    `mapstructure:"nginx"`
 	Minio    MinIOConfig    `mapstructure:"minio"`
 	Logging       LoggingConfig       `mapstructure:"logging"`
 	Metrics       MetricsConfig       `mapstructure:"metrics"`
@@ -72,6 +76,7 @@ type ServerConfig struct {
 	MaxRequestSize  string        `mapstructure:"max_request_size"`
 	RateLimitRPS    int           `mapstructure:"rate_limit_rps"`
 	RateLimitBurst  int           `mapstructure:"rate_limit_burst"`
+	RedirectHTTPS   bool          `mapstructure:"redirect_https"` // Redirect HTTP→HTTPS when TLS is enabled
 
 	// TLS configuration
 	TLS ServerTLSConfig `mapstructure:"tls"`
@@ -94,6 +99,10 @@ type ServerTLSConfig struct {
 // DatabaseConfig holds PostgreSQL configuration
 type DatabaseConfig struct {
 	URL             string        `mapstructure:"url"`
+	SSLMode         string        `mapstructure:"ssl_mode"`     // disable, allow, prefer, require, verify-ca, verify-full
+	SSLRootCert     string        `mapstructure:"ssl_rootcert"` // CA certificate path for server verification (verify-ca/verify-full)
+	SSLCert         string        `mapstructure:"ssl_cert"`     // Client certificate path (optional, for mTLS)
+	SSLKey          string        `mapstructure:"ssl_key"`      // Client key path (optional, for mTLS)
 	MaxOpenConns    int           `mapstructure:"max_open_conns"`
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
@@ -104,6 +113,11 @@ type DatabaseConfig struct {
 // RedisConfig holds Redis configuration
 type RedisConfig struct {
 	URL          string        `mapstructure:"url"`
+	TLSEnabled   bool          `mapstructure:"tls_enabled"`   // Force TLS even with redis:// URL
+	TLSCertFile  string        `mapstructure:"tls_cert_file"` // Client certificate for mTLS
+	TLSKeyFile   string        `mapstructure:"tls_key_file"`  // Client key for mTLS
+	TLSCAFile    string        `mapstructure:"tls_ca_file"`   // Custom CA for server verification
+	TLSSkipVerify bool         `mapstructure:"tls_skip_verify"` // Skip server cert verification
 	PoolSize     int           `mapstructure:"pool_size"`
 	MinIdleConns int           `mapstructure:"min_idle_conns"`
 	DialTimeout  time.Duration `mapstructure:"dial_timeout"`
@@ -157,10 +171,11 @@ type SecurityConfig struct {
 
 // StorageConfig holds storage configuration
 type StorageConfig struct {
-	Type   string   `mapstructure:"type"` // local | s3
-	Path   string   `mapstructure:"path"`
-	S3     S3Config `mapstructure:"s3"`
-	Backup struct {
+	Type      string   `mapstructure:"type"` // local | s3
+	Path      string   `mapstructure:"path"`
+	StacksDir string   `mapstructure:"stacks_dir"` // Directory for stack/compose files (default: <path>/stacks)
+	S3        S3Config `mapstructure:"s3"`
+	Backup    struct {
 		Compression      string `mapstructure:"compression"`
 		CompressionLevel int    `mapstructure:"compression_level"`
 		RetentionDays    int    `mapstructure:"default_retention_days"`
@@ -175,6 +190,7 @@ type S3Config struct {
 	AccessKey    string `mapstructure:"access_key"`
 	SecretKey    string `mapstructure:"secret_key"`
 	UsePathStyle bool   `mapstructure:"use_path_style"`
+	UseSSL       bool   `mapstructure:"use_ssl"` // Use HTTPS for S3 connections (default: true)
 }
 
 // AgentConfig holds agent-specific configuration
@@ -183,6 +199,7 @@ type AgentConfig struct {
 	ID                string        `mapstructure:"id"`
 	Name              string        `mapstructure:"name"`
 	Token             string        `mapstructure:"token"`
+	DataDir           string        `mapstructure:"data_dir"` // Agent local state directory (default: /var/lib/usulnet-agent)
 	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
 	InventoryInterval time.Duration `mapstructure:"inventory_interval"`
 	MetricsInterval   time.Duration `mapstructure:"metrics_interval"`
@@ -220,6 +237,20 @@ type CaddyConfig struct {
 	ACMEEmail   string `mapstructure:"acme_email"`
 	ListenHTTP  string `mapstructure:"listen_http"`
 	ListenHTTPS string `mapstructure:"listen_https"`
+}
+
+// NginxConfig holds nginx reverse proxy configuration.
+// When enabled, usulnet manages nginx configuration files and Let's Encrypt
+// certificates directly. This is the default/recommended proxy backend.
+type NginxConfig struct {
+	Enabled        bool   `mapstructure:"enabled"`
+	ConfigDir      string `mapstructure:"config_dir"`
+	CertDir        string `mapstructure:"cert_dir"`
+	ACMEEmail      string `mapstructure:"acme_email"`
+	ACMEWebRoot    string `mapstructure:"acme_web_root"`
+	ACMEAccountDir string `mapstructure:"acme_account_dir"`
+	ListenHTTP     string `mapstructure:"listen_http"`
+	ListenHTTPS    string `mapstructure:"listen_https"`
 }
 
 // MinIOConfig holds MinIO/S3 configuration.
@@ -292,6 +323,9 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	// Dual-binding: USULNET_ prefixed (canonical) + unprefixed (Docker Compose compat).
 	// BindEnv picks the first set: USULNET_DATABASE_URL takes priority over DATABASE_URL.
 	_ = v.BindEnv("database.url", "USULNET_DATABASE_URL", "DATABASE_URL")
+	_ = v.BindEnv("database.ssl_rootcert", "USULNET_DATABASE_SSL_ROOTCERT")
+	_ = v.BindEnv("database.ssl_cert", "USULNET_DATABASE_SSL_CERT")
+	_ = v.BindEnv("database.ssl_key", "USULNET_DATABASE_SSL_KEY")
 	_ = v.BindEnv("redis.url", "USULNET_REDIS_URL", "REDIS_URL")
 	_ = v.BindEnv("nats.url", "USULNET_NATS_URL", "NATS_URL")
 	_ = v.BindEnv("security.jwt_secret", "USULNET_JWT_SECRET", "JWT_SECRET")
@@ -349,8 +383,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.https_port", 7443)
 	v.SetDefault("server.tls.enabled", false)
 	v.SetDefault("server.tls.auto_tls", true)
+	v.SetDefault("server.redirect_https", true)
 
 	// Database (tuned to reduce connection churn under moderate load)
+	v.SetDefault("database.ssl_mode", "require")
 	v.SetDefault("database.max_open_conns", 25)
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.conn_max_lifetime", "30m")
@@ -385,12 +421,15 @@ func setDefaults(v *viper.Viper) {
 
 	// Storage
 	v.SetDefault("storage.type", "local")
-	v.SetDefault("storage.path", "/var/lib/usulnet")
+	v.SetDefault("storage.path", "/app/data")
+	v.SetDefault("storage.stacks_dir", "") // empty = storage.path + "/stacks"
 	v.SetDefault("storage.backup.compression", "zstd")
 	v.SetDefault("storage.backup.compression_level", 3)
 	v.SetDefault("storage.backup.default_retention_days", 30)
+	v.SetDefault("storage.s3.use_ssl", true)
 
 	// Agent
+	v.SetDefault("agent.data_dir", "/var/lib/usulnet-agent")
 	v.SetDefault("agent.heartbeat_interval", "30s")
 	v.SetDefault("agent.inventory_interval", "5m")
 	v.SetDefault("agent.metrics_interval", "1m")
@@ -486,9 +525,38 @@ func (c *Config) Validate() error {
 	// Security validation for master/standalone
 	if c.Mode != "agent" {
 		if c.Security.JWTSecret == "" {
-			errs = append(errs, fmt.Errorf("security.jwt_secret is required"))
+			// Auto-generate a JWT secret for first-run convenience.
+			// This secret changes on every restart if not persisted in config,
+			// which invalidates all existing sessions — acceptable for initial setup
+			// but operators MUST set a stable secret for production.
+			b := make([]byte, 32)
+			if _, err := rand.Read(b); err != nil {
+				errs = append(errs, fmt.Errorf("security.jwt_secret is required (auto-generation failed: %w)", err))
+			} else {
+				c.Security.JWTSecret = hex.EncodeToString(b)
+				slog.Warn("security.jwt_secret not configured — auto-generated a temporary secret. Sessions will be invalidated on restart. Set a permanent secret in config.yaml or via USULNET_SECURITY_JWT_SECRET.")
+			}
 		} else if len(c.Security.JWTSecret) < 32 {
 			errs = append(errs, fmt.Errorf("security.jwt_secret must be at least 32 characters"))
+		}
+
+		if c.Security.ConfigEncryptionKey == "" {
+			b := make([]byte, 32)
+			if _, err := rand.Read(b); err != nil {
+				errs = append(errs, fmt.Errorf("security.config_encryption_key is required (auto-generation failed: %w)", err))
+			} else {
+				c.Security.ConfigEncryptionKey = hex.EncodeToString(b)
+				slog.Warn("security.config_encryption_key not configured — auto-generated a temporary key. Encrypted data will be unreadable after restart. Set a permanent key in config.yaml or via USULNET_SECURITY_CONFIG_ENCRYPTION_KEY.")
+			}
+		}
+	}
+
+	// Encryption key validation (64 hex chars = 32 bytes for AES-256)
+	if c.Mode != "agent" && c.Security.ConfigEncryptionKey != "" {
+		if len(c.Security.ConfigEncryptionKey) != 64 {
+			errs = append(errs, fmt.Errorf("security.config_encryption_key must be exactly 64 hex characters (got %d)", len(c.Security.ConfigEncryptionKey)))
+		} else if _, err := hex.DecodeString(c.Security.ConfigEncryptionKey); err != nil {
+			errs = append(errs, fmt.Errorf("security.config_encryption_key must be valid hexadecimal: %w", err))
 		}
 	}
 
@@ -500,6 +568,42 @@ func (c *Config) Validate() error {
 		if c.Storage.S3.AccessKey == "" || c.Storage.S3.SecretKey == "" {
 			errs = append(errs, fmt.Errorf("storage.s3 credentials are required when using S3 storage"))
 		}
+	}
+
+	// TLS validation: custom cert/key required when auto_tls is disabled
+	if c.Server.TLS.Enabled && !c.Server.TLS.AutoTLS {
+		if c.Server.TLS.CertFile == "" || c.Server.TLS.KeyFile == "" {
+			errs = append(errs, fmt.Errorf("server.tls.cert_file and server.tls.key_file are required when tls.enabled=true and tls.auto_tls=false"))
+		}
+	}
+
+	// NATS TLS validation
+	if c.NATS.TLS.Enabled {
+		if c.NATS.TLS.CertFile == "" || c.NATS.TLS.KeyFile == "" {
+			errs = append(errs, fmt.Errorf("nats.tls.cert_file and nats.tls.key_file are required when nats.tls.enabled=true"))
+		}
+	}
+
+	// Agent TLS validation
+	if c.Mode == "agent" && c.Agent.TLSEnabled {
+		if c.Agent.TLSCertFile == "" || c.Agent.TLSKeyFile == "" {
+			errs = append(errs, fmt.Errorf("agent.tls_cert_file and agent.tls_key_file are required when agent.tls_enabled=true"))
+		}
+	}
+
+	// Logging file path required when output is "file"
+	if strings.EqualFold(c.Logging.Output, "file") && c.Logging.File.Path == "" {
+		errs = append(errs, fmt.Errorf("logging.file.path is required when logging.output=file"))
+	}
+
+	// Tracing endpoint required when enabled
+	if c.Observability.Tracing.Enabled && c.Observability.Tracing.Endpoint == "" {
+		errs = append(errs, fmt.Errorf("observability.tracing.endpoint is required when tracing is enabled"))
+	}
+
+	// Sampling rate bounds
+	if c.Observability.Tracing.Enabled && (c.Observability.Tracing.SamplingRate < 0 || c.Observability.Tracing.SamplingRate > 1) {
+		errs = append(errs, fmt.Errorf("observability.tracing.sampling_rate must be between 0.0 and 1.0 (got %f)", c.Observability.Tracing.SamplingRate))
 	}
 
 	// Port validation

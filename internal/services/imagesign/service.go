@@ -199,6 +199,7 @@ func (s *Service) SignImage(ctx context.Context, imageRef string, opts SignOptio
 	sig := &models.ImageSignature{
 		ID:            uuid.New(),
 		ImageRef:      imageRef,
+		ImageDigest:   extractDigestFromOutput(stdout.String(), stderr.String()),
 		SignatureType: models.SignatureTypeCosign,
 		Verified:      true,
 		VerifiedAt:    &now,
@@ -371,6 +372,31 @@ func parseCosignVerifyOutput(data []byte) ([]SignatureInfo, error) {
 	return sigs, nil
 }
 
+// extractDigestFromOutput attempts to extract a sha256 digest from cosign
+// sign/verify output. Cosign typically includes the digest in the form
+// "sha256:<hex>" somewhere in stdout or stderr.
+func extractDigestFromOutput(stdout, stderr string) string {
+	for _, s := range []string{stdout, stderr} {
+		// Look for sha256:abc123... pattern (64 hex chars).
+		idx := strings.Index(s, "sha256:")
+		if idx == -1 {
+			continue
+		}
+		rest := s[idx:]
+		// Take up to 71 chars (sha256: + 64 hex)
+		candidate := rest
+		if len(candidate) > 71 {
+			candidate = candidate[:71]
+		}
+		// Trim any trailing whitespace or non-hex
+		candidate = strings.TrimRight(candidate, " \t\n\r,\"'}")
+		if len(candidate) >= 71 && strings.HasPrefix(candidate, "sha256:") {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // ---------------------------------------------------------------------------
 // Policy verification
 // ---------------------------------------------------------------------------
@@ -430,10 +456,18 @@ func (s *Service) VerifyImageAgainstPolicies(ctx context.Context, imageRef strin
 
 	if needsAttest {
 		// Look up attestations by image ref since we may not have the digest.
-		sigs, _ := s.repo.GetSignaturesByRef(ctx, imageRef)
+		sigs, sigErr := s.repo.GetSignaturesByRef(ctx, imageRef)
+		if sigErr != nil {
+			s.logger.Warn("failed to look up signatures for attestation check",
+				"image_ref", imageRef, "error", sigErr)
+		}
 		for _, sig := range sigs {
 			if sig.ImageDigest != "" {
-				atts, _ := s.repo.GetAttestationsByDigest(ctx, sig.ImageDigest)
+				atts, attErr := s.repo.GetAttestationsByDigest(ctx, sig.ImageDigest)
+				if attErr != nil {
+					s.logger.Warn("failed to look up attestations by digest",
+						"image_ref", imageRef, "digest", sig.ImageDigest, "error", attErr)
+				}
 				attestations = append(attestations, atts...)
 				break
 			}

@@ -26,9 +26,14 @@ type WebhookRepo interface {
 	Create(ctx context.Context, wh *models.OutgoingWebhook) error
 	GetByID(ctx context.Context, id uuid.UUID) (*models.OutgoingWebhook, error)
 	List(ctx context.Context) ([]*models.OutgoingWebhook, error)
+	ListEnabled(ctx context.Context, event string) ([]*models.OutgoingWebhook, error)
 	Update(ctx context.Context, wh *models.OutgoingWebhook) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	CreateDelivery(ctx context.Context, d *models.WebhookDelivery) error
+	UpdateDelivery(ctx context.Context, d *models.WebhookDelivery) error
+	GetDelivery(ctx context.Context, id uuid.UUID) (*models.WebhookDelivery, error)
 	ListDeliveries(ctx context.Context, opts models.WebhookDeliveryListOptions) ([]*models.WebhookDelivery, int64, error)
+	ListPendingDeliveries(ctx context.Context, limit int) ([]*models.WebhookDelivery, error)
 }
 
 // RunbookRepo defines the interface for runbook persistence.
@@ -39,6 +44,8 @@ type RunbookRepo interface {
 	Update(ctx context.Context, rb *models.Runbook) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	CreateExecution(ctx context.Context, exec *models.RunbookExecution) error
+	UpdateExecution(ctx context.Context, exec *models.RunbookExecution) error
+	GetExecution(ctx context.Context, id uuid.UUID) (*models.RunbookExecution, error)
 	ListExecutions(ctx context.Context, runbookID uuid.UUID, limit int) ([]*models.RunbookExecution, error)
 	ListRecentExecutions(ctx context.Context, limit int) ([]*models.RunbookExecution, error)
 	GetCategories(ctx context.Context) ([]string, error)
@@ -152,11 +159,22 @@ type ContainerTemplateRecord = models.ContainerTemplateRecord
 // TrackedVulnRepo defines the interface for tracked vulnerability persistence.
 type TrackedVulnRepo interface {
 	Create(ctx context.Context, v *TrackedVulnRecord) error
+	Upsert(ctx context.Context, v *TrackedVulnRecord) error
+	GetByID(ctx context.Context, id uuid.UUID) (*TrackedVulnRecord, error)
 	List(ctx context.Context) ([]*TrackedVulnRecord, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	Resolve(ctx context.Context, id uuid.UUID, notes string, scanID *uuid.UUID) error
+	Assign(ctx context.Context, id uuid.UUID, assigneeID *uuid.UUID, assigneeName string) error
+	ListSLABreached(ctx context.Context) ([]*TrackedVulnRecord, error)
+	WeeklyTrend(ctx context.Context) ([]models.VulnWeeklyTrend, error)
+	TopAffectedImages(ctx context.Context, limit int) ([]models.ImageVulnCount, error)
+	MTTRBySeverity(ctx context.Context) (map[string]float64, error)
+	SLACompliancePercent(ctx context.Context) (float64, error)
 	ExistsByCVE(ctx context.Context, cveID string) (bool, error)
 	CountSLABreached(ctx context.Context) (int, error)
 	CountResolvedSince(ctx context.Context, since time.Time) (int, error)
+	CountBySeverity(ctx context.Context) (map[string]int, error)
+	CountByStatus(ctx context.Context) (map[string]int, error)
 }
 
 type TrackedVulnRecord = models.TrackedVulnRecord

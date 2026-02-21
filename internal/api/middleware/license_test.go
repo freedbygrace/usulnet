@@ -186,9 +186,8 @@ func TestRequireFeature_Allowed(t *testing.T) {
 		{"business with OAuth", businessProvider(), license.FeatureOAuth},
 		{"business with AuditExport", businessProvider(), license.FeatureAuditExport},
 		{"business with Swarm", businessProvider(), license.FeatureSwarm},
-		{"enterprise with SAML", enterpriseProvider(), license.FeatureSSOSAML},
-		{"enterprise with HA", enterpriseProvider(), license.FeatureHAMode},
-		{"enterprise with WhiteLabel", enterpriseProvider(), license.FeatureWhiteLabel},
+		{"enterprise with Compliance", enterpriseProvider(), license.FeatureCompliance},
+		{"enterprise with OPA", enterpriseProvider(), license.FeatureOPAPolicies},
 	}
 
 	for _, tt := range tests {
@@ -220,10 +219,15 @@ func TestRequireFeature_Blocked(t *testing.T) {
 		{"CE blocks Swarm", ceProvider(), license.FeatureSwarm},
 		{"CE blocks SAML", ceProvider(), license.FeatureSSOSAML},
 		{"CE blocks CustomRoles", ceProvider(), license.FeatureCustomRoles},
+		// Unimplemented features are blocked for all tiers (not in AllEnterpriseFeatures)
 		{"business blocks SAML", businessProvider(), license.FeatureSSOSAML},
 		{"business blocks HA", businessProvider(), license.FeatureHAMode},
 		{"business blocks SharedTerminals", businessProvider(), license.FeatureSharedTerminals},
 		{"business blocks WhiteLabel", businessProvider(), license.FeatureWhiteLabel},
+		{"enterprise blocks SAML (unimplemented)", enterpriseProvider(), license.FeatureSSOSAML},
+		{"enterprise blocks HA (unimplemented)", enterpriseProvider(), license.FeatureHAMode},
+		{"enterprise blocks SharedTerminals (unimplemented)", enterpriseProvider(), license.FeatureSharedTerminals},
+		{"enterprise blocks WhiteLabel (unimplemented)", enterpriseProvider(), license.FeatureWhiteLabel},
 	}
 
 	for _, tt := range tests {

@@ -7,12 +7,23 @@ package middleware
 import (
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/httprate"
 
 	apierrors "github.com/fr4nsys/usulnet/internal/api/errors"
 )
+
+var apiRateLimitPerMinute int64 = 100
+
+// SetAPIRateLimitPerMinute sets the per-user API request limit used by APIRateLimit.
+func SetAPIRateLimitPerMinute(limit int) {
+	if limit <= 0 {
+		return
+	}
+	atomic.StoreInt64(&apiRateLimitPerMinute, int64(limit))
+}
 
 // RateLimitConfig contains rate limiting configuration.
 type RateLimitConfig struct {
@@ -142,7 +153,7 @@ func AuthRateLimit() func(http.Handler) http.Handler {
 // APIRateLimit returns a standard rate limiter for API endpoints.
 // 100 requests per minute per user/IP.
 func APIRateLimit() func(http.Handler) http.Handler {
-	return RateLimitByUser(100, time.Minute)
+	return RateLimitByUser(int(atomic.LoadInt64(&apiRateLimitPerMinute)), time.Minute)
 }
 
 // BurstRateLimit returns a rate limiter that allows bursts.

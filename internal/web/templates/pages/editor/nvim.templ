@@ -10,12 +10,14 @@ import (
 // ============================================================================
 
 type NvimData struct {
-	PageData layouts.PageData
-	RepoID   string
-	RepoName string
-	FilePath string
-	Ref      string
-	Language string
+	PageData  layouts.PageData
+	RepoID    string
+	RepoName  string
+	FilePath  string
+	Ref       string
+	Language  string
+	SnippetID string
+	Content   string
 }
 
 // ============================================================================
@@ -87,11 +89,12 @@ templ Nvim(data NvimData) {
 			</div>
 
 			<!-- Terminal Container -->
-			<div id="nvim-terminal" 
+			<div id="nvim-terminal"
 				class="flex-1 bg-[#0d1117] overflow-hidden"
 				data-repo-id={ data.RepoID }
 				data-file-path={ data.FilePath }
-				data-ref={ data.Ref }></div>
+				data-ref={ data.Ref }
+				data-snippet-id={ data.SnippetID }></div>
 		</div>
 
 		<!-- xterm.js (self-hosted) -->
@@ -105,13 +108,19 @@ templ Nvim(data NvimData) {
 		// ====================================================================
 		// usulnet Neovim Terminal
 		// ====================================================================
+		function escapeHtml(str) {
+			if (!str) return '';
+			return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+		}
+
 		var term, ws, fitAddon;
 		var container = document.getElementById('nvim-terminal');
 		var repoID = container.dataset.repoId || '';
 		var filePath = container.dataset.filePath || '';
 		var ref = container.dataset.ref || '';
-		
-		console.log('[Nvim] Init mode:', repoID ? 'git' : 'standalone', 'file:', filePath);
+		var snippetID = container.dataset.snippetId || '';
+
+		console.log('[Nvim] Init mode:', repoID ? 'git' : (snippetID ? 'snippet' : 'standalone'), 'file:', filePath);
 
 		document.addEventListener('DOMContentLoaded', function() {
 			initNvimTerminal();
@@ -203,6 +212,7 @@ templ Nvim(data NvimData) {
 				+ '?repo=' + encodeURIComponent(repoID)
 				+ '&file=' + encodeURIComponent(filePath)
 				+ '&ref=' + encodeURIComponent(ref)
+				+ '&snippet=' + encodeURIComponent(snippetID)
 				+ '&cols=' + cols
 				+ '&rows=' + rows;
 
@@ -224,7 +234,7 @@ templ Nvim(data NvimData) {
 						statusEl.innerHTML = '<i class="fas fa-circle text-green-400 text-[6px] mr-1"></i>Connected';
 					}, 2000);
 				} else if (msg.type === 'error') {
-					statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-red-400 mr-1"></i>' + msg.data;
+					statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-red-400 mr-1"></i>' + escapeHtml(msg.data);
 				}
 			};
 

@@ -88,6 +88,16 @@ templ hostFileBrowser(data HostFilesData) {
 
 			<!-- Actions -->
 			<div class="flex items-center gap-2">
+				<!-- Current user indicator -->
+				<button
+					@click="showUserModal = true"
+					:class="activeUser === 'root' ? 'bg-dark-600 hover:bg-dark-500 text-gray-300' : 'bg-primary-500/20 hover:bg-primary-500/30 text-primary-400 border border-primary-500/30'"
+					class="px-3 py-1.5 text-sm rounded-lg flex items-center gap-1.5"
+					title="Browse as different user"
+				>
+					<i class="fas fa-user-shield"></i>
+					<span x-text="activeUser"></span>
+				</button>
 				<button
 					@click="showNewFolderModal = true"
 					class="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 text-gray-300 text-sm rounded-lg"
@@ -350,6 +360,68 @@ templ hostFileBrowser(data HostFilesData) {
 				</div>
 			</div>
 		</div>
+		<!-- Switch User Modal -->
+		<div
+			x-show="showUserModal"
+			x-transition
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+			@click.self="showUserModal = false"
+			style="display: none;"
+		>
+			<div class="bg-dark-800 rounded-xl border border-dark-600 w-full max-w-md mx-4 p-6 shadow-2xl">
+				<h3 class="text-lg font-medium text-white mb-2">
+					<i class="fas fa-user-shield text-primary-400 mr-2"></i>Browse as User
+				</h3>
+				<p class="text-sm text-gray-400 mb-4">
+					Enter a username to browse with that user's permissions. Leave empty to browse as root.
+				</p>
+				<div class="space-y-3">
+					<input
+						type="text"
+						x-model="userInput"
+						placeholder="Username (e.g. www-data, nginx, nobody)..."
+						class="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+						@keyup.enter="switchUser()"
+					/>
+					<div x-show="userError" class="text-sm text-red-400">
+						<i class="fas fa-exclamation-circle mr-1"></i><span x-text="userError"></span>
+					</div>
+					<div x-show="activeUser !== 'root'" class="text-sm text-gray-400">
+						Currently browsing as: <span class="text-primary-400 font-medium" x-text="activeUser"></span>
+					</div>
+				</div>
+				<div class="flex justify-between items-center mt-5">
+					<button
+						x-show="activeUser !== 'root'"
+						@click="resetUser()"
+						class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+					>
+						<i class="fas fa-undo mr-1"></i>Reset to root
+					</button>
+					<span x-show="activeUser === 'root'"></span>
+					<div class="flex gap-3">
+						<button
+							@click="showUserModal = false; userInput = ''; userError = ''"
+							class="px-4 py-2 bg-dark-600 hover:bg-dark-500 text-gray-300 rounded-lg"
+						>
+							Cancel
+						</button>
+						<button
+							@click="switchUser()"
+							:disabled="!userInput || userValidating"
+							class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg disabled:opacity-50"
+						>
+							<template x-if="userValidating">
+								<span><i class="fas fa-spinner fa-spin mr-1"></i>Checking...</span>
+							</template>
+							<template x-if="!userValidating">
+								<span><i class="fas fa-user-check mr-1"></i>Switch</span>
+							</template>
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	<!-- Monaco Editor CDN -->
@@ -375,6 +447,11 @@ templ hostFileBrowser(data HostFilesData) {
 				monacoEditor: null,
 				monacoReady: false,
 				monacoLoaded: false,
+				activeUser: 'root',
+				showUserModal: false,
+				userInput: '',
+				userError: '',
+				userValidating: false,
 
 				get pathParts() {
 					return this.currentPath.split('/').filter(p => p);
@@ -426,11 +503,60 @@ templ hostFileBrowser(data HostFilesData) {
 					});
 				},
 
+				hostHeaders() {
+					const h = {};
+					if (this.activeUser && this.activeUser !== 'root') {
+						h['X-Host-User'] = this.activeUser;
+					}
+					return h;
+				},
+
+				async switchUser() {
+					if (!this.userInput) return;
+					this.userValidating = true;
+					this.userError = '';
+					try {
+						const response = await fetch(`/api/v1/hosts/${this.hostID}/validate-user`, {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ username: this.userInput })
+						});
+						if (!response.ok) {
+							const data = await response.json();
+							throw new Error(data.error || 'User not found');
+						}
+						const data = await response.json();
+						this.activeUser = data.username;
+						this.showUserModal = false;
+						this.userInput = '';
+						this.userError = '';
+						// Navigate to user's home directory
+						if (data.home && data.home !== '/') {
+							this.currentPath = data.home;
+						}
+						await this.loadFiles();
+					} catch (e) {
+						this.userError = e.message;
+					} finally {
+						this.userValidating = false;
+					}
+				},
+
+				resetUser() {
+					this.activeUser = 'root';
+					this.showUserModal = false;
+					this.userInput = '';
+					this.userError = '';
+					this.loadFiles();
+				},
+
 				async loadFiles() {
 					this.loading = true;
 					this.error = null;
 					try {
-						const response = await fetch(`/api/v1/hosts/${this.hostID}/browse${this.currentPath}`);
+						const response = await fetch(`/api/v1/hosts/${this.hostID}/browse${this.currentPath}`, {
+							headers: this.hostHeaders()
+						});
 						if (!response.ok) {
 							const data = await response.json();
 							throw new Error(data.error || 'Failed to load files');
@@ -468,7 +594,9 @@ templ hostFileBrowser(data HostFilesData) {
 					this.monacoReady = false;
 
 					try {
-						const response = await fetch(`/api/v1/hosts/${this.hostID}/file${file.path}`);
+						const response = await fetch(`/api/v1/hosts/${this.hostID}/file${file.path}`, {
+							headers: this.hostHeaders()
+						});
 						if (!response.ok) {
 							const data = await response.json();
 							throw new Error(data.error || 'Failed to read file');
@@ -542,8 +670,10 @@ templ hostFileBrowser(data HostFilesData) {
 					if (!this.deleteConfirm) return;
 					const file = this.deleteConfirm;
 					try {
+						const headers = { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '', ...this.hostHeaders() };
 						const response = await fetch(`/api/v1/hosts/${this.hostID}/file${file.path}?recursive=${file.is_dir}`, {
-							method: 'DELETE'
+							method: 'DELETE',
+							headers: headers
 						});
 						if (!response.ok && response.status !== 204) {
 							const data = await response.json();
@@ -563,8 +693,10 @@ templ hostFileBrowser(data HostFilesData) {
 						if (!path.endsWith('/')) path += '/';
 						path += this.newFolderName;
 
+						const headers = { 'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || '', ...this.hostHeaders() };
 						const response = await fetch(`/api/v1/hosts/${this.hostID}/mkdir${path}`, {
-							method: 'POST'
+							method: 'POST',
+							headers: headers
 						});
 						if (!response.ok) {
 							const data = await response.json();

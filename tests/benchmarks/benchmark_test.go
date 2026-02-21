@@ -80,15 +80,15 @@ func BenchmarkHealthEndpoint(b *testing.B) {
 	})
 }
 
-// BenchmarkVersionEndpoint measures the performance of the public version endpoint.
-func BenchmarkVersionEndpoint(b *testing.B) {
+// BenchmarkLivenessEndpoint measures the performance of the public liveness endpoint.
+func BenchmarkLivenessEndpoint(b *testing.B) {
 	router := setupBenchRouter()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			w := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodGet, "/api/v1/system/version", nil)
+			r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 			router.ServeHTTP(w, r)
 			if w.Code != http.StatusOK {
 				b.Fatalf("unexpected status: %d", w.Code)

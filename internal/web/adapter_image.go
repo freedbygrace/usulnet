@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/fr4nsys/usulnet/internal/models"
 	imagesvc "github.com/fr4nsys/usulnet/internal/services/image"
 )
 
@@ -71,4 +72,11 @@ func (a *imageAdapter) Pull(ctx context.Context, reference string) error {
 		return ErrServiceNotConfigured
 	}
 	return a.svc.Pull(ctx, resolveHostID(ctx, a.hostID), reference, nil)
+}
+
+func (a *imageAdapter) PullWithAuth(ctx context.Context, reference string, auth *models.RegistryAuthConfig) error {
+	if a.svc == nil {
+		return ErrServiceNotConfigured
+	}
+	return a.svc.Pull(ctx, resolveHostID(ctx, a.hostID), reference, auth)
 }

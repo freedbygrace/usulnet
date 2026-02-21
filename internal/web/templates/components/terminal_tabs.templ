@@ -195,6 +195,7 @@ templ TerminalTabsScript() {
 				_initialized: false,
 				_resizeHandler: null,
 				_rootEl: null,
+				_reconnectAttempts: 0,
 
 				init() {
 					if (this._initialized) return;
@@ -359,6 +360,7 @@ templ TerminalTabsScript() {
 
 					tab.ws.onopen = () => {
 						tab.status = 'connected';
+						this._reconnectAttempts = 0;
 						if (this.activeTab === tabId) {
 							tab.term.focus();
 						}
@@ -384,9 +386,15 @@ templ TerminalTabsScript() {
 					tab.ws.onclose = (event) => {
 						tab.status = 'disconnected';
 						const graceful = (event.code === 1000 || event.code === 1001);
-						tab.term.write('\r\n\x1b[31mDisconnected' + (graceful ? '.' : ' — reconnecting...') + '\x1b[0m\r\n');
-						if (!this._destroyed && !graceful) {
-							setTimeout(() => this.connect(tabId), 3000);
+						if (!this._destroyed && !graceful && this._reconnectAttempts < 5) {
+							const delay = Math.min(30000, 1000 * Math.pow(2, this._reconnectAttempts));
+							this._reconnectAttempts++;
+							tab.term.write('\r\n\x1b[31mDisconnected — reconnecting in ' + (delay / 1000) + 's... (attempt ' + this._reconnectAttempts + '/5)\x1b[0m\r\n');
+							setTimeout(() => this.connect(tabId), delay);
+						} else if (!graceful && this._reconnectAttempts >= 5) {
+							tab.term.write('\r\n\x1b[31mDisconnected — max reconnect attempts reached.\x1b[0m\r\n');
+						} else {
+							tab.term.write('\r\n\x1b[31mDisconnected.\x1b[0m\r\n');
 						}
 					};
 

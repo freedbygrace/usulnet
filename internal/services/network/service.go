@@ -17,17 +17,21 @@ import (
 	"github.com/fr4nsys/usulnet/internal/docker"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
-	hostservice "github.com/fr4nsys/usulnet/internal/services/host"
 )
+
+// HostClientProvider resolves a Docker client for a given host.
+type HostClientProvider interface {
+	GetClient(ctx context.Context, hostID uuid.UUID) (docker.ClientAPI, error)
+}
 
 // Service provides Docker network management operations.
 type Service struct {
-	hostService *hostservice.Service
+	hostService HostClientProvider
 	logger      *logger.Logger
 }
 
 // NewService creates a new network service.
-func NewService(hostService *hostservice.Service, log *logger.Logger) *Service {
+func NewService(hostService HostClientProvider, log *logger.Logger) *Service {
 	if log == nil {
 		log = logger.Nop()
 	}
@@ -218,7 +222,7 @@ func (s *Service) Create(ctx context.Context, hostID uuid.UUID, input *models.Cr
 func (s *Service) Delete(ctx context.Context, hostID uuid.UUID, networkID string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for network delete: %w", err)
 	}
 
 	if err := client.NetworkRemove(ctx, networkID); err != nil {
@@ -233,7 +237,7 @@ func (s *Service) Delete(ctx context.Context, hostID uuid.UUID, networkID string
 func (s *Service) Connect(ctx context.Context, hostID uuid.UUID, networkID, containerID string, aliases []string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for network connect: %w", err)
 	}
 
 	opts := docker.NetworkConnectOptions{
@@ -253,7 +257,7 @@ func (s *Service) Connect(ctx context.Context, hostID uuid.UUID, networkID, cont
 func (s *Service) Disconnect(ctx context.Context, hostID uuid.UUID, networkID, containerID string, force bool) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get docker client for network disconnect: %w", err)
 	}
 
 	if err := client.NetworkDisconnect(ctx, networkID, containerID, force); err != nil {

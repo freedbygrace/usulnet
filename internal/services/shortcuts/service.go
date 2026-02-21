@@ -6,6 +6,7 @@ package shortcuts
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -248,7 +249,7 @@ func (s *Service) downloadFavicon(ctx context.Context, faviconURL string) ([]byt
 func (s *Service) FetchAndSetFavicon(ctx context.Context, shortcutID uuid.UUID) error {
 	shortcut, err := s.shortcutRepo.GetByID(ctx, shortcutID)
 	if err != nil {
-		return err
+		return fmt.Errorf("get shortcut for favicon fetch: %w", err)
 	}
 
 	faviconURL, _, err := s.FetchFavicon(ctx, shortcut.URL)
@@ -258,7 +259,7 @@ func (s *Service) FetchAndSetFavicon(ctx context.Context, shortcutID uuid.UUID) 
 			"url", shortcut.URL,
 			"error", err,
 		)
-		return err
+		return fmt.Errorf("fetch favicon for shortcut %s: %w", shortcutID, err)
 	}
 
 	shortcut.Icon = faviconURL

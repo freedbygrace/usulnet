@@ -26,6 +26,7 @@ type CaptureService interface {
 	ListCaptures(ctx context.Context, userID uuid.UUID) ([]*models.PacketCapture, error)
 	DeleteCapture(ctx context.Context, id uuid.UUID) error
 	GetPcapPath(ctx context.Context, id uuid.UUID) (string, error)
+	AnalyzeCapture(ctx context.Context, id uuid.UUID) (*models.CaptureAnalysis, error)
 	Cleanup()
 }
 
@@ -58,14 +59,16 @@ func (h *Handler) PacketCapture(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// If a specific capture is requested, set it as active
+		// If a specific capture is requested, set it as active (with ownership check)
 		captureID := r.URL.Query().Get("id")
 		if captureID != "" {
 			if id, err := uuid.Parse(captureID); err == nil {
-				capture, err := h.captureService.GetCapture(r.Context(), id)
-				if err == nil {
-					session := toCaptureSession(capture)
-					data.Active = &session
+				if h.verifyCaptureOwnership(r, id) {
+					capture, err := h.captureService.GetCapture(r.Context(), id)
+					if err == nil {
+						session := toCaptureSession(capture)
+						data.Active = &session
+					}
 				}
 			}
 		}
@@ -170,6 +173,13 @@ func (h *Handler) PacketCaptureStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify capture ownership — users can only stop their own captures
+	if !h.verifyCaptureOwnership(r, id) {
+		h.setFlash(w, r, "error", "Access denied: capture belongs to another user")
+		http.Redirect(w, r, "/tools/capture", http.StatusSeeOther)
+		return
+	}
+
 	if err := h.captureService.StopCapture(r.Context(), id); err != nil {
 		h.setFlash(w, r, "error", "Failed to stop capture: "+err.Error())
 		http.Redirect(w, r, "/tools/capture?id="+captureID, http.StatusSeeOther)
@@ -199,6 +209,13 @@ func (h *Handler) PacketCaptureDownload(w http.ResponseWriter, r *http.Request) 
 	id, err := uuid.Parse(captureID)
 	if err != nil {
 		h.setFlash(w, r, "error", "Invalid capture ID")
+		http.Redirect(w, r, "/tools/capture", http.StatusSeeOther)
+		return
+	}
+
+	// Verify capture ownership — users can only download their own captures
+	if !h.verifyCaptureOwnership(r, id) {
+		h.setFlash(w, r, "error", "Access denied: capture belongs to another user")
 		http.Redirect(w, r, "/tools/capture", http.StatusSeeOther)
 		return
 	}
@@ -238,6 +255,13 @@ func (h *Handler) PacketCaptureDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify capture ownership — users can only delete their own captures
+	if !h.verifyCaptureOwnership(r, id) {
+		h.setFlash(w, r, "error", "Access denied: capture belongs to another user")
+		http.Redirect(w, r, "/tools/capture", http.StatusSeeOther)
+		return
+	}
+
 	if err := h.captureService.DeleteCapture(r.Context(), id); err != nil {
 		h.setFlash(w, r, "error", "Failed to delete capture: "+err.Error())
 		http.Redirect(w, r, "/tools/capture", http.StatusSeeOther)
@@ -261,9 +285,69 @@ func (h *Handler) PacketCaptureDetail(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/tools/capture?id="+captureID, http.StatusSeeOther)
 }
 
+// PacketCaptureAnalyze returns PCAP analysis results as JSON.
+// GET /tools/capture/{id}/analyze
+func (h *Handler) PacketCaptureAnalyze(w http.ResponseWriter, r *http.Request) {
+	captureID := chi.URLParam(r, "id")
+	if captureID == "" {
+		h.jsonError(w, "Missing capture ID", http.StatusBadRequest)
+		return
+	}
+
+	if h.captureService == nil {
+		h.jsonError(w, "Packet capture service is not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	id, err := uuid.Parse(captureID)
+	if err != nil {
+		h.jsonError(w, "Invalid capture ID", http.StatusBadRequest)
+		return
+	}
+
+	if !h.verifyCaptureOwnership(r, id) {
+		h.jsonError(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	analysis, err := h.captureService.AnalyzeCapture(r.Context(), id)
+	if err != nil {
+		h.jsonError(w, "Failed to analyze capture: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.jsonResponse(w, analysis)
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+// verifyCaptureOwnership checks that the capture identified by id belongs to
+// the currently authenticated user. Admin users bypass this check.
+func (h *Handler) verifyCaptureOwnership(r *http.Request, captureID uuid.UUID) bool {
+	user := h.getUserData(r)
+	if user == nil || user.ID == "" {
+		return false
+	}
+
+	// Admins can access any capture
+	if user.Role == "admin" {
+		return true
+	}
+
+	capture, err := h.captureService.GetCapture(r.Context(), captureID)
+	if err != nil {
+		return false
+	}
+
+	userID, err := uuid.Parse(user.ID)
+	if err != nil {
+		return false
+	}
+
+	return capture.UserID == userID
+}
 
 // toCaptureSession converts a model to the template's CaptureSession type.
 func toCaptureSession(c *models.PacketCapture) toolspages.CaptureSession {
