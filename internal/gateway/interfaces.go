@@ -14,9 +14,12 @@ import (
 )
 
 // HostRepository defines the interface for host data access.
-// This allows the gateway to verify agent tokens and update host status.
+// This allows the gateway to verify agent tokens, update host status,
+// persist Docker system info from inventory, and store heartbeat metrics.
 type HostRepository interface {
 	GetByAgentToken(ctx context.Context, token string) (*models.HostInfo, error)
 	UpdateStatus(ctx context.Context, hostID uuid.UUID, status string, lastSeen time.Time) error
 	UpdateAgentInfo(ctx context.Context, hostID uuid.UUID, info *protocol.AgentInfo) error
+	UpdateDockerInfo(ctx context.Context, hostID uuid.UUID, info *models.HostDockerInfo) error
+	InsertMetrics(ctx context.Context, metrics *models.HostMetrics) error
 }

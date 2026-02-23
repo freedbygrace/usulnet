@@ -253,8 +253,8 @@ func Run(cfgFile, mode string) error {
 		}
 
 		// Auto-configure NATS client TLS if not explicitly configured
-		if !cfg.NATS.TLS.Enabled && (cfg.Mode == "master" || cfg.NATS.URL != "") {
-			// Generate a client cert for the master's NATS connection
+		if !cfg.NATS.TLS.Enabled && cfg.NATS.URL != "" {
+			// Generate a client cert for the NATS connection
 			masterCertPath, masterKeyPath, masterErr := pkiMgr.EnsureMasterNATSClientCert()
 			if masterErr != nil {
 				return fmt.Errorf("failed to ensure master NATS client cert: %w", masterErr)
@@ -264,6 +264,7 @@ func Run(cfgFile, mode string) error {
 			cfg.NATS.TLS.CertFile = masterCertPath
 			cfg.NATS.TLS.KeyFile = masterKeyPath
 			cfg.NATS.TLS.CAFile = pkiMgr.CACertPath()
+			cfg.NATS.TLS.SkipVerify = true // Self-signed, no CA verification by default
 			log.Info("NATS mTLS auto-configured from PKI",
 				"cert", masterCertPath,
 				"ca", pkiMgr.CACertPath(),
@@ -321,9 +322,9 @@ func Run(cfgFile, mode string) error {
 	defer rdb.Close()
 	log.Info("Redis connected", "tls", cfg.Redis.TLSEnabled)
 
-	// Initialize NATS (only for master/agent modes or if URL is configured)
+	// Initialize NATS (required for all modes — master and agent)
 	var nc *nats.Client
-	if cfg.Mode != "standalone" || cfg.NATS.URL != "" {
+	if cfg.NATS.URL != "" {
 		log.Info("Connecting to NATS...")
 
 		natsCfg := nats.Config{
@@ -355,18 +356,10 @@ func Run(cfgFile, mode string) error {
 
 		if err := nc.Connect(ctx); err != nil {
 			nc.Close()
-			if cfg.Mode == "standalone" {
-				log.Warn("NATS connection failed (optional in standalone mode)", "error", err)
-				nc = nil
-			} else {
-				return fmt.Errorf("failed to connect to NATS (required for %s mode): %w", cfg.Mode, err)
-			}
-		} else {
-			log.Info("NATS connected", "url", cfg.NATS.URL)
+			return fmt.Errorf("failed to connect to NATS (required for %s mode): %w", cfg.Mode, err)
 		}
-		if nc != nil {
-			defer nc.Close()
-		}
+		log.Info("NATS connected", "url", cfg.NATS.URL)
+		defer nc.Close()
 	}
 
 	app := &Application{
@@ -412,10 +405,8 @@ func Run(cfgFile, mode string) error {
 // startComponents initializes and starts all required components based on mode
 func (app *Application) startComponents(ctx context.Context) error {
 	switch app.Config.Mode {
-	case "standalone":
-		return app.startStandalone(ctx)
 	case "master":
-		return app.startMaster(ctx)
+		return app.startServer(ctx)
 	case "agent":
 		return app.startAgent(ctx)
 	default:
@@ -423,11 +414,11 @@ func (app *Application) startComponents(ctx context.Context) error {
 	}
 }
 
-// startStandalone initializes all services for standalone/master mode via a
-// phased init pipeline. Each phase populates the shared initContext that
-// subsequent phases depend on.
-func (app *Application) startStandalone(ctx context.Context) error {
-	app.Logger.Info("Starting in standalone mode")
+// startServer initializes all services for master mode via a phased init
+// pipeline. Each phase populates the shared initContext that subsequent
+// phases depend on.
+func (app *Application) startServer(ctx context.Context) error {
+	app.Logger.Info("Starting in master mode")
 
 	ic := &initContext{}
 
@@ -480,28 +471,30 @@ func (app *Application) startStandalone(ctx context.Context) error {
 		// Server is running
 	}
 
+	// =========================================================================
+	// GATEWAY INITIALIZATION (agent management via NATS)
+	// =========================================================================
+	// Any usulnet master installation with NATS can accept agent connections,
+	// activate licenses, and manage remote Docker nodes.
+
+	if app.NATS != nil {
+		if err := app.initGateway(ctx); err != nil {
+			return fmt.Errorf("init gateway: %w", err)
+		}
+
+		// Wire gateway into stack service for agent deployments
+		if ic.stackService != nil && app.gatewayServer != nil {
+			ic.stackService.SetGatewayCommandSender(app.gatewayServer)
+			app.Logger.Info("Stack service upgraded with gateway command sender")
+		}
+	}
+
 	return nil
 }
 
-func (app *Application) startMaster(ctx context.Context) error {
-	app.Logger.Info("Starting in master mode")
-
-	// Master mode = standalone (all services + web UI) + gateway (agent management)
-	// First, initialize everything standalone does
-	if err := app.startStandalone(ctx); err != nil {
-		return fmt.Errorf("failed to start standalone services: %w", err)
-	}
-
-	// =========================================================================
-	// GATEWAY INITIALIZATION (Master-only)
-	// =========================================================================
-
-	if app.NATS == nil {
-		return fmt.Errorf("NATS connection required for master mode - configure nats.url in config")
-	}
-
-	// Reuse host repository created in startStandalone
-	// Create gateway server
+// initGateway creates and starts the gateway server for agent management.
+// Called by startServer when NATS is available.
+func (app *Application) initGateway(ctx context.Context) error {
 	gatewayCfg := gateway.DefaultServerConfig()
 	gw, err := gateway.NewServer(app.NATS, app.hostRepo, app.containerService, gatewayCfg, app.Logger)
 	if err != nil {
@@ -522,14 +515,14 @@ func (app *Application) startMaster(ctx context.Context) error {
 	// Wire gateway as command sender for remote host proxy clients
 	if app.hostService != nil {
 		app.hostService.SetCommandSender(gw)
-		app.Logger.Info("Master mode: host service upgraded with command sender")
+		app.Logger.Info("Host service upgraded with gateway command sender")
 	}
 
 	// Register gateway API routes on the existing router
 	gatewayAPI := gateway.NewAPIHandler(gw, app.Logger)
 	gatewayAPI.RegisterRoutes(app.Server.Router())
 
-	app.Logger.Info("Master mode: gateway server started",
+	app.Logger.Info("Gateway server started — agent connections enabled",
 		"heartbeat_interval", gatewayCfg.HeartbeatInterval,
 		"heartbeat_timeout", gatewayCfg.HeartbeatTimeout,
 		"command_timeout", gatewayCfg.CommandTimeout,

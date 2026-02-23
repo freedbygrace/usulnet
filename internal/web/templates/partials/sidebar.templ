@@ -31,6 +31,29 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 			</a>
 		</div>
 
+		<!-- Search -->
+		<div class="px-3 pt-3 pb-0" x-data="{ q: '' }">
+			<div class="relative">
+				<i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs pointer-events-none"></i>
+				<input
+					type="text"
+					x-model="q"
+					@input="document.querySelectorAll('#sidebar-scroll .nav-item').forEach(el => { const match = !q || el.textContent.toLowerCase().includes(q.toLowerCase()); el.style.display = match ? '' : 'none'; }); document.querySelectorAll('#sidebar-scroll [x-data]').forEach(el => { if (q && el.__x) el.__x.$data.open = true; });"
+					@keydown.escape="q = ''; document.querySelectorAll('#sidebar-scroll .nav-item').forEach(el => el.style.display = ''); $el.blur();"
+					placeholder="Search..."
+					class="w-full pl-8 pr-8 py-1.5 bg-dark-700/50 border border-dark-600/50 rounded-lg text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:border-primary-500/30 focus:bg-dark-700 transition-colors"
+				/>
+				<button
+					x-show="q"
+					@click="q = ''; document.querySelectorAll('#sidebar-scroll .nav-item').forEach(el => el.style.display = '');"
+					class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs"
+					style="display: none;"
+				>
+					<i class="fas fa-times"></i>
+				</button>
+			</div>
+		</div>
+
 		<!-- Navigation -->
 		<div id="sidebar-scroll" class="flex-1 overflow-y-auto py-4 px-3 space-y-4">
 			<!-- Overview (always expanded) -->
@@ -81,6 +104,11 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 				}
 				@navItemPrimary("Updates", "fa-sync-alt", "/updates", active == "updates", getBadge(stats, "updates"))
 				@navItem("Backups", "fa-archive", "/backups", active == "backups", 0)
+				if isEditionAvailable(edition, "biz") {
+					@navItem("Backup Verify", "fa-check-double", "/backup-verify", active == "backup-verify", 0)
+				} else {
+					@navItemLocked("Backup Verify", "fa-check-double", "biz")
+				}
 				if !prefs.IsHidden("config") {
 					@navItem("Config", "fa-cogs", "/config", active == "config", 0)
 					@navItem("Docker Engine", "fab fa-docker", "/config/docker", active == "docker-config", 0)
@@ -95,6 +123,18 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 					@navItem("Maintenance", "fa-wrench", "/maintenance", active == "maintenance", 0)
 				}
 				@navItem("Bulk Operations", "fa-th-list", "/bulk-ops", active == "bulk-ops", 0)
+				@navItem("Crontab", "fa-clock", "/crontab", active == "crontab", 0)
+				if isEditionAvailable(edition, "biz") {
+					@navItem("Firewall", "fa-fire", "/firewall", active == "firewall", 0)
+				} else {
+					@navItemLocked("Firewall", "fa-fire", "biz")
+				}
+				if isEditionAvailable(edition, "biz") {
+					@navItem("SSL Observatory", "fa-lock", "/ssl", active == "ssl", 0)
+				} else {
+					@navItemLocked("SSL Observatory", "fa-lock", "biz")
+				}
+				@navItem("Rollback", "fa-undo-alt", "/rollback", active == "rollback", 0)
 			}
 
 			<!-- Connections (collapsible, default expanded) -->
@@ -111,6 +151,11 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 				}
 				@navItem("SSH Keys", "fa-key", "/connections/keys", active == "connections-keys", 0)
 				@navItem("Shortcuts", "fa-external-link-alt", "/connections/shortcuts", active == "connections-shortcuts", 0)
+				if isEditionAvailable(edition, "biz") {
+					@navItem("WireGuard", "fa-shield-alt", "/wireguard", active == "wireguard", 0)
+				} else {
+					@navItemLocked("WireGuard", "fa-shield-alt", "biz")
+				}
 			}
 
 			<!-- Tools (collapsible, default collapsed) -->
@@ -129,6 +174,9 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 			@sidebarSection("integrations", "Integrations", prefs) {
 				if !prefs.IsHidden("proxy") {
 					@navItem("Reverse Proxy", "fa-random", "/proxy", active == "proxy", 0)
+				}
+				if !prefs.IsHidden("dns") {
+					@navItem("DNS", "fa-globe-americas", "/dns", active == "dns", 0)
 				}
 				if !prefs.IsHidden("repositories") {
 					@navItem("Repositories", "fa-code-branch", "/integrations/gitea", active == "gitea", 0)
@@ -358,6 +406,17 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 					} catch(e) {}
 				}, 500);
 			};
+
+			// Helper for Alpine x-init: reads sidebar section state from localStorage.
+			// Defined as a global so Alpine expressions can call it without try/catch
+			// (Alpine 3.x does not support try/catch in inline expressions).
+			window._sidebarSectionOpen = function(key, defaultOpen) {
+				try {
+					var s = JSON.parse(localStorage.getItem('usulnet-sidebar-collapsed') || '{}');
+					if (key in s) return !s[key];
+				} catch(e) {}
+				return defaultOpen;
+			};
 		})();
 	</script>
 }
@@ -366,7 +425,7 @@ templ Sidebar(active string, user *types.UserData, stats *types.StatsData, editi
 // the initial collapse state from server-side preferences, with localStorage
 // as the immediate toggle store for responsiveness.
 templ sidebarSection(key string, label string, prefs *types.SidebarPreferences) {
-	<div x-data={ fmt.Sprintf("{ open: !%t }", prefs.IsCollapsed(key)) } x-init={ fmt.Sprintf("try { var s = JSON.parse(localStorage.getItem('usulnet-sidebar-collapsed') || '{}'); if ('%s' in s) open = !s['%s']; } catch(e) {}", key, key) }>
+	<div x-data={ fmt.Sprintf("{ open: !%t }", prefs.IsCollapsed(key)) } x-init={ fmt.Sprintf("open = window._sidebarSectionOpen('%s', open)", key) }>
 		<button
 			@click={ fmt.Sprintf("open = !open; window._sidebarToggleSection('%s', !open)", key) }
 			class="flex items-center justify-between w-full px-3 mb-2 group"
@@ -377,7 +436,7 @@ templ sidebarSection(key string, label string, prefs *types.SidebarPreferences) 
 				class="fas text-[8px] text-gray-600 group-hover:text-gray-400 transition-colors"
 			></i>
 		</button>
-		<div x-show="open" x-collapse class="space-y-1">
+		<div x-show="open" x-transition class="space-y-1">
 			{ children... }
 		</div>
 	</div>

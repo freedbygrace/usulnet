@@ -6,11 +6,14 @@
 package container
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -62,6 +65,17 @@ func DefaultConfig() ServiceConfig {
 	}
 }
 
+// ContainerEvent describes a container lifecycle event for external observers.
+type ContainerEvent struct {
+	Action      string           // start, stop, die, destroy, create, etc.
+	ContainerID string           // Docker container ID
+	Container   *models.Container // Full container model (nil for destroy events)
+}
+
+// EventCallback is called when a container event is processed.
+// Callbacks run synchronously in the event loop; keep them fast.
+type EventCallback func(ctx context.Context, hostID uuid.UUID, event ContainerEvent)
+
 // Service provides container management operations.
 type Service struct {
 	repo        ContainerRepository
@@ -76,6 +90,10 @@ type Service struct {
 	// eventWatchers tracks active event stream goroutines per host
 	watcherMu      sync.Mutex
 	activeWatchers map[uuid.UUID]context.CancelFunc
+
+	// eventCallbacks are notified on container lifecycle events
+	callbackMu     sync.RWMutex
+	eventCallbacks []EventCallback
 }
 
 // NewService creates a new container service.
@@ -96,6 +114,33 @@ func NewService(
 		logger:         log.Named("container"),
 		stopCh:         make(chan struct{}),
 		activeWatchers: make(map[uuid.UUID]context.CancelFunc),
+	}
+}
+
+// AddEventCallback registers a callback that is invoked on container lifecycle
+// events (start, stop, die, destroy, etc.). Callbacks run synchronously in the
+// event processing goroutine, so they should be fast and non-blocking.
+func (s *Service) AddEventCallback(fn EventCallback) {
+	s.callbackMu.Lock()
+	defer s.callbackMu.Unlock()
+	s.eventCallbacks = append(s.eventCallbacks, fn)
+}
+
+// notifyCallbacks calls all registered event callbacks.
+func (s *Service) notifyCallbacks(ctx context.Context, hostID uuid.UUID, event ContainerEvent) {
+	s.callbackMu.RLock()
+	callbacks := s.eventCallbacks
+	s.callbackMu.RUnlock()
+
+	for _, fn := range callbacks {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("panic in container event callback", "error", r, "action", event.Action)
+				}
+			}()
+			fn(ctx, hostID, event)
+		}()
 	}
 }
 
@@ -1158,9 +1203,14 @@ func (s *Service) refreshEventWatchers(ctx context.Context) {
 		}
 	}
 
-	// Start watchers for new online hosts
+	// Start watchers for new online hosts (skip agent hosts — they don't
+	// support Docker event streaming and would reconnect indefinitely).
 	for _, host := range hosts {
 		if _, exists := s.activeWatchers[host.ID]; exists {
+			continue
+		}
+
+		if host.IsAgent() {
 			continue
 		}
 
@@ -1292,7 +1342,7 @@ func (s *Service) handleDockerEvent(ctx context.Context, hostID uuid.UUID, clien
 		"action", event.Action,
 	)
 
-	// For destroy events, remove from database
+	// For destroy events, remove from database and notify observers
 	if event.Action == "destroy" {
 		if err := s.repo.Delete(ctx, containerID); err != nil {
 			s.logger.Warn("failed to delete destroyed container",
@@ -1300,6 +1350,11 @@ func (s *Service) handleDockerEvent(ctx context.Context, hostID uuid.UUID, clien
 				"error", err,
 			)
 		}
+		s.notifyCallbacks(ctx, hostID, ContainerEvent{
+			Action:      event.Action,
+			ContainerID: containerID,
+			Container:   nil,
+		})
 		return
 	}
 
@@ -1322,6 +1377,13 @@ func (s *Service) handleDockerEvent(ctx context.Context, hostID uuid.UUID, clien
 			"error", err,
 		)
 	}
+
+	// Notify registered observers (DNS service discovery, etc.)
+	s.notifyCallbacks(ctx, hostID, ContainerEvent{
+		Action:      event.Action,
+		ContainerID: containerID,
+		Container:   model,
+	})
 }
 
 // reconciliationWorker does periodic full syncs as a safety net to catch any
@@ -2095,7 +2157,14 @@ func (s *Service) BrowseContainer(ctx context.Context, hostID uuid.UUID, contain
 		return nil, fmt.Errorf("failed to list directory: %s", output)
 	}
 
-	return s.parseContainerLS(output, path), nil
+	files := s.parseContainerLS(output, path)
+
+	// Resolve symlink types: check which symlinks point to directories
+	// so the frontend navigates into them instead of trying to read them as files.
+	// Uses POSIX test -d (works in BusyBox/Alpine containers that lack GNU stat).
+	s.resolveContainerSymlinkTypes(ctx, client, containerID, files)
+
+	return files, nil
 }
 
 // parseContainerLS parses the output of ls -la command.
@@ -2114,7 +2183,7 @@ func (s *Service) parseContainerLS(output, basePath string) []ContainerFile {
 		// Format: drwxr-xr-x  2 root root 4096 2024-01-15T10:30:00 filename
 		// Or:     drwxr-xr-x  2 root root 4096 Jan 15 10:30 filename
 		fields := strings.Fields(line)
-		if len(fields) < 8 {
+		if len(fields) < 7 {
 			continue
 		}
 
@@ -2189,6 +2258,42 @@ func (s *Service) parseContainerLS(output, basePath string) []ContainerFile {
 	return files
 }
 
+// resolveContainerSymlinkTypes checks which symlinks in the file list point to
+// directories and updates their IsDir field. Uses POSIX "test -d" which works
+// in minimal containers (Alpine/BusyBox) that lack GNU coreutils stat.
+func (s *Service) resolveContainerSymlinkTypes(ctx context.Context, client docker.ClientAPI, containerID string, files []ContainerFile) {
+	var symlinkPaths []string
+	idxMap := make(map[string]int) // path → index in files
+	for i, f := range files {
+		if f.IsSymlink {
+			symlinkPaths = append(symlinkPaths, f.Path)
+			idxMap[f.Path] = i
+		}
+	}
+	if len(symlinkPaths) == 0 {
+		return
+	}
+
+	// Build a single shell command that tests each symlink path.
+	// test -d follows symlinks, so it returns true for symlinks→directories.
+	// Uses single-quote escaping for safe path handling.
+	var checks []string
+	for _, p := range symlinkPaths {
+		escaped := "'" + strings.ReplaceAll(p, "'", "'\\''") + "'"
+		checks = append(checks, fmt.Sprintf("[ -d %s ] && printf '%%s\\n' %s", escaped, escaped))
+	}
+	cmd := strings.Join(checks, "; ")
+
+	out, _, _ := client.RunShellCommand(ctx, containerID, cmd)
+
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if idx, ok := idxMap[line]; ok {
+			files[idx].IsDir = true
+		}
+	}
+}
+
 // ReadContainerFile reads the content of a file in a container.
 func (s *Service) ReadContainerFile(ctx context.Context, hostID uuid.UUID, containerID, path string, maxSize int64) (*ContainerFileContent, error) {
 	client, err := s.hostService.GetClient(ctx, hostID)
@@ -2198,6 +2303,14 @@ func (s *Service) ReadContainerFile(ctx context.Context, hostID uuid.UUID, conta
 
 	if maxSize <= 0 || maxSize > maxContainerFileSize {
 		maxSize = maxContainerFileSize
+	}
+
+	// Check file type — reject directories and symlinks to directories.
+	// Uses POSIX test -d (follows symlinks) for BusyBox/Alpine compatibility.
+	escaped := "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+	_, testExit, _ := client.RunShellCommand(ctx, containerID, fmt.Sprintf("[ -d %s ]", escaped))
+	if testExit == 0 {
+		return nil, fmt.Errorf("path is a directory, not a file: %s", path)
 	}
 
 	// First check if the file exists and get its size
@@ -2244,32 +2357,89 @@ func (s *Service) ReadContainerFile(ctx context.Context, hostID uuid.UUID, conta
 }
 
 // WriteContainerFile writes content to a file in a container.
-func (s *Service) WriteContainerFile(ctx context.Context, hostID uuid.UUID, containerID, path, content string) error {
+// Uses Docker's CopyToContainer (tar-based) API to avoid shell argument
+// length limits that cause crashes with large files (fixes issue #16).
+// Falls back to chunked shell writes for remote agent-proxied hosts.
+func (s *Service) WriteContainerFile(ctx context.Context, hostID uuid.UUID, containerID, filePath, content string) error {
 	client, err := s.hostService.GetClient(ctx, hostID)
 	if err != nil {
 		return fmt.Errorf("get docker client for host %s: %w", hostID, err)
 	}
 
-	// Use printf with base64 encoding to avoid shell escaping issues
-	// First encode the content
-	encoded := base64Encode(content)
-
-	// Write using echo | base64 -d > file
-	cmd := fmt.Sprintf("echo '%s' | base64 -d > %q", encoded, path)
-	output, exitCode, err := client.RunShellCommand(ctx, containerID, cmd)
-	if err != nil {
-		return fmt.Errorf("write file: %w", err)
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("failed to write file: %s", output)
+	// Try tar-based copy first (works for local Docker, no shell limits).
+	if err := s.writeFileViaTar(ctx, client, containerID, filePath, content); err != nil {
+		// Fall back to chunked shell writes for remote agents that
+		// don't support CopyToContainer.
+		if err2 := s.writeFileViaShell(ctx, client, containerID, filePath, content); err2 != nil {
+			return fmt.Errorf("write file: %w", err2)
+		}
 	}
 
 	s.logger.Debug("wrote file in container",
 		"host_id", hostID,
 		"container_id", containerID,
-		"path", path,
+		"path", filePath,
 		"size", len(content),
 	)
+
+	return nil
+}
+
+// writeFileViaTar writes a file using Docker's CopyToContainer tar API.
+func (s *Service) writeFileViaTar(ctx context.Context, client docker.ClientAPI, containerID, filePath, content string) error {
+	dir := path.Dir(filePath)
+	filename := path.Base(filePath)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{
+		Name: filename,
+		Mode: 0644,
+		Size: int64(len(content)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return fmt.Errorf("create tar header: %w", err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		return fmt.Errorf("write tar content: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("close tar writer: %w", err)
+	}
+
+	return client.ContainerCopyToContainer(ctx, containerID, dir, &buf)
+}
+
+// writeFileViaShell writes a file using chunked shell commands.
+// Each chunk stays well under shell argument limits (~48 KB raw → ~64 KB base64).
+func (s *Service) writeFileViaShell(ctx context.Context, client docker.ClientAPI, containerID, filePath, content string) error {
+	const chunkSize = 48 * 1024 // 48 KB per chunk
+
+	// Truncate/create the file first.
+	if output, exitCode, err := client.RunShellCommand(ctx, containerID, fmt.Sprintf(": > %q", filePath)); err != nil {
+		return fmt.Errorf("truncate file: %w", err)
+	} else if exitCode != 0 {
+		return fmt.Errorf("failed to truncate file: %s", output)
+	}
+
+	data := []byte(content)
+	for i := 0; i < len(data); i += chunkSize {
+		end := i + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[i:end]
+
+		encoded := base64Encode(string(chunk))
+		cmd := fmt.Sprintf("printf '%%s' '%s' | base64 -d >> %q", encoded, filePath)
+		output, exitCode, err := client.RunShellCommand(ctx, containerID, cmd)
+		if err != nil {
+			return fmt.Errorf("write chunk at offset %d: %w", i, err)
+		}
+		if exitCode != 0 {
+			return fmt.Errorf("failed to write chunk at offset %d: %s", i, output)
+		}
+	}
 
 	return nil
 }
@@ -2415,3 +2585,4 @@ func isBinaryContent(content string) bool {
 func base64Encode(s string) string {
 	return base64.StdEncoding.EncodeToString([]byte(s))
 }
+

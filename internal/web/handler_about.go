@@ -146,7 +146,7 @@ func (h *Handler) probeConnections(ctx context.Context) []pages.ConnectionStatus
 	}
 	conns = append(conns, redisConn)
 
-	// NATS (optional in standalone mode)
+	// NATS (required for all modes — enables agent management)
 	natsConn := pages.ConnectionStatus{
 		Name:    "NATS",
 		Status:  "disconnected",
@@ -166,9 +166,6 @@ func (h *Handler) probeConnections(ctx context.Context) []pages.ConnectionStatus
 	} else {
 		natsConn.Status = "not configured"
 		natsConn.TLSInfo = "n/a"
-		if h.mode == "standalone" {
-			natsConn.Details = "Optional in standalone mode"
-		}
 	}
 	conns = append(conns, natsConn)
 

@@ -1135,7 +1135,7 @@ func (r *ContainerRepository) GetStatsHistory(ctx context.Context, containerID s
 
 // DeleteOldStats deletes stats older than the specified duration.
 func (r *ContainerRepository) DeleteOldStats(ctx context.Context, olderThan time.Duration) (int64, error) {
-	query := `DELETE FROM container_stats WHERE collected_at < $1`
+	query := `DELETE FROM container_stats WHERE recorded_at < $1`
 
 	threshold := time.Now().UTC().Add(-olderThan)
 	result, err := r.db.Exec(ctx, query, threshold)

@@ -23,10 +23,11 @@ import (
 
 // Service manages Docker daemon configuration (daemon.json).
 type Service struct {
-	logger     *logger.Logger
-	configPath string
-	backupDir  string
-	mu         sync.Mutex
+	logger      *logger.Logger
+	configPath  string
+	backupDir   string
+	mu          sync.Mutex
+	containerID string // non-empty when running in a Docker container with host PID ns
 }
 
 // NewService creates a new Docker config service.
@@ -39,17 +40,28 @@ func NewService(cfg Config, log *logger.Logger) *Service {
 	if backupDir == "" {
 		backupDir = "/etc/docker/backups"
 	}
-	return &Service{
+	s := &Service{
 		logger:     log.Named("dockerconfig"),
 		configPath: configPath,
 		backupDir:  backupDir,
 	}
+
+	// Detect if running in a Docker container with host PID namespace.
+	// In this setup, /etc/docker/daemon.json lives on the host, not in the
+	// container. We use nsenter via docker exec to access host files.
+	if id := detectContainerID(); id != "" && isHostPIDNS() {
+		s.containerID = id
+		s.logger.Info("Running in container with host PID ns, using nsenter for host file access",
+			"container_id", id)
+	}
+
+	return s
 }
 
 // Read reads and parses the current daemon.json file.
 // Returns an empty DaemonConfig if the file does not exist (valid Docker state).
 func (s *Service) Read(_ context.Context) (*DaemonConfig, error) {
-	data, err := os.ReadFile(s.configPath)
+	data, err := s.readConfigFile()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &DaemonConfig{}, nil
@@ -69,7 +81,7 @@ func (s *Service) Read(_ context.Context) (*DaemonConfig, error) {
 
 // ReadRaw returns the raw daemon.json content as a pretty-printed string.
 func (s *Service) ReadRaw(_ context.Context) (string, error) {
-	data, err := os.ReadFile(s.configPath)
+	data, err := s.readConfigFile()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "{}", nil
@@ -113,7 +125,7 @@ func (s *Service) UpdateCategory(ctx context.Context, category string, changes m
 
 	// 4. Backup current daemon.json (only if file exists)
 	var backupPath string
-	if _, err := os.Stat(s.configPath); err == nil {
+	if s.configFileExists() {
 		backupPath, err = s.backup()
 		if err != nil {
 			return nil, fmt.Errorf("backup before write: %w", err)
@@ -127,13 +139,7 @@ func (s *Service) UpdateCategory(ctx context.Context, category string, changes m
 	}
 	data = append(data, '\n')
 
-	// Ensure directory exists
-	dir := filepath.Dir(s.configPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create config directory: %w", err)
-	}
-
-	if err := os.WriteFile(s.configPath, data, 0o644); err != nil {
+	if err := s.writeConfigFile(data); err != nil {
 		return nil, fmt.Errorf("write daemon.json: %w", err)
 	}
 
@@ -166,7 +172,7 @@ func (s *Service) backup() (string, error) {
 		return "", fmt.Errorf("create backup directory: %w", err)
 	}
 
-	data, err := os.ReadFile(s.configPath)
+	data, err := s.readConfigFile()
 	if err != nil {
 		return "", fmt.Errorf("read daemon.json for backup: %w", err)
 	}
@@ -242,14 +248,14 @@ func (s *Service) RestoreBackup(ctx context.Context, backupName string) error {
 	}
 
 	// Backup current config before restoring
-	if _, statErr := os.Stat(s.configPath); statErr == nil {
+	if s.configFileExists() {
 		if _, err := s.backup(); err != nil {
 			return fmt.Errorf("pre-restore backup: %w", err)
 		}
 	}
 
 	// Write restored config
-	if err := os.WriteFile(s.configPath, data, 0o644); err != nil {
+	if err := s.writeConfigFile(data); err != nil {
 		return fmt.Errorf("write restored config: %w", err)
 	}
 
@@ -713,4 +719,180 @@ func nilIfEmpty(s *string) *string {
 		return nil
 	}
 	return s
+}
+
+// =============================================================================
+// Host filesystem access via nsenter (for containerized deployments)
+// =============================================================================
+
+// readConfigFile reads daemon.json from the correct filesystem.
+// When running in a container with host PID namespace, it reads from the
+// Docker host via nsenter. Otherwise reads the local file.
+func (s *Service) readConfigFile() ([]byte, error) {
+	// Try local filesystem first (works on host or when file is volume-mounted)
+	data, err := os.ReadFile(s.configPath)
+	if err == nil && len(data) > 0 {
+		return data, nil
+	}
+
+	// Local file missing or empty — try reading from host via nsenter
+	if s.containerID != "" {
+		if hostData, hostErr := s.readHostFile(s.configPath); hostErr == nil && len(hostData) > 0 {
+			return hostData, nil
+		}
+	}
+
+	// Return original result (may be os.ErrNotExist or empty data)
+	return data, err
+}
+
+// writeConfigFile writes data to daemon.json on the correct filesystem.
+// When running in a container with host PID namespace, it writes to the
+// Docker host via nsenter. Otherwise writes locally.
+func (s *Service) writeConfigFile(data []byte) error {
+	if s.containerID != "" {
+		return s.writeHostFile(s.configPath, data)
+	}
+
+	// Local write
+	dir := filepath.Dir(s.configPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+	return os.WriteFile(s.configPath, data, 0o644)
+}
+
+// configFileExists checks whether daemon.json exists (locally or on host).
+func (s *Service) configFileExists() bool {
+	if _, err := os.Stat(s.configPath); err == nil {
+		return true
+	}
+	if s.containerID != "" {
+		// Check host via nsenter
+		_, err := s.readHostFile(s.configPath)
+		return err == nil
+	}
+	return false
+}
+
+// readHostFile reads a file from the Docker host filesystem via nsenter.
+// Uses: docker exec -u 0 <self> nsenter --target 1 --mount -- cat <path>
+func (s *Service) readHostFile(path string) ([]byte, error) {
+	cmd := exec.Command("docker",
+		"exec", "-u", "0", s.containerID,
+		"nsenter", "--target", "1", "--mount", "--",
+		"cat", path,
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("nsenter read %s: %w", path, err)
+	}
+	return output, nil
+}
+
+// writeHostFile writes data to a file on the Docker host filesystem via nsenter.
+// Uses: docker exec -i -u 0 <self> nsenter --target 1 --mount -- tee <path>
+func (s *Service) writeHostFile(path string, data []byte) error {
+	// Ensure parent directory exists on host
+	dir := filepath.Dir(path)
+	mkdirCmd := exec.Command("docker",
+		"exec", "-u", "0", s.containerID,
+		"nsenter", "--target", "1", "--mount", "--",
+		"mkdir", "-p", dir,
+	)
+	if out, err := mkdirCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("nsenter mkdir %s: %s (%w)", dir, strings.TrimSpace(string(out)), err)
+	}
+
+	// Write file content via tee
+	cmd := exec.Command("docker",
+		"exec", "-i", "-u", "0", s.containerID,
+		"nsenter", "--target", "1", "--mount", "--",
+		"tee", path,
+	)
+	cmd.Stdin = strings.NewReader(string(data))
+	// Discard stdout (tee echoes input)
+	cmd.Stdout = nil
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("nsenter write %s: %s (%w)", path, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// detectContainerID finds our own Docker container ID from cgroup info.
+// Returns empty string if not running in a Docker container.
+func detectContainerID() string {
+	// Method 1: /proc/self/cgroup (cgroup v1 and v2)
+	if data, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			// cgroup v1: "N:controller:/docker/<id>"
+			if idx := strings.Index(line, "/docker/"); idx >= 0 {
+				id := strings.TrimSpace(line[idx+len("/docker/"):])
+				id = strings.TrimSuffix(id, ".scope")
+				if len(id) >= 12 {
+					return id[:12]
+				}
+			}
+			// cgroup v2 systemd: "0::/system.slice/docker-<id>.scope"
+			if idx := strings.Index(line, "/docker-"); idx >= 0 {
+				id := line[idx+len("/docker-"):]
+				id = strings.TrimSuffix(strings.TrimSpace(id), ".scope")
+				if len(id) >= 12 {
+					return id[:12]
+				}
+			}
+		}
+	}
+
+	// Method 2: /proc/self/mountinfo — look for docker overlay paths
+	if data, err := os.ReadFile("/proc/self/mountinfo"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			for _, prefix := range []string{"/docker/containers/", "/docker-", "/docker/"} {
+				if idx := strings.Index(line, prefix); idx >= 0 {
+					after := line[idx+len(prefix):]
+					var id strings.Builder
+					for _, c := range after {
+						if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+							id.WriteRune(c)
+						} else {
+							break
+						}
+					}
+					if id.Len() >= 12 {
+						return id.String()[:12]
+					}
+				}
+			}
+		}
+	}
+
+	// Method 3: Hostname (Docker sets it to short container ID by default)
+	if h, err := os.Hostname(); err == nil && len(h) == 12 {
+		// Only use hostname if it looks like a hex container ID
+		isHex := true
+		for _, c := range h {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				isHex = false
+				break
+			}
+		}
+		if isHex {
+			return h
+		}
+	}
+
+	return ""
+}
+
+// isHostPIDNS checks if the container shares the host PID namespace.
+// When pid:host is set, PID 1 is the host's init process (systemd/init),
+// not our container's entrypoint.
+func isHostPIDNS() bool {
+	data, err := os.ReadFile("/proc/1/cmdline")
+	if err != nil {
+		return false
+	}
+	cmdline := string(data)
+	return !strings.Contains(cmdline, "usulnet")
 }

@@ -40,9 +40,9 @@ type ProxyService interface {
 	ListDNSProviders(ctx context.Context) ([]*models.ProxyDNSProvider, error)
 	CreateDNSProvider(ctx context.Context, name, provider, apiToken, zone string, propagation int, isDefault bool, userID *uuid.UUID) (*models.ProxyDNSProvider, error)
 	DeleteDNSProvider(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
-	SyncToCaddy(ctx context.Context) error
-	CaddyHealthy(ctx context.Context) (bool, error)
-	UpstreamStatus(ctx context.Context) (interface{}, error)
+	Sync(ctx context.Context) error
+	BackendHealthy(ctx context.Context) (bool, error)
+	BackendMode() string
 	ListAuditLogs(ctx context.Context, limit, offset int) ([]*models.ProxyAuditLog, int, error)
 }
 
@@ -547,12 +547,12 @@ type ProxyHealthResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-// GetHealth returns the health status of the proxy backend (Caddy).
+// GetHealth returns the health status of the nginx proxy backend.
 // GET /api/proxy/health
 func (h *ProxyHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	healthy, err := h.proxyService.CaddyHealthy(ctx)
+	healthy, err := h.proxyService.BackendHealthy(ctx)
 	if err != nil {
 		h.OK(w, ProxyHealthResponse{Healthy: false, Message: err.Error()})
 		return
@@ -561,26 +561,12 @@ func (h *ProxyHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	h.OK(w, ProxyHealthResponse{Healthy: healthy})
 }
 
-// GetUpstreamStatus returns the health status of all upstreams.
-// GET /api/proxy/upstreams
-func (h *ProxyHandler) GetUpstreamStatus(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	status, err := h.proxyService.UpstreamStatus(ctx)
-	if err != nil {
-		h.HandleError(w, err)
-		return
-	}
-
-	h.OK(w, status)
-}
-
-// SyncToCaddy forces a sync to Caddy.
+// SyncProxy forces a configuration sync to the nginx backend.
 // POST /api/proxy/sync
-func (h *ProxyHandler) SyncToCaddy(w http.ResponseWriter, r *http.Request) {
+func (h *ProxyHandler) SyncProxy(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	if err := h.proxyService.SyncToCaddy(ctx); err != nil {
+	if err := h.proxyService.Sync(ctx); err != nil {
 		h.HandleError(w, err)
 		return
 	}

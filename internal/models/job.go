@@ -39,7 +39,7 @@ const (
 	JobTypeVolumePrune       JobType = "volume_prune"
 	JobTypeNetworkPrune      JobType = "network_prune"
 	JobTypeStackDeploy       JobType = "stack_deploy"
-	JobTypeNPMSync           JobType = "npm_sync"
+	JobTypeProxySync         JobType = "proxy_sync"
 	JobTypeHostInventory     JobType = "host_inventory"
 	JobTypeMetricsCollection JobType = "metrics_collection"
 	JobTypeCleanup           JobType = "cleanup"

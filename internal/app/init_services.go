@@ -142,7 +142,7 @@ func (app *Application) initServices(ctx context.Context, ic *initContext) error
 	app.Logger.Info("Security service initialized", "analyzers", 12)
 
 	// =========================================================================
-	// ENCRYPTOR (shared by Config, TOTP, NPM)
+	// ENCRYPTOR (shared by Config, TOTP, Proxy)
 	// =========================================================================
 
 	var encryptor *crypto.AESEncryptor
@@ -153,7 +153,7 @@ func (app *Application) initServices(ctx context.Context, ic *initContext) error
 			// This survives restarts (unlike random generation) as long as
 			// jwt_secret stays the same. WARNING: changing jwt_secret will
 			// invalidate all encrypted data (TOTP secrets, SSH credentials,
-			// NPM credentials, config values). Set USULNET_ENCRYPTION_KEY
+			// proxy DNS credentials, config values). Set USULNET_ENCRYPTION_KEY
 			// explicitly for independent key rotation.
 			h := crypto.SHA256String(ic.jwtSecret)
 			encKey = h[:64] // 64 hex chars = 32 bytes
@@ -162,7 +162,7 @@ func (app *Application) initServices(ctx context.Context, ic *initContext) error
 		var encErr error
 		encryptor, encErr = crypto.NewAESEncryptor(encKey)
 		if encErr != nil {
-			app.Logger.Error("Failed to create encryptor — SSH, TOTP, NPM, and Config services will be unavailable",
+			app.Logger.Error("Failed to create encryptor — SSH, TOTP, Proxy, and Config services will be unavailable",
 				"error", encErr,
 				"key_length", len(encKey),
 				"hint", "key must be exactly 64 hexadecimal characters (generate with: openssl rand -hex 32)",

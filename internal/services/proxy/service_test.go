@@ -13,7 +13,6 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
-	"github.com/fr4nsys/usulnet/internal/services/proxy/caddy"
 )
 
 // ---------------------------------------------------------------------------
@@ -266,10 +265,10 @@ func (b *mockBackend) Mode() string {
 	}
 	return b.mode
 }
-func (b *mockBackend) RequestCertificate(_ context.Context, _ []string, _ string) (string, string, error) {
+func (b *mockBackend) RequestCertificate(_ context.Context, _ []string, _ string, _ *models.ProxyDNSProvider) (string, string, error) {
 	return "cert-pem", "key-pem", nil
 }
-func (b *mockBackend) RenewCertificate(_ context.Context, _ []string, _ string) (string, string, error) {
+func (b *mockBackend) RenewCertificate(_ context.Context, _ []string, _ string, _ *models.ProxyDNSProvider) (string, string, error) {
 	return "renewed-cert", "renewed-key", nil
 }
 
@@ -575,19 +574,6 @@ func TestSync_BackendError(t *testing.T) {
 	}
 }
 
-func TestSyncToCaddy_BackwardsCompatible(t *testing.T) {
-	svc, _, backend, _ := newTestService(t)
-	ctx := context.Background()
-
-	err := svc.SyncToCaddy(ctx)
-	if err != nil {
-		t.Fatalf("SyncToCaddy failed: %v", err)
-	}
-	if backend.syncCalls != 1 {
-		t.Error("SyncToCaddy should delegate to Sync")
-	}
-}
-
 func TestBackendHealthy(t *testing.T) {
 	svc, _, backend, _ := newTestService(t)
 	ctx := context.Background()
@@ -608,35 +594,6 @@ func TestBackendHealthy(t *testing.T) {
 	}
 }
 
-func TestCaddyHealthy_BackwardsCompatible(t *testing.T) {
-	svc, _, backend, _ := newTestService(t)
-	ctx := context.Background()
-	backend.healthy = true
-
-	healthy, err := svc.CaddyHealthy(ctx)
-	if err != nil || !healthy {
-		t.Error("CaddyHealthy should delegate to BackendHealthy")
-	}
-}
-
-func TestUpstreamStatus_NonCaddyBackendReturnsEmpty(t *testing.T) {
-	svc, _, _, _ := newTestService(t)
-	ctx := context.Background()
-
-	status, err := svc.UpstreamStatus(ctx)
-	if err != nil {
-		t.Fatalf("UpstreamStatus failed: %v", err)
-	}
-
-	upstreams, ok := status.([]caddy.UpstreamStatus)
-	if !ok {
-		t.Fatalf("expected []caddy.UpstreamStatus, got %T", status)
-	}
-	if len(upstreams) != 0 {
-		t.Fatalf("expected no upstream status entries, got %d", len(upstreams))
-	}
-}
-
 func TestBackendMode(t *testing.T) {
 	svc, _, backend, _ := newTestService(t)
 	backend.mode = "nginx"
@@ -649,7 +606,7 @@ func TestRequestLECertificate(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 	ctx := context.Background()
 
-	cert, key, err := svc.RequestLECertificate(ctx, []string{"example.com"}, "admin@example.com")
+	cert, key, err := svc.RequestLECertificate(ctx, []string{"example.com"}, "admin@example.com", nil)
 	if err != nil {
 		t.Fatalf("RequestLECertificate failed: %v", err)
 	}
@@ -662,7 +619,7 @@ func TestRenewLECertificate(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 	ctx := context.Background()
 
-	cert, key, err := svc.RenewLECertificate(ctx, []string{"example.com"}, "admin@example.com")
+	cert, key, err := svc.RenewLECertificate(ctx, []string{"example.com"}, "admin@example.com", nil)
 	if err != nil {
 		t.Fatalf("RenewLECertificate failed: %v", err)
 	}
@@ -741,9 +698,9 @@ func TestAutoProxyFromLabels_CreateNew(t *testing.T) {
 	ctx := context.Background()
 
 	labels := map[string]string{
-		models.LabelCaddyDomain:    "app.example.com",
-		models.LabelCaddyPort:      "3000",
-		models.LabelCaddyWebsocket: "true",
+		models.LabelProxyDomain:    "app.example.com",
+		models.LabelProxyPort:      "3000",
+		models.LabelProxyWebsocket: "true",
 	}
 
 	err := svc.AutoProxyFromLabels(ctx, "container-1", "web-app", labels)
@@ -785,8 +742,8 @@ func TestAutoProxyFromLabels_UpdateExisting(t *testing.T) {
 	}
 
 	labels := map[string]string{
-		models.LabelCaddyDomain: "new.example.com",
-		models.LabelCaddyPort:   "9090",
+		models.LabelProxyDomain: "new.example.com",
+		models.LabelProxyPort:   "9090",
 	}
 
 	err := svc.AutoProxyFromLabels(ctx, "container-1", "web-app", labels)
@@ -807,8 +764,8 @@ func TestAutoProxyFromLabels_SSLDisabled(t *testing.T) {
 	ctx := context.Background()
 
 	labels := map[string]string{
-		models.LabelCaddyDomain: "app.example.com",
-		models.LabelCaddySSL:    "false",
+		models.LabelProxyDomain: "app.example.com",
+		models.LabelProxySSL:    "false",
 	}
 
 	err := svc.AutoProxyFromLabels(ctx, "c1", "app", labels)

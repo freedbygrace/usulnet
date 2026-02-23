@@ -24,13 +24,13 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "usulnet",
 	Short: "Docker Management Platform",
-	Long:  `usulnet is a self-hosted Docker management platform with security scoring, centralized config, and NPM integration.`,
+	Long:  `usulnet is a self-hosted Docker management platform with security scoring, centralized config, and nginx reverse proxy.`,
 }
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the server",
-	Long:  `Start the usulnet server in the specified mode (standalone, master, or agent).`,
+	Long:  `Start the usulnet server in the specified mode (master or agent).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return app.Run(cfgFile, mode)
 	},
@@ -209,7 +209,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file path (default: /etc/usulnet/config.yaml or ./config.yaml)")
 
 	// Serve flags
-	serveCmd.Flags().StringVarP(&mode, "mode", "m", "standalone", "operation mode: standalone|master|agent")
+	serveCmd.Flags().StringVarP(&mode, "mode", "m", "master", "operation mode: master|agent")
 	serveCmd.Flags().String("component", "", "component to run: api|gateway|scheduler (master mode only)")
 
 	// PKI flags

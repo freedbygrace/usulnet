@@ -48,7 +48,12 @@ func (h *Handler) ContainerReadFileAPI(w http.ResponseWriter, r *http.Request) {
 
 	content, err := h.services.Containers().ReadFile(r.Context(), containerID, path)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "is a directory") {
+			status = http.StatusBadRequest
+		}
+		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+		http.Error(w, string(errJSON), status)
 		return
 	}
 
@@ -95,11 +100,15 @@ func (h *Handler) ContainerWriteFileAPI(w http.ResponseWriter, r *http.Request) 
 		path = "/" + path
 	}
 
+	// Limit request body to 10 MB to prevent OOM on very large uploads.
+	const maxWriteSize = 10 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxWriteSize)
+
 	var body struct {
 		Content string `json:"content"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"file too large or invalid request body (max 10 MB)"}`, http.StatusBadRequest)
 		return
 	}
 

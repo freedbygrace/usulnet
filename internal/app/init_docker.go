@@ -24,13 +24,13 @@ import (
 // initDocker initializes Docker-related services: host, container, image, volume,
 // network, and stack services. Connects to the local Docker daemon.
 func (app *Application) initDocker(ctx context.Context, ic *initContext) error {
-	defaultHostID := standaloneHostID
+	defaultHostID := localHostID
 
-	// Host service in standalone mode with DB-backed repository for host CRUD
-	hostService := hostsvc.NewStandaloneService(hostsvc.DefaultConfig(), app.Logger)
+	// Host service with DB-backed repository for host CRUD
+	hostService := hostsvc.NewLocalService(hostsvc.DefaultConfig(), app.Logger)
 	app.hostService = hostService
 
-	// Wire host repository so Create/Update/Delete hosts work in standalone mode
+	// Wire host repository so Create/Update/Delete hosts work
 	stdDBHosts := stdlib.OpenDBFromPool(app.DB.Pool())
 	app.hostRepo = postgres.NewHostRepository(sqlx.NewDb(stdDBHosts, "pgx"))
 	hostService.SetRepository(app.hostRepo)

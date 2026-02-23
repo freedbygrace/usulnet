@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fr4nsys/usulnet/internal/docker"
+	"github.com/fr4nsys/usulnet/internal/gateway/protocol"
 	"github.com/fr4nsys/usulnet/internal/license"
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/crypto"
@@ -96,9 +97,9 @@ func NewService(
 	}
 }
 
-// NewStandaloneService creates a host service for standalone mode without a database repository.
+// NewLocalService creates a host service for the local Docker daemon without a database repository.
 // Use RegisterClient to pre-register Docker clients.
-func NewStandaloneService(config Config, log *logger.Logger) *Service {
+func NewLocalService(config Config, log *logger.Logger) *Service {
 	if log == nil {
 		log = logger.Nop()
 	}
@@ -121,7 +122,20 @@ func (s *Service) SetCommandSender(sender docker.CommandSender) {
 	s.logger.Info("command sender configured for agent proxy support")
 }
 
-// SetRepository sets the host repository (for upgrading standalone to master mode).
+// SendCommand sends a command to a remote agent host via the gateway.
+// Returns an error if no command sender is configured.
+func (s *Service) SendCommand(ctx context.Context, hostID uuid.UUID, cmd *protocol.Command) (*protocol.CommandResult, error) {
+	s.mu.RLock()
+	sender := s.cmdSender
+	s.mu.RUnlock()
+
+	if sender == nil {
+		return nil, fmt.Errorf("gateway not available for sending commands to host %s", hostID)
+	}
+	return sender.SendCommand(ctx, hostID, cmd)
+}
+
+// SetRepository sets the host repository for database-backed host lookups.
 // Thread-safe: may be called while background goroutines read repo.
 func (s *Service) SetRepository(repo *postgres.HostRepository) {
 	s.mu.Lock()
@@ -131,7 +145,7 @@ func (s *Service) SetRepository(repo *postgres.HostRepository) {
 }
 
 // RegisterClient directly registers a Docker client in the pool for a given host ID.
-// This bypasses the database and is used for standalone/local mode.
+// This bypasses the database and is used for the local Docker daemon.
 func (s *Service) RegisterClient(hostID string, client *docker.Client) {
 	s.clientPool.Set(hostID, client)
 	s.logger.Info("docker client registered", "host_id", hostID)
@@ -187,7 +201,7 @@ func (s *Service) Stop() {
 // initializeConnections connects to all known hosts on startup.
 func (s *Service) initializeConnections(ctx context.Context) {
 	if s.repo == nil {
-		s.logger.Info("standalone mode - skipping host initialization from DB")
+		s.logger.Info("local mode - skipping host initialization from DB")
 		return
 	}
 	hosts, err := s.repo.ListOnline(ctx)
@@ -245,7 +259,7 @@ func (s *Service) healthCheckWorker(ctx context.Context) {
 // performHealthChecks checks all hosts.
 func (s *Service) performHealthChecks(ctx context.Context) {
 	if s.repo == nil {
-		// Standalone mode: just check pool connectivity
+		// Local mode: just check pool connectivity
 		results := s.clientPool.HealthCheck(ctx)
 		for hostID, err := range results {
 			if err != nil {
@@ -418,7 +432,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*models.Host, error) {
 		return s.repo.GetByID(ctx, id)
 	}
 
-	// Standalone mode: build host info from client pool
+	// Local mode: build host info from client pool
 	client, ok := s.clientPool.Get(id.String())
 	if !ok {
 		return nil, fmt.Errorf("host not found")
@@ -448,7 +462,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*models.Host, error) {
 // GetByName retrieves a host by name.
 func (s *Service) GetByName(ctx context.Context, name string) (*models.Host, error) {
 	if s.repo == nil {
-		return nil, fmt.Errorf("host repository not available (standalone mode)")
+		return nil, fmt.Errorf("host repository not available (local mode)")
 	}
 	return s.repo.GetByName(ctx, name)
 }
@@ -584,7 +598,7 @@ func (s *Service) List(ctx context.Context, opts postgres.HostListOptions) ([]*m
 	s.mu.RUnlock()
 
 	if repo == nil {
-		// Standalone mode: return hosts from client pool
+		// Local mode: return hosts from client pool
 		ids := s.clientPool.HostIDs()
 		hosts := make([]*models.Host, 0, len(ids))
 		for _, id := range ids {
@@ -615,39 +629,49 @@ func (s *Service) ListSummaries(ctx context.Context) ([]*models.HostSummary, err
 			if summary.Status != models.HostStatusOnline {
 				continue
 			}
+			// Try direct client pool first (local/TCP hosts)
 			client, ok := s.clientPool.Get(summary.ID.String())
-			if !ok {
-				continue
+			if ok {
+				info, err := client.Info(ctx)
+				if err == nil {
+					summary.ContainerCount = info.Containers
+					summary.RunningCount = info.ContainersRunning
+					summary.ImageCount = info.Images
+					if summary.DockerVersion == nil || *summary.DockerVersion == "" {
+						summary.DockerVersion = &info.ServerVersion
+					}
+					if summary.TotalCPUs == nil || *summary.TotalCPUs == 0 {
+						summary.TotalCPUs = &info.NCPU
+					}
+					if summary.TotalMemory == nil || *summary.TotalMemory == 0 {
+						summary.TotalMemory = &info.MemTotal
+					}
+					if summary.OSType == nil || *summary.OSType == "" {
+						summary.OSType = &info.OSType
+					}
+					if summary.Architecture == nil || *summary.Architecture == "" {
+						summary.Architecture = &info.Architecture
+					}
+					now := time.Now()
+					summary.LastSeenAt = &now
+					continue
+				}
 			}
-			info, err := client.Info(ctx)
-			if err != nil {
-				continue
+			// For agent hosts not in client pool, enrich from latest metrics in DB
+			if summary.EndpointType == models.EndpointAgent {
+				metrics, err := s.repo.GetLatestMetrics(ctx, summary.ID)
+				if err == nil && metrics != nil {
+					summary.ContainerCount = metrics.ContainerCount
+					summary.RunningCount = metrics.RunningCount
+					summary.CPUPercent = metrics.CPUPercent
+					summary.MemoryPercent = metrics.MemoryPercent
+				}
 			}
-			summary.ContainerCount = info.Containers
-			summary.RunningCount = info.ContainersRunning
-			summary.ImageCount = info.Images
-			if summary.DockerVersion == nil || *summary.DockerVersion == "" {
-				summary.DockerVersion = &info.ServerVersion
-			}
-			if summary.TotalCPUs == nil || *summary.TotalCPUs == 0 {
-				summary.TotalCPUs = &info.NCPU
-			}
-			if summary.TotalMemory == nil || *summary.TotalMemory == 0 {
-				summary.TotalMemory = &info.MemTotal
-			}
-			if summary.OSType == nil || *summary.OSType == "" {
-				summary.OSType = &info.OSType
-			}
-			if summary.Architecture == nil || *summary.Architecture == "" {
-				summary.Architecture = &info.Architecture
-			}
-			now := time.Now()
-			summary.LastSeenAt = &now
 		}
 		return summaries, nil
 	}
 
-	// Standalone mode: build summaries from Docker client pool
+	// Local mode: build summaries from Docker client pool
 	var summaries []*models.HostSummary
 	for _, hostID := range s.clientPool.HostIDs() {
 		client, ok := s.clientPool.Get(hostID)
@@ -814,9 +838,9 @@ func (s *Service) GetClient(ctx context.Context, hostID uuid.UUID) (docker.Clien
 	}
 	s.mu.RUnlock()
 
-	// In standalone mode (no repo), cannot reconnect
+	// In local mode (no repo), cannot reconnect
 	if s.repo == nil {
-		return nil, fmt.Errorf("docker client not available for host %s (standalone mode)", hostID)
+		return nil, fmt.Errorf("docker client not available for host %s (local mode)", hostID)
 	}
 
 	// Look up host to determine type
@@ -1017,7 +1041,7 @@ func (s *Service) syncDockerInfo(ctx context.Context, host *models.Host) error {
 // Used at startup to ensure the host record has accurate Docker version data.
 func (s *Service) SyncDockerInfoForHost(ctx context.Context, hostID uuid.UUID) error {
 	if s.repo == nil {
-		return nil // no DB in standalone mode
+		return nil // no DB in local mode
 	}
 	host, err := s.repo.GetByID(ctx, hostID)
 	if err != nil {

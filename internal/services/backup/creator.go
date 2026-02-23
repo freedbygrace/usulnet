@@ -154,6 +154,8 @@ func (c *Creator) Create(ctx context.Context, opts CreateOptions) (*CreateResult
 		result, err = c.createContainerBackup(ctx, backup, opts)
 	case models.BackupTypeStack:
 		result, err = c.createStackBackup(ctx, backup, opts)
+	case models.BackupTypeSystem:
+		result, err = c.createSystemBackup(ctx, backup, opts)
 	default:
 		err = errors.New(errors.CodeBackupFailed, "unsupported backup type")
 	}
@@ -537,6 +539,124 @@ func (c *Creator) createStackBackup(ctx context.Context, backup *models.Backup, 
 	}
 
 	// Create archive
+	return c.createArchive(ctx, backup, tmpDir, opts)
+}
+
+// createSystemBackup creates a backup of the platform database and configuration.
+// It finds the database container by the target name (e.g., "postgresql") and
+// backs up its volumes containing the database data directory.
+func (c *Creator) createSystemBackup(ctx context.Context, backup *models.Backup, opts CreateOptions) (*CreateResult, error) {
+	if c.containerProvider == nil {
+		return nil, errors.New(errors.CodeBackupFailed, "container provider not configured")
+	}
+
+	// Store metadata
+	if backup.Metadata == nil {
+		backup.Metadata = &models.BackupMetadata{}
+	}
+
+	if opts.ProgressCallback != nil {
+		opts.ProgressCallback(Progress{
+			Phase:   "preparing",
+			Percent: 5,
+			Message: "Preparing system backup...",
+		})
+	}
+
+	// Try to find the database container by common name patterns
+	dbContainerNames := []string{
+		"USULNET-DB-001", "usulnet-db-001",
+		"usulnet-db", "postgres", "postgresql",
+	}
+
+	var dbContainer *ContainerInfo
+	for _, name := range dbContainerNames {
+		container, err := c.containerProvider.GetContainerByName(ctx, opts.HostID, name)
+		if err == nil && container != nil {
+			dbContainer = container
+			break
+		}
+	}
+
+	// Create temporary directory
+	tmpDir, err := os.MkdirTemp("", "system-backup-*")
+	if err != nil {
+		return nil, errors.Wrap(err, errors.CodeBackupFailed, "failed to create temp directory")
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if dbContainer != nil {
+		backup.Metadata.ContainerImage = dbContainer.Image
+		backup.Metadata.Labels = dbContainer.Labels
+
+		if opts.ProgressCallback != nil {
+			opts.ProgressCallback(Progress{
+				Phase:   "archiving",
+				Percent: 10,
+				Message: fmt.Sprintf("Found database container: %s", dbContainer.Name),
+			})
+		}
+
+		// Back up database container volumes
+		for i, volumeName := range dbContainer.Volumes {
+			mountpoint, err := c.volumeProvider.GetVolumeMountpoint(ctx, opts.HostID, volumeName)
+			if err != nil {
+				c.logger.Warn("failed to get volume mountpoint for system backup, trying CopyVolumeData",
+					"volume", volumeName, "error", err)
+				// Try CopyVolumeData as fallback
+				volumeDir := filepath.Join(tmpDir, "volumes", volumeName)
+				if mkErr := os.MkdirAll(volumeDir, 0755); mkErr == nil {
+					if copyErr := c.volumeProvider.CopyVolumeData(ctx, opts.HostID, volumeName, volumeDir); copyErr != nil {
+						c.logger.Warn("failed to copy volume data for system backup", "volume", volumeName, "error", copyErr)
+					}
+				}
+				continue
+			}
+
+			volumeDir := filepath.Join(tmpDir, "volumes", volumeName)
+			if err := os.MkdirAll(volumeDir, 0755); err != nil {
+				return nil, errors.Wrap(err, errors.CodeBackupFailed, "failed to create volume directory")
+			}
+
+			if err := copyDir(mountpoint, volumeDir); err != nil {
+				c.logger.Warn("failed to copy volume data, trying CopyVolumeData",
+					"volume", volumeName, "error", err)
+				if copyErr := c.volumeProvider.CopyVolumeData(ctx, opts.HostID, volumeName, volumeDir); copyErr != nil {
+					c.logger.Warn("failed to copy volume data for system backup", "volume", volumeName, "error", copyErr)
+				}
+			}
+
+			if opts.ProgressCallback != nil {
+				progress := 10 + float64(i+1)/float64(len(dbContainer.Volumes))*40
+				opts.ProgressCallback(Progress{
+					Phase:   "archiving",
+					Percent: progress,
+					Message: fmt.Sprintf("Backed up volume %s", volumeName),
+				})
+			}
+		}
+	} else {
+		c.logger.Warn("database container not found for system backup, creating metadata-only backup")
+	}
+
+	// Write metadata
+	metaData := map[string]interface{}{
+		"backup_type": "system",
+		"target_id":   opts.TargetID,
+		"target_name": opts.TargetName,
+		"backup_time": time.Now().UTC(),
+	}
+	if dbContainer != nil {
+		metaData["db_container_id"] = dbContainer.ID
+		metaData["db_container_name"] = dbContainer.Name
+		metaData["db_container_image"] = dbContainer.Image
+		metaData["db_volumes"] = dbContainer.Volumes
+	}
+	metaJSON, _ := json.MarshalIndent(metaData, "", "  ")
+	if err := os.WriteFile(filepath.Join(tmpDir, "backup_metadata.json"), metaJSON, 0644); err != nil {
+		c.logger.Warn("failed to write metadata", "error", err)
+	}
+
 	return c.createArchive(ctx, backup, tmpDir, opts)
 }
 

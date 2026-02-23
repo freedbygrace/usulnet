@@ -120,12 +120,10 @@ const (
 	CodeLimitExceeded   = "LIMIT_EXCEEDED"
 )
 
-// NPM integration error codes
+// Reverse proxy error codes
 const (
-	CodeNPMNotConfigured  = "NPM_NOT_CONFIGURED"
-	CodeNPMConnectionFailed = "NPM_CONNECTION_FAILED"
-	CodeNPMProxyNotFound  = "NPM_PROXY_NOT_FOUND"
-	CodeNPMSyncFailed     = "NPM_SYNC_FAILED"
+	CodeProxyNotConfigured  = "PROXY_NOT_CONFIGURED"
+	CodeProxySyncFailed     = "PROXY_SYNC_FAILED"
 )
 
 // Notification error codes

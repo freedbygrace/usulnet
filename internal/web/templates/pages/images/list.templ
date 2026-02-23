@@ -58,11 +58,15 @@ templ ImagesList(data ImagesListData) {
 			</div>
 			<div class="flex items-center gap-3">
 				@components.RefreshButton()
+				<a href="/image-builder" class="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg transition-colors">
+					<i class="fas fa-hammer mr-2"></i>
+					Build
+				</a>
 				<a href="/images/pull" class="px-4 py-2 bg-dark-700 hover:bg-dark-600 text-gray-300 rounded-lg transition-colors">
 					<i class="fas fa-download mr-2"></i>
 					Pull Image
 				</a>
-				<button 
+				<button
 					hx-post="/images/prune"
 					hx-confirm="Remove all unused images? This cannot be undone."
 					hx-swap="none"

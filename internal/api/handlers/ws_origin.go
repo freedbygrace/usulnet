@@ -34,7 +34,7 @@ func isAllowedWebSocketOrigin(r *http.Request) bool {
 	// Determine the effective server host. In reverse proxy deployments the
 	// X-Forwarded-Host header contains the public hostname the browser used,
 	// while r.Host may contain the backend address (e.g., 127.0.0.1:8080).
-	// We check both to avoid false rejections behind Nginx/Caddy/Traefik.
+	// We check both to avoid false rejections behind Nginx/Traefik.
 	serverHost := r.Host
 	if h, _, err := net.SplitHostPort(r.Host); err == nil {
 		serverHost = h

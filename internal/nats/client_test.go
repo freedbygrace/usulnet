@@ -19,8 +19,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.URL != "nats://localhost:4222" {
-		t.Errorf("URL = %q, want %q", cfg.URL, "nats://localhost:4222")
+	if cfg.URL != "natss://localhost:4222" {
+		t.Errorf("URL = %q, want %q", cfg.URL, "natss://localhost:4222")
 	}
 	if cfg.Name != "usulnet-client" {
 		t.Errorf("Name = %q, want %q", cfg.Name, "usulnet-client")

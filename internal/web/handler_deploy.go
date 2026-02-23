@@ -76,7 +76,7 @@ func (h *Handler) AgentDeployTempl(w http.ResponseWriter, r *http.Request) {
 		sshAuthType = "password"
 	}
 	if agentImage == "" {
-		agentImage = "usulnet-agent:latest"
+		agentImage = "usulnet/usulnet-agent:latest"
 	}
 
 	req := deploy.DeployRequest{

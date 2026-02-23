@@ -600,7 +600,7 @@ func (r *HostRepository) ExistsByName(ctx context.Context, name string) (bool, e
 
 // DeleteOldMetrics deletes host metrics older than the given retention period.
 func (r *HostRepository) DeleteOldMetrics(ctx context.Context, retention time.Duration) (int64, error) {
-	query := `DELETE FROM host_metrics WHERE created_at < $1`
+	query := `DELETE FROM host_metrics WHERE recorded_at < $1`
 
 	cutoff := time.Now().Add(-retention)
 	result, err := r.db.ExecContext(ctx, query, cutoff)

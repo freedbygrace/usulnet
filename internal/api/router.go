@@ -97,7 +97,6 @@ type Handlers struct {
 	Audit         *handlers.AuditHandler
 	PasswordReset *handlers.PasswordResetHandler
 	Proxy         *handlers.ProxyHandler
-	NPM           *handlers.NPMHandler
 	SSH           *handlers.SSHHandler
 	OpenAPI       *handlers.OpenAPIHandler
 	Settings      *handlers.SettingsHandler
@@ -302,9 +301,8 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 				r.Route("/proxy", func(r chi.Router) {
 					r.Use(middleware.RequireViewer)
 
-					// Health & Status (viewer+)
+					// Health (viewer+)
 					r.Get("/health", h.Proxy.GetHealth)
-					r.Get("/upstreams", h.Proxy.GetUpstreamStatus)
 
 					// Proxy Hosts
 					r.Route("/hosts", func(r chi.Router) {
@@ -347,70 +345,8 @@ func NewRouter(config RouterConfig, h *Handlers) chi.Router {
 					// Sync & Audit (operator+)
 					r.Group(func(r chi.Router) {
 						r.Use(middleware.RequireOperator)
-						r.Post("/sync", h.Proxy.SyncToCaddy)
+						r.Post("/sync", h.Proxy.SyncProxy)
 						r.Get("/audit-logs", h.Proxy.ListAuditLogs)
-					})
-				})
-			}
-
-			// NPM routes (for Nginx Proxy Manager integration)
-			if h.NPM != nil {
-				r.Route("/npm", func(r chi.Router) {
-					r.Use(middleware.RequireViewer)
-
-					// Connection Management
-					r.Route("/connections", func(r chi.Router) {
-						r.Get("/{hostID}", h.NPM.GetConnection)
-						r.Post("/{hostID}/test", h.NPM.TestConnection)
-
-						r.Group(func(r chi.Router) {
-							r.Use(middleware.RequireOperator)
-							r.Post("/", h.NPM.ConfigureConnection)
-							r.Put("/{id}", h.NPM.UpdateConnection)
-							r.Delete("/{id}", h.NPM.DeleteConnection)
-						})
-					})
-
-					// NPM Resources (per host)
-					r.Route("/{hostID}", func(r chi.Router) {
-						// Proxy Hosts
-						r.Get("/proxy-hosts", h.NPM.ListProxyHosts)
-						r.Get("/proxy-hosts/{proxyID}", h.NPM.GetProxyHost)
-						r.Group(func(r chi.Router) {
-							r.Use(middleware.RequireOperator)
-							r.Post("/proxy-hosts", h.NPM.CreateProxyHost)
-							r.Put("/proxy-hosts/{proxyID}", h.NPM.UpdateProxyHost)
-							r.Delete("/proxy-hosts/{proxyID}", h.NPM.DeleteProxyHost)
-							r.Post("/proxy-hosts/{proxyID}/enable", h.NPM.EnableProxyHost)
-							r.Post("/proxy-hosts/{proxyID}/disable", h.NPM.DisableProxyHost)
-						})
-
-						// Certificates
-						r.Get("/certificates", h.NPM.ListCertificates)
-						r.Group(func(r chi.Router) {
-							r.Use(middleware.RequireOperator)
-							r.Post("/certificates/letsencrypt", h.NPM.RequestLetsEncryptCertificate)
-							r.Delete("/certificates/{certID}", h.NPM.DeleteCertificate)
-						})
-
-						// Redirections
-						r.Get("/redirections", h.NPM.ListRedirections)
-						r.Group(func(r chi.Router) {
-							r.Use(middleware.RequireOperator)
-							r.Post("/redirections", h.NPM.CreateRedirection)
-							r.Delete("/redirections/{redirID}", h.NPM.DeleteRedirection)
-						})
-
-						// Access Lists
-						r.Get("/access-lists", h.NPM.ListAccessLists)
-						r.Group(func(r chi.Router) {
-							r.Use(middleware.RequireOperator)
-							r.Post("/access-lists", h.NPM.CreateAccessList)
-							r.Delete("/access-lists/{listID}", h.NPM.DeleteAccessList)
-						})
-
-						// Audit Logs
-						r.Get("/audit-logs", h.NPM.ListAuditLogs)
 					})
 				})
 			}

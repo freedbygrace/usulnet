@@ -41,7 +41,7 @@ func NewTestLogger(t testing.TB) *logger.Logger {
 // TestUserID is a stable UUID used across test fixtures.
 var TestUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
-// TestHostID is a stable host UUID for standalone-mode tests.
+// TestHostID is a stable host UUID for master-mode tests.
 var TestHostID = uuid.MustParse("00000000-0000-0000-0000-000000000010")
 
 // TestUser returns a fully populated admin user suitable for most tests.

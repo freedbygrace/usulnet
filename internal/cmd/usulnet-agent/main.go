@@ -35,7 +35,7 @@ func main() {
 	// Parse flags
 	var (
 		configFile  = flag.String("config", "", "Path to config file")
-		gatewayURL  = flag.String("gateway", envOrDefault("USULNET_GATEWAY_URL", "nats://localhost:4222"), "Gateway NATS URL")
+		gatewayURL  = flag.String("gateway", envOrDefault("USULNET_GATEWAY_URL", "natss://localhost:4222"), "Gateway NATS URL (natss:// for TLS)")
 		token       = flag.String("token", envOrDefault("USULNET_AGENT_TOKEN", ""), "Agent authentication token")
 		dockerHost  = flag.String("docker", envOrDefault("DOCKER_HOST", "unix:///var/run/docker.sock"), "Docker daemon address")
 		hostname    = flag.String("hostname", "", "Override hostname (auto-detected if empty)")

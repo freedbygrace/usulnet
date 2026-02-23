@@ -8,12 +8,14 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"log/slog"
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fr4nsys/usulnet/internal/api/handlers"
 	giteapkg "github.com/fr4nsys/usulnet/internal/integrations/gitea"
-	"github.com/fr4nsys/usulnet/internal/integrations/npm"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 	"github.com/fr4nsys/usulnet/internal/repository/redis"
 	"github.com/fr4nsys/usulnet/internal/scheduler/workers"
@@ -21,12 +23,24 @@ import (
 	ldapauthsvc "github.com/fr4nsys/usulnet/internal/services/auth/ldap"
 	oauthauthsvc "github.com/fr4nsys/usulnet/internal/services/auth/oauth"
 	capturesvc "github.com/fr4nsys/usulnet/internal/services/capture"
+	containersvc "github.com/fr4nsys/usulnet/internal/services/container"
+	crontabsvc "github.com/fr4nsys/usulnet/internal/services/crontab"
+	backupverifysvc "github.com/fr4nsys/usulnet/internal/services/backupverify"
+	firewallsvc "github.com/fr4nsys/usulnet/internal/services/firewall"
+	imagebuildersvc "github.com/fr4nsys/usulnet/internal/services/imagebuilder"
+	rollbacksvc "github.com/fr4nsys/usulnet/internal/services/rollback"
+	sslobssvc "github.com/fr4nsys/usulnet/internal/services/sslobservatory"
+	wireguardsvc "github.com/fr4nsys/usulnet/internal/services/wireguard"
+	marketplacesvc "github.com/fr4nsys/usulnet/internal/services/marketplace"
 	changessvc "github.com/fr4nsys/usulnet/internal/services/changes"
 	compliancesvc "github.com/fr4nsys/usulnet/internal/services/compliance"
 	costoptsvc "github.com/fr4nsys/usulnet/internal/services/costopt"
 	dashboardsvc "github.com/fr4nsys/usulnet/internal/services/dashboard"
 	databasesvc "github.com/fr4nsys/usulnet/internal/services/database"
 	deploysvc "github.com/fr4nsys/usulnet/internal/services/deploy"
+	dnssvc "github.com/fr4nsys/usulnet/internal/services/dns"
+	dnsdiscovery "github.com/fr4nsys/usulnet/internal/services/dns/discovery"
+	dnsembedded "github.com/fr4nsys/usulnet/internal/services/dns/embedded"
 	driftsvc "github.com/fr4nsys/usulnet/internal/services/drift"
 	ephemeralsvc "github.com/fr4nsys/usulnet/internal/services/ephemeral"
 	gitsvc "github.com/fr4nsys/usulnet/internal/services/git"
@@ -39,7 +53,6 @@ import (
 	monitoringsvc "github.com/fr4nsys/usulnet/internal/services/monitoring"
 	opasvc "github.com/fr4nsys/usulnet/internal/services/opa"
 	proxysvc "github.com/fr4nsys/usulnet/internal/services/proxy"
-	"github.com/fr4nsys/usulnet/internal/services/proxy/caddy"
 	nginxbackend "github.com/fr4nsys/usulnet/internal/services/proxy/nginx"
 	rdpsvc "github.com/fr4nsys/usulnet/internal/services/rdp"
 	recordingsvc "github.com/fr4nsys/usulnet/internal/services/recording"
@@ -132,7 +145,7 @@ func (app *Application) initWeb(ctx context.Context, ic *initContext) error {
 		hdlDeps.LicenseProvider = ic.licenseProvider
 	}
 
-	// TOTP and NPM use the encryptor created earlier
+	// TOTP and Proxy use the encryptor created earlier
 	if ic.encryptor != nil {
 		regDeps.Encryptor = ic.encryptor
 		hdlDeps.Encryptor = &encryptorAdapter{enc: ic.encryptor}
@@ -176,77 +189,44 @@ func (app *Application) initWeb(ctx context.Context, ic *initContext) error {
 		app.Logger.Info("TOTP 2FA support enabled (with replay prevention)")
 	}
 
-	// Setup NPM Integration (manual connection via Settings UI, gated by npm.enabled)
-	if ic.encryptor != nil && app.Config.NPM.Enabled {
-		npmConnRepo := postgres.NewNPMConnectionRepository(app.DB)
-		npmMappingRepo := postgres.NewContainerProxyMappingRepository(app.DB)
-		npmAuditRepo := postgres.NewNPMAuditLogRepository(app.DB)
-
-		npmService := npm.NewService(
-			npmConnRepo,
-			npmMappingRepo,
-			npmAuditRepo,
-			ic.encryptor,
-			app.Logger.Base(),
-		)
-		regDeps.NPMService = npmService
-		app.Logger.Info("NPM integration available (connect via Settings)")
-	}
-
-	// Setup Reverse Proxy Service (nginx by default, Caddy as fallback)
-	if ic.encryptor != nil && (app.Config.Nginx.Enabled || app.Config.Caddy.Enabled) {
+	// Setup Reverse Proxy Service (nginx backend, always enabled when encryptor is available)
+	if ic.encryptor != nil {
 		proxyHostRepo := postgres.NewProxyHostRepository(app.DB, app.Logger)
 		proxyHeaderRepo := postgres.NewProxyHeaderRepository(app.DB)
 		proxyCertRepo := postgres.NewProxyCertificateRepository(app.DB, app.Logger)
 		proxyDNSRepo := postgres.NewProxyDNSProviderRepository(app.DB, app.Logger)
 		proxyAuditRepo := postgres.NewProxyAuditLogRepository(app.DB)
 
-		var backend proxysvc.SyncBackend
-		var proxyCfg proxysvc.Config
-
-		if app.Config.Nginx.Enabled {
-			// nginx backend (default/recommended)
-			nginxCfg := nginxbackend.Config{
-				ConfigDir:      app.Config.Nginx.ConfigDir,
-				CertDir:        app.Config.Nginx.CertDir,
-				ACMEWebRoot:    app.Config.Nginx.ACMEWebRoot,
-				ACMEAccountDir: app.Config.Nginx.ACMEAccountDir,
-			}
-			if nginxCfg.ConfigDir == "" {
-				nginxCfg.ConfigDir = "/etc/nginx/conf.d/usulnet"
-			}
-			if nginxCfg.CertDir == "" {
-				nginxCfg.CertDir = "/etc/usulnet/certs"
-			}
-			if nginxCfg.ACMEWebRoot == "" {
-				nginxCfg.ACMEWebRoot = "/var/lib/usulnet/acme"
-			}
-			if nginxCfg.ACMEAccountDir == "" {
-				nginxCfg.ACMEAccountDir = "/var/lib/usulnet/acme/account"
-			}
-			backend = nginxbackend.NewBackend(nginxCfg)
-			proxyCfg = proxysvc.Config{
-				ACMEEmail:     app.Config.Nginx.ACMEEmail,
-				ListenHTTP:    app.Config.Nginx.ListenHTTP,
-				ListenHTTPS:   app.Config.Nginx.ListenHTTPS,
-				DefaultHostID: ic.defaultHostID,
-			}
-			app.Logger.Info("Reverse proxy service: nginx backend")
-		} else {
-			// Caddy backend (legacy)
-			caddyClient := caddy.NewClient(caddy.Config{
-				AdminURL: app.Config.Caddy.AdminURL,
-				Timeout:  10 * time.Second,
-			})
-			backend = proxysvc.NewCaddyBackend(caddyClient)
-			proxyCfg = proxysvc.Config{
-				CaddyAdminURL: app.Config.Caddy.AdminURL,
-				ACMEEmail:     app.Config.Caddy.ACMEEmail,
-				ListenHTTP:    app.Config.Caddy.ListenHTTP,
-				ListenHTTPS:   app.Config.Caddy.ListenHTTPS,
-				DefaultHostID: ic.defaultHostID,
-			}
-			app.Logger.Info("Reverse proxy service: Caddy backend")
+		nginxCfg := nginxbackend.Config{
+			ConfigDir:      app.Config.Nginx.ConfigDir,
+			CertDir:        app.Config.Nginx.CertDir,
+			ACMEWebRoot:    app.Config.Nginx.ACMEWebRoot,
+			ACMEAccountDir: app.Config.Nginx.ACMEAccountDir,
+			ContainerName:  app.Config.Nginx.ContainerName,
+		}
+		if nginxCfg.ConfigDir == "" {
+			nginxCfg.ConfigDir = "/etc/nginx/conf.d/usulnet"
+		}
+		if nginxCfg.CertDir == "" {
+			nginxCfg.CertDir = "/etc/usulnet/certs"
+		}
+		if nginxCfg.ACMEWebRoot == "" {
+			nginxCfg.ACMEWebRoot = "/var/lib/usulnet/acme"
+		}
+		if nginxCfg.ACMEAccountDir == "" {
+			nginxCfg.ACMEAccountDir = "/var/lib/usulnet/acme/account"
+		}
+		backend := nginxbackend.NewBackend(nginxCfg)
+		// Wire Docker exec so nginx -t / nginx -s reload run inside the nginx container
+		if ic.dockerClient != nil && nginxCfg.ContainerName != "" {
+			backend.SetDockerExecer(&nginxDockerExecAdapter{client: ic.dockerClient})
+			slog.Info("nginx: using Docker exec for container", "container", nginxCfg.ContainerName)
+		}
+		proxyCfg := proxysvc.Config{
+			ACMEEmail:     app.Config.Nginx.ACMEEmail,
+			ListenHTTP:    app.Config.Nginx.ListenHTTP,
+			ListenHTTPS:   app.Config.Nginx.ListenHTTPS,
+			DefaultHostID: ic.defaultHostID,
 		}
 
 		proxyService := proxysvc.NewService(
@@ -260,7 +240,170 @@ func (app *Application) initWeb(ctx context.Context, ic *initContext) error {
 			proxyCfg,
 			app.Logger,
 		)
+
+		// Wire extended repositories (redirections, streams, dead hosts, access lists, locations)
+		proxyRedirRepo := postgres.NewProxyRedirectionRepository(app.DB)
+		proxyStreamRepo := postgres.NewProxyStreamRepository(app.DB)
+		proxyDeadHostRepo := postgres.NewProxyDeadHostRepository(app.DB)
+		proxyACLRepo := postgres.NewProxyAccessListRepository(app.DB)
+		proxyLocationRepo := postgres.NewProxyLocationRepository(app.DB)
+		proxyService.SetExtendedRepositories(proxyRedirRepo, proxyStreamRepo, proxyDeadHostRepo, proxyACLRepo, proxyLocationRepo)
+
 		regDeps.ProxyService = proxyService
+		app.Logger.Info("Reverse proxy service: nginx backend")
+	}
+
+	// Setup DNS Service (embedded miekg/dns server)
+	if app.Config.DNS.Enabled {
+		dnsZoneRepo := postgres.NewDNSZoneRepository(app.DB, app.Logger)
+		dnsRecordRepo := postgres.NewDNSRecordRepository(app.DB, app.Logger)
+		dnsTSIGRepo := postgres.NewDNSTSIGKeyRepository(app.DB, app.Logger)
+		dnsAuditRepo := postgres.NewDNSAuditLogRepository(app.DB)
+
+		embeddedCfg := dnsembedded.Config{
+			ListenAddr: app.Config.DNS.ListenAddr,
+			Forwarders: app.Config.DNS.Forwarders,
+		}
+		dnsBackend := dnsembedded.New(embeddedCfg, app.Logger)
+
+		dnsCfg := dnssvc.Config{
+			Enabled:    app.Config.DNS.Enabled,
+			ListenAddr: app.Config.DNS.ListenAddr,
+			Forwarders: app.Config.DNS.Forwarders,
+		}
+
+		var dnsEnc dnssvc.Encryptor
+		if ic.encryptor != nil {
+			dnsEnc = ic.encryptor
+		}
+
+		dnsService := dnssvc.NewService(
+			dnsZoneRepo,
+			dnsRecordRepo,
+			dnsTSIGRepo,
+			dnsAuditRepo,
+			dnsEnc,
+			dnsBackend,
+			dnsCfg,
+			app.Logger,
+		)
+
+		// Start the DNS server
+		if err := dnsService.Start(ctx); err != nil {
+			app.Logger.Error("Failed to start DNS server", "error", err)
+		} else {
+			app.Logger.Info("DNS server started", "addr", app.Config.DNS.ListenAddr)
+		}
+
+		regDeps.DNSService = dnsService
+
+		// Setup DNS Service Discovery (auto-register containers as DNS records)
+		if app.Config.DNS.ServiceDiscovery.Enabled && ic.containerService != nil {
+			sdCfg := dnsdiscovery.Config{
+				Enabled:               app.Config.DNS.ServiceDiscovery.Enabled,
+				Domain:                app.Config.DNS.ServiceDiscovery.Domain,
+				TTL:                   app.Config.DNS.ServiceDiscovery.TTL,
+				CreateSRV:             app.Config.DNS.ServiceDiscovery.CreateSRV,
+				IncludeStoppedCleanup: app.Config.DNS.ServiceDiscovery.IncludeStoppedCleanup,
+			}
+
+			discoverySvc := dnsdiscovery.NewService(dnsService, sdCfg, app.Logger)
+			if err := discoverySvc.Start(ctx, ic.defaultHostID); err != nil {
+				app.Logger.Error("Failed to start DNS service discovery", "error", err)
+			} else {
+				// Register as container event observer
+				ic.containerService.AddEventCallback(func(ctx context.Context, hostID uuid.UUID, event containersvc.ContainerEvent) {
+					discoverySvc.HandleContainerEvent(ctx, hostID, event.Action, event.ContainerID, event.Container)
+				})
+				app.Logger.Info("DNS service discovery enabled",
+					"domain", sdCfg.Domain,
+					"ttl", sdCfg.TTL,
+					"srv", sdCfg.CreateSRV,
+				)
+			}
+
+			regDeps.DNSDiscoveryService = discoverySvc
+		}
+	}
+
+	// Setup Crontab Manager
+	{
+		crontabEntryRepo := postgres.NewCrontabEntryRepository(app.DB, app.Logger)
+		crontabExecRepo := postgres.NewCrontabExecutionRepository(app.DB)
+		crontabService := crontabsvc.NewService(crontabEntryRepo, crontabExecRepo, app.Logger)
+		if err := crontabService.Start(ctx, ic.defaultHostID); err != nil {
+			app.Logger.Error("Failed to start crontab service", "error", err)
+		} else {
+			app.Logger.Info("Crontab manager started")
+		}
+		regDeps.CrontabService = crontabService
+	}
+
+	// Setup Firewall Manager
+	{
+		fwRuleRepo := postgres.NewFirewallRuleRepository(app.DB, app.Logger)
+		fwAuditRepo := postgres.NewFirewallAuditRepository(app.DB, app.Logger)
+		firewallService := firewallsvc.NewService(fwRuleRepo, fwAuditRepo, app.Logger)
+		// CommandSender will be wired later when gateway is available
+		regDeps.FirewallService = firewallService
+		app.Logger.Info("Firewall manager started")
+	}
+
+	// Setup SSL Observatory
+	{
+		sslTargetRepo := postgres.NewSSLTargetRepository(app.DB, app.Logger)
+		sslScanRepo := postgres.NewSSLScanResultRepository(app.DB, app.Logger)
+		sslService := sslobssvc.NewService(sslTargetRepo, sslScanRepo, app.Logger)
+		regDeps.SSLObsService = sslService
+		app.Logger.Info("SSL Observatory started")
+	}
+
+	// Setup Backup Verification Service
+	{
+		bvRepo := postgres.NewBackupVerificationRepository(app.DB, app.Logger)
+		bvSchedRepo := postgres.NewBackupVerificationScheduleRepository(app.DB, app.Logger)
+		backupRepo := postgres.NewBackupRepository(app.DB)
+		bvService := backupverifysvc.NewService(bvRepo, bvSchedRepo, backupRepo, app.Logger)
+		regDeps.BackupVerifyService = bvService
+		app.Logger.Info("Backup Verification service started")
+	}
+
+	// Setup Image Builder Service
+	{
+		ibJobRepo := postgres.NewImageBuildJobRepository(app.DB, app.Logger)
+		ibTemplateRepo := postgres.NewDockerfileTemplateRepository(app.DB, app.Logger)
+		ibService := imagebuildersvc.NewService(ibJobRepo, ibTemplateRepo, app.Logger)
+		regDeps.ImageBuilderService = ibService
+		app.Logger.Info("Image Builder service started")
+	}
+
+	// Setup Automated Rollback Service
+	{
+		rbPolicyRepo := postgres.NewRollbackPolicyRepository(app.DB, app.Logger)
+		rbExecRepo := postgres.NewRollbackExecutionRepository(app.DB, app.Logger)
+		stackRepo := postgres.NewStackRepository(app.DB)
+		rbService := rollbacksvc.NewService(rbPolicyRepo, rbExecRepo, stackRepo, app.Logger)
+		regDeps.RollbackService = rbService
+		app.Logger.Info("Automated Rollback service started")
+	}
+
+	// Setup WireGuard VPN Service
+	{
+		wgIfaceRepo := postgres.NewWireGuardInterfaceRepository(app.DB, app.Logger)
+		wgPeerRepo := postgres.NewWireGuardPeerRepository(app.DB, app.Logger)
+		wgService := wireguardsvc.NewService(wgIfaceRepo, wgPeerRepo, app.Logger)
+		regDeps.WireGuardService = wgService
+		app.Logger.Info("WireGuard VPN service started")
+	}
+
+	// Setup Container Marketplace Service
+	{
+		mkAppRepo := postgres.NewMarketplaceAppRepository(app.DB, app.Logger)
+		mkInstRepo := postgres.NewMarketplaceInstallationRepository(app.DB, app.Logger)
+		mkReviewRepo := postgres.NewMarketplaceReviewRepository(app.DB, app.Logger)
+		mkService := marketplacesvc.NewService(mkAppRepo, mkInstRepo, mkReviewRepo, app.Logger)
+		regDeps.MarketplaceService = mkService
+		app.Logger.Info("Container Marketplace service started")
 	}
 
 	// Setup Storage Service (S3, Azure, GCS, B2, SFTP, Local — requires encryption key)

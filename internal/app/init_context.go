@@ -35,7 +35,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// initContext carries shared state between initialization phases in startStandalone.
+// initContext carries shared state between initialization phases in startServer.
 // Each init function populates fields that subsequent phases depend on.
 type initContext struct {
 	// Server config (populated by initServer, consumed by initAuth for TokenValidator/APIKeyAuth, initAPI for Setup)

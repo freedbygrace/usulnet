@@ -27,6 +27,8 @@ type CaptureService interface {
 	DeleteCapture(ctx context.Context, id uuid.UUID) error
 	GetPcapPath(ctx context.Context, id uuid.UUID) (string, error)
 	AnalyzeCapture(ctx context.Context, id uuid.UUID) (*models.CaptureAnalysis, error)
+	GetLivePackets(id uuid.UUID, offset int) ([]string, int64)
+	GetLiveStats(id uuid.UUID) (packetCount int64, fileSize int64, running bool)
 	Cleanup()
 }
 
@@ -39,9 +41,15 @@ type CaptureService interface {
 func (h *Handler) PacketCapture(w http.ResponseWriter, r *http.Request) {
 	pageData := h.prepareTemplPageData(r, "Packet Capture", "capture")
 
+	tcpdumpAvailable := false
+	if h.captureService != nil {
+		tcpdumpAvailable = h.captureService.Available()
+	}
+
 	data := toolspages.PacketCaptureData{
-		PageData:   pageData,
-		Interfaces: getNetworkInterfaces(),
+		PageData:         pageData,
+		Interfaces:       getNetworkInterfaces(),
+		TcpdumpAvailable: tcpdumpAvailable,
 	}
 
 	// Load captures from database if service is available

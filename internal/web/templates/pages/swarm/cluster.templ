@@ -20,6 +20,8 @@ type ClusterData struct {
 	Nodes          []NodeItem
 	Services       []ServiceItem
 	HostID         string
+	IsAgentHost    bool
+	MasterHostID   string
 }
 
 type NodeItem struct {
@@ -48,6 +50,25 @@ type ServiceItem struct {
 templ Cluster(data ClusterData) {
 	@layouts.Base(data.PageData) {
 		<div class="space-y-6">
+			if data.IsAgentHost {
+				<!-- Agent Host Warning -->
+				<div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 flex items-start gap-3">
+					<i class="fas fa-exclamation-triangle text-yellow-400 mt-0.5"></i>
+					<div>
+						<h3 class="text-sm font-semibold text-yellow-400">Swarm requires the master node</h3>
+						<p class="text-sm text-gray-400 mt-1">
+							You are viewing from an agent node. Docker Swarm operations (init, join, services)
+							must be performed from the master node.
+						</p>
+						if data.MasterHostID != "" {
+							<a href={ templ.SafeURL(fmt.Sprintf("/switch-host/%s?redirect=/swarm", data.MasterHostID)) }
+								class="inline-flex items-center gap-1 mt-2 text-sm text-primary-400 hover:text-primary-300">
+								<i class="fas fa-exchange-alt"></i>Switch to master node
+							</a>
+						}
+					</div>
+				</div>
+			}
 			<!-- Header -->
 			<div class="flex items-center justify-between">
 				<div>
@@ -58,7 +79,7 @@ templ Cluster(data ClusterData) {
 				</div>
 				<div class="flex items-center gap-2">
 					@components.RefreshButton()
-					if !data.Active {
+					if !data.Active && !data.IsAgentHost {
 						<button
 							hx-post="/swarm/init"
 							hx-confirm="Initialize Docker Swarm on this node? This will make it the cluster manager."
@@ -74,14 +95,14 @@ templ Cluster(data ClusterData) {
 				if data.Active {
 					@clusterActive(data)
 				} else {
-					@clusterInactive()
+					@clusterInactive(data)
 				}
 			</div>
 		</div>
 	}
 }
 
-templ clusterInactive() {
+templ clusterInactive(data ClusterData) {
 	<div class="space-y-6">
 		<div class="card p-8 text-center">
 			<div class="text-gray-400 mb-4">
@@ -117,6 +138,7 @@ templ clusterInactive() {
 					using the join token from the cluster manager.
 				</p>
 				<form method="POST" action="/swarm/join" class="space-y-3">
+					<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 					<div>
 						<label class="label text-xs">Manager Address (e.g. 192.168.1.10:2377)</label>
 						<input type="text" name="remote_addr" required placeholder="192.168.1.10:2377"

@@ -38,6 +38,16 @@ import (
 	calendarsvc "github.com/fr4nsys/usulnet/internal/services/calendar"
 	changessvc "github.com/fr4nsys/usulnet/internal/services/changes"
 	costoptsvc "github.com/fr4nsys/usulnet/internal/services/costopt"
+	crontabsvc "github.com/fr4nsys/usulnet/internal/services/crontab"
+	firewallsvc "github.com/fr4nsys/usulnet/internal/services/firewall"
+	backupverifysvc "github.com/fr4nsys/usulnet/internal/services/backupverify"
+	imagebuildersvc "github.com/fr4nsys/usulnet/internal/services/imagebuilder"
+	rollbacksvc "github.com/fr4nsys/usulnet/internal/services/rollback"
+	sslobssvc "github.com/fr4nsys/usulnet/internal/services/sslobservatory"
+	wireguardsvc "github.com/fr4nsys/usulnet/internal/services/wireguard"
+	marketplacesvc "github.com/fr4nsys/usulnet/internal/services/marketplace"
+	dnssvc "github.com/fr4nsys/usulnet/internal/services/dns"
+	dnsdiscovery "github.com/fr4nsys/usulnet/internal/services/dns/discovery"
 	dockerconfigsvc "github.com/fr4nsys/usulnet/internal/services/dockerconfig"
 	driftsvc "github.com/fr4nsys/usulnet/internal/services/drift"
 	dashboardsvc "github.com/fr4nsys/usulnet/internal/services/dashboard"
@@ -63,6 +73,8 @@ type Services interface {
 	Hosts() HostService
 	Events() EventService
 	Proxy() ProxyService
+	DNS() *dnssvc.Service
+	DNSDiscovery() *dnsdiscovery.Service
 	Storage() StorageService
 	Auth() AuthService
 	Stats() StatsService
@@ -73,6 +85,14 @@ type Services interface {
 	Metrics() MetricsServiceFull
 	Alerts() AlertsService
 	Scheduler() *scheduler.Scheduler
+	Crontab() *crontabsvc.Service
+	Firewall() *firewallsvc.Service
+	SSLObservatory() *sslobssvc.Service
+	BackupVerify() *backupverifysvc.Service
+	ImageBuilder() *imagebuildersvc.Service
+	Rollback() *rollbacksvc.Service
+	WireGuard() *wireguardsvc.Service
+	Marketplace() *marketplacesvc.Service
 }
 
 // Service interfaces (defined here for compilation, actual implementations in services package)
@@ -355,14 +375,23 @@ type ProxyService interface {
 	// Audit
 	ListAuditLogs(ctx context.Context, limit, offset int) ([]AuditLogView, int, error)
 	// Connection management
-	GetConnection(ctx context.Context) (*models.NPMConnection, error)
+	GetConnection(ctx context.Context) (*ProxyConnection, error)
 	SetupConnection(ctx context.Context, baseURL, email, password, userID string) error
 	UpdateConnectionConfig(ctx context.Context, connID string, baseURL, email, password *string, enabled *bool, userID string) error
 	DeleteConnection(ctx context.Context, connID string) error
 	// IsConnected
 	IsConnected(ctx context.Context) bool
-	// Mode returns the proxy backend type: "caddy" or "npm"
+	// Mode returns the proxy backend type (e.g. "nginx")
 	Mode() string
+}
+
+// ProxyConnection represents the proxy backend connection status.
+type ProxyConnection struct {
+	ID           string
+	BaseURL      string
+	AdminEmail   string
+	IsEnabled    bool
+	HealthStatus string
 }
 
 // StorageService provides S3-compatible storage operations for the web layer.

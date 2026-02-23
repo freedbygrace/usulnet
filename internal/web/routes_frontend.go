@@ -370,6 +370,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("security:scan"))
 				r.Post("/scan", h.SecurityScan)
+				r.Post("/scan/", h.SecurityScan) // handle trailing slash
 				r.Post("/scan/{id}", h.SecurityScanContainer)
 				r.Post("/issues/{id}/ignore", h.SecurityIssueIgnore)
 				r.Post("/issues/{id}/resolve", h.SecurityIssueResolve)
@@ -682,6 +683,174 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 			r.Group(func(r chi.Router) {
 				r.Use(m.RequirePermission("host:update"))
 				r.Get("/{id}/edit", h.ProxyEditTempl)
+			})
+		})
+
+		// DNS Server Management
+		r.Route("/dns", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:view"))
+			r.Get("/", h.DNSZonesTempl)
+			r.Get("/settings", h.DNSSettingsTempl)
+			r.Get("/audit", h.DNSAuditTempl)
+
+			// Mutations require host:update
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:update"))
+				r.Get("/zones/new", h.DNSZoneNewTempl)
+				r.Post("/zones", h.DNSZoneCreateTempl)
+				r.Get("/zones/{id}", h.DNSZoneDetailTempl)
+				r.Get("/zones/{id}/edit", h.DNSZoneEditTempl)
+				r.Post("/zones/{id}", h.DNSZoneUpdateTempl)
+				r.Delete("/zones/{id}", h.DNSZoneDeleteTempl)
+
+				// Records within a zone
+				r.Post("/zones/{zoneID}/records", h.DNSRecordCreateTempl)
+				r.Get("/zones/{zoneID}/records/{id}/edit", h.DNSRecordEditTempl)
+				r.Post("/zones/{zoneID}/records/{id}", h.DNSRecordUpdateTempl)
+				r.Delete("/zones/{zoneID}/records/{id}", h.DNSRecordDeleteTempl)
+			})
+		})
+
+		// Crontab Manager
+		r.Route("/crontab", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:view"))
+			r.Get("/", h.CrontabListTempl)
+
+			// Mutations require host:update
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:update"))
+				r.Get("/new", h.CrontabNewTempl)
+				r.Post("/", h.CrontabCreateTempl)
+				r.Get("/{id}", h.CrontabDetailTempl)
+				r.Get("/{id}/edit", h.CrontabEditTempl)
+				r.Post("/{id}", h.CrontabUpdateTempl)
+				r.Delete("/{id}", h.CrontabDeleteTempl)
+				r.Post("/{id}/toggle", h.CrontabToggleTempl)
+				r.Post("/{id}/run", h.CrontabRunNowTempl)
+			})
+		})
+
+		// Firewall Manager
+		r.Route("/firewall", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:view"))
+			r.Get("/", h.FirewallListTempl)
+			r.Get("/audit", h.FirewallAuditTempl)
+
+			// Mutations require host:update
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:update"))
+				r.Get("/new", h.FirewallNewTempl)
+				r.Post("/", h.FirewallCreateTempl)
+				r.Post("/apply", h.FirewallApplyTempl)
+				r.Post("/sync", h.FirewallSyncTempl)
+				r.Get("/{id}", h.FirewallDetailTempl)
+				r.Get("/{id}/edit", h.FirewallEditTempl)
+				r.Post("/{id}", h.FirewallUpdateTempl)
+				r.Delete("/{id}", h.FirewallDeleteTempl)
+			})
+		})
+
+		// SSL Observatory
+		r.Route("/ssl", func(r chi.Router) {
+			r.Use(m.RequirePermission("host:view"))
+			r.Get("/", h.SSLDashboardTempl)
+			r.Get("/targets", h.SSLTargetListTempl)
+
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("host:update"))
+				r.Get("/targets/new", h.SSLTargetNewTempl)
+				r.Post("/targets", h.SSLTargetCreateTempl)
+				r.Get("/targets/{id}", h.SSLTargetDetailTempl)
+				r.Delete("/targets/{id}", h.SSLTargetDeleteTempl)
+				r.Post("/targets/{id}/scan", h.SSLScanTargetTempl)
+				r.Post("/scan-all", h.SSLScanAllTempl)
+			})
+		})
+
+		// Backup Verification
+		r.Route("/backup-verify", func(r chi.Router) {
+			r.Use(m.RequirePermission("backup:view"))
+			r.Get("/", h.BackupVerifyListTempl)
+			r.Get("/schedules", h.BackupVerifyScheduleListTempl)
+
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("backup:create"))
+				r.Post("/{backupID}/verify", h.BackupVerifyRunTempl)
+				r.Get("/{id}", h.BackupVerifyDetailTempl)
+				r.Get("/schedules/new", h.BackupVerifyScheduleNewTempl)
+				r.Post("/schedules", h.BackupVerifyScheduleCreateTempl)
+				r.Delete("/schedules/{id}", h.BackupVerifyScheduleDeleteTempl)
+			})
+		})
+
+		// Image Builder
+		r.Route("/image-builder", func(r chi.Router) {
+			r.Use(m.RequirePermission("container:view"))
+			r.Get("/", h.ImageBuilderListTempl)
+			r.Get("/templates", h.ImageBuilderTemplateListTempl)
+
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("container:create"))
+				r.Get("/new", h.ImageBuilderNewTempl)
+				r.Post("/", h.ImageBuilderCreateTempl)
+				r.Get("/{id}", h.ImageBuilderDetailTempl)
+				r.Get("/templates/new", h.ImageBuilderTemplateNewTempl)
+				r.Post("/templates", h.ImageBuilderTemplateCreateTempl)
+				r.Delete("/templates/{id}", h.ImageBuilderTemplateDeleteTempl)
+			})
+		})
+
+		// Automated Rollback
+		r.Route("/rollback", func(r chi.Router) {
+			r.Use(m.RequirePermission("stack:view"))
+			r.Get("/", h.RollbackListTempl)
+			r.Get("/policies", h.RollbackPolicyListTempl)
+
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("stack:manage"))
+				r.Get("/{id}", h.RollbackDetailTempl)
+				r.Post("/{stackID}/execute", h.RollbackExecuteTempl)
+				r.Get("/policies/new", h.RollbackPolicyNewTempl)
+				r.Post("/policies", h.RollbackPolicyCreateTempl)
+				r.Get("/policies/{id}/edit", h.RollbackPolicyEditTempl)
+				r.Post("/policies/{id}", h.RollbackPolicyUpdateTempl)
+				r.Delete("/policies/{id}", h.RollbackPolicyDeleteTempl)
+			})
+		})
+
+		// WireGuard VPN
+		r.Route("/wireguard", func(r chi.Router) {
+			r.Use(m.RequirePermission("network:view"))
+			r.Get("/", h.WireGuardListTempl)
+			r.Get("/peers", h.WireGuardPeerListTempl)
+
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("network:create"))
+				r.Get("/new", h.WireGuardNewTempl)
+				r.Post("/", h.WireGuardCreateTempl)
+				r.Get("/{id}", h.WireGuardDetailTempl)
+				r.Post("/{id}/delete", h.WireGuardDeleteTempl)
+				r.Get("/{id}/peers/new", h.WireGuardPeerNewTempl)
+				r.Post("/{id}/peers", h.WireGuardPeerCreateTempl)
+				r.Get("/peers/{peerID}", h.WireGuardPeerDetailTempl)
+				r.Post("/peers/{peerID}/delete", h.WireGuardPeerDeleteTempl)
+			})
+		})
+
+		// Container Marketplace
+		r.Route("/marketplace", func(r chi.Router) {
+			r.Use(m.RequirePermission("container:view"))
+			r.Get("/", h.MarketplaceListTempl)
+			r.Get("/installed", h.MarketplaceInstalledTempl)
+
+			r.Group(func(r chi.Router) {
+				r.Use(m.RequirePermission("container:create"))
+				r.Get("/submit", h.MarketplaceSubmitTempl)
+				r.Post("/submit", h.MarketplaceSubmitCreateTempl)
+				r.Get("/{slug}", h.MarketplaceDetailTempl)
+				r.Get("/{slug}/install", h.MarketplaceInstallTempl)
+				r.Post("/{slug}/install", h.MarketplaceInstallCreateTempl)
+				r.Post("/installations/{id}/uninstall", h.MarketplaceUninstallTempl)
 			})
 		})
 
@@ -1262,6 +1431,7 @@ func RegisterFrontendRoutes(r chi.Router, h *Handler, m *Middleware) {
 
 		// Topology (requires container:view — shows container relationships)
 		r.With(m.RequirePermission("container:view")).Get("/topology", h.TopologyTempl)
+		r.With(m.RequirePermission("container:view")).Get("/topology/api", h.TopologyAPITempl)
 
 		// Dependencies (full dependency graph — requires container:view)
 		r.With(m.RequirePermission("container:view")).Get("/dependencies", h.DependenciesTempl)

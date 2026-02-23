@@ -97,6 +97,7 @@ LABEL org.opencontainers.image.title="usulnet" \
 RUN apk add --no-cache \
     ca-certificates tzdata curl su-exec util-linux \
     docker-cli docker-cli-compose \
+    tcpdump \
     neovim git ripgrep fd \
     musl-locales musl-locales-lang && \
     update-ca-certificates
@@ -125,8 +126,13 @@ RUN addgroup -g 1000 usulnet && \
     adduser -u 1000 -G usulnet -s /bin/sh -D usulnet
 
 # Create required directories with proper ownership in a single layer
-RUN mkdir -p /app/data /app/config /app/web/static/css /var/lib/usulnet/trivy && \
-    chown -R usulnet:usulnet /app /var/lib/usulnet
+# Includes nginx shared volume dirs so Docker seeds volumes with correct ownership
+RUN mkdir -p /app/data /app/config /app/web/static/css \
+    /var/lib/usulnet/trivy \
+    /etc/nginx/conf.d/usulnet \
+    /etc/usulnet/certs \
+    /var/lib/usulnet/acme/.well-known/acme-challenge && \
+    chown -R usulnet:usulnet /app /var/lib/usulnet /etc/nginx/conf.d/usulnet /etc/usulnet/certs
 
 WORKDIR /app
 

@@ -185,56 +185,119 @@ func (h *Handler) WSContainerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log streaming requires a direct Docker client connection
-	directClient, ok := dockerClientAPI.(*docker.Client)
-	if !ok {
-		h.sendWSMessage(conn, WSLogMessage{Type: "error", Data: "Log streaming not available for remote hosts"})
-		return
-	}
-
 	h.sendWSMessage(conn, WSLogMessage{
 		Type:      "connected",
 		Data:      "Connected to log stream",
 		Timestamp: time.Now().Format(time.RFC3339),
 	})
 
-	// Use Docker streaming logs API
-	logOpts := docker.LogOptions{
-		Follow:     follow,
-		Timestamps: true,
-		Tail:       strconv.Itoa(tail),
-		Stdout:     true,
-		Stderr:     true,
+	// Try streaming logs (direct Docker client)
+	directClient, isDirectClient := dockerClientAPI.(*docker.Client)
+	if isDirectClient {
+		logOpts := docker.LogOptions{
+			Follow:     follow,
+			Timestamps: true,
+			Tail:       strconv.Itoa(tail),
+			Stdout:     true,
+			Stderr:     true,
+		}
+
+		logCh, err := directClient.ContainerLogsStream(ctx, containerID, logOpts)
+		if err != nil {
+			h.sendWSMessage(conn, WSLogMessage{Type: "error", Data: "Failed to stream logs: " + err.Error()})
+			return
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case logLine, ok := <-logCh:
+				if !ok {
+					h.sendWSMessage(conn, WSLogMessage{
+						Type:      "disconnected",
+						Data:      "Log stream ended",
+						Timestamp: time.Now().Format(time.RFC3339),
+					})
+					return
+				}
+
+				msg := WSLogMessage{
+					Type:      "log",
+					Data:      logLine.Message,
+					Stream:    logLine.Stream,
+					Timestamp: logLine.Timestamp.Format(time.RFC3339),
+				}
+				if err := h.sendWSMessage(conn, msg); err != nil {
+					return
+				}
+			}
+		}
 	}
 
-	logCh, err := directClient.ContainerLogsStream(ctx, containerID, logOpts)
+	// Fallback: buffered log polling for agent/remote hosts
+	logLines, err := dockerClientAPI.ContainerLogsLines(ctx, containerID, tail)
 	if err != nil {
-		h.sendWSMessage(conn, WSLogMessage{Type: "error", Data: "Failed to stream logs: " + err.Error()})
+		h.sendWSMessage(conn, WSLogMessage{Type: "error", Data: "Failed to get logs: " + err.Error()})
 		return
 	}
+
+	// Send initial batch of logs
+	for _, line := range logLines {
+		msg := WSLogMessage{
+			Type:      "log",
+			Data:      line.Message,
+			Stream:    line.Stream,
+			Timestamp: line.Timestamp.Format(time.RFC3339),
+		}
+		if err := h.sendWSMessage(conn, msg); err != nil {
+			return
+		}
+	}
+
+	if !follow {
+		h.sendWSMessage(conn, WSLogMessage{
+			Type:      "disconnected",
+			Data:      "Log fetch complete",
+			Timestamp: time.Now().Format(time.RFC3339),
+		})
+		return
+	}
+
+	// Poll for new logs every 5 seconds (agent hosts don't support streaming)
+	var lastTimestamp time.Time
+	if len(logLines) > 0 {
+		lastTimestamp = logLines[len(logLines)-1].Timestamp
+	} else {
+		lastTimestamp = time.Now().Add(-time.Minute)
+	}
+
+	pollTicker := time.NewTicker(5 * time.Second)
+	defer pollTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case logLine, ok := <-logCh:
-			if !ok {
-				h.sendWSMessage(conn, WSLogMessage{
-					Type:      "disconnected",
-					Data:      "Log stream ended",
-					Timestamp: time.Now().Format(time.RFC3339),
-				})
-				return
+		case <-pollTicker.C:
+			newLines, err := dockerClientAPI.ContainerLogsSince(ctx, containerID, lastTimestamp)
+			if err != nil {
+				continue
 			}
-
-			msg := WSLogMessage{
-				Type:      "log",
-				Data:      logLine.Message,
-				Stream:    logLine.Stream,
-				Timestamp: logLine.Timestamp.Format(time.RFC3339),
-			}
-			if err := h.sendWSMessage(conn, msg); err != nil {
-				return
+			for _, line := range newLines {
+				if !line.Timestamp.After(lastTimestamp) {
+					continue
+				}
+				msg := WSLogMessage{
+					Type:      "log",
+					Data:      line.Message,
+					Stream:    line.Stream,
+					Timestamp: line.Timestamp.Format(time.RFC3339),
+				}
+				if err := h.sendWSMessage(conn, msg); err != nil {
+					return
+				}
+				lastTimestamp = line.Timestamp
 			}
 		}
 	}
@@ -535,28 +598,58 @@ func (h *Handler) WSContainerStats(w http.ResponseWriter, r *http.Request) {
 		h.sendWSMessage(conn, map[string]string{"type": "error", "message": "Failed to get Docker client: " + err.Error()})
 		return
 	}
-	dockerClient, ok := dockerClientAPI.(*docker.Client)
-	if !ok {
-		h.sendWSMessage(conn, map[string]string{"type": "error", "message": "Stats streaming not available for remote hosts"})
-		return
-	}
 
 	h.sendWSMessage(conn, map[string]string{"type": "connected", "message": "Stats stream connected"})
 
-	// Docker streaming stats
-	statsCh, err := dockerClient.ContainerStats(ctx, containerID)
-	if err != nil {
-		h.sendWSMessage(conn, map[string]string{"type": "error", "message": "Failed to stream stats: " + err.Error()})
-		return
+	// Try streaming stats (direct Docker client)
+	dockerClient, isDirectClient := dockerClientAPI.(*docker.Client)
+	if isDirectClient {
+		statsCh, err := dockerClient.ContainerStats(ctx, containerID)
+		if err != nil {
+			h.sendWSMessage(conn, map[string]string{"type": "error", "message": "Failed to stream stats: " + err.Error()})
+			return
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case stats, ok := <-statsCh:
+				if !ok {
+					return
+				}
+				msg := WSStatsMessage{
+					Type:        "stats",
+					CPUPercent:  stats.CPUPercent,
+					MemoryUsage: int64(stats.MemoryUsage),
+					MemoryLimit: int64(stats.MemoryLimit),
+					MemoryPct:   stats.MemoryPercent,
+					NetRx:       int64(stats.NetworkRx),
+					NetTx:       int64(stats.NetworkTx),
+					BlockRead:   int64(stats.BlockRead),
+					BlockWrite:  int64(stats.BlockWrite),
+					PIDs:        int64(stats.PIDs),
+					Timestamp:   stats.Read.Format(time.RFC3339),
+				}
+				if err := h.sendWSMessage(conn, msg); err != nil {
+					return
+				}
+			}
+		}
 	}
+
+	// Fallback: poll stats for agent/remote hosts
+	statsTicker := time.NewTicker(3 * time.Second)
+	defer statsTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case stats, ok := <-statsCh:
-			if !ok {
-				return
+		case <-statsTicker.C:
+			stats, err := dockerClientAPI.ContainerStatsOnce(ctx, containerID)
+			if err != nil {
+				continue
 			}
 			msg := WSStatsMessage{
 				Type:        "stats",
@@ -855,11 +948,11 @@ func (h *Handler) WSCapture(w http.ResponseWriter, r *http.Request) {
 		"message": "Capture stream connected",
 	})
 
-	// Poll capture stats every 2 seconds
-	ticker := time.NewTicker(2 * time.Second)
+	// Poll capture stats and live packets every second
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	var lastPacketCount int64
+	var lastLineOffset int
 	for {
 		select {
 		case <-ctx.Done():
@@ -868,28 +961,47 @@ func (h *Handler) WSCapture(w http.ResponseWriter, r *http.Request) {
 			if h.captureService == nil {
 				continue
 			}
-			capture, err := h.captureService.GetCapture(ctx, id)
-			if err != nil {
-				continue
-			}
 
-			msg := map[string]interface{}{
-				"type":         "stats",
-				"status":       string(capture.Status),
-				"packet_count": capture.PacketCount,
-				"file_size":    capture.FileSize,
-			}
+			// Try live stats first (avoids DB hit for running captures)
+			liveCount, liveSize, isRunning := h.captureService.GetLiveStats(id)
 
-			// Only send if something changed or capture is running
-			if capture.PacketCount != lastPacketCount || capture.Status == "running" {
-				lastPacketCount = capture.PacketCount
-				if err := h.sendWSMessage(conn, msg); err != nil {
+			if isRunning {
+				// Send live stats
+				if err := h.sendWSMessage(conn, map[string]interface{}{
+					"type":         "stats",
+					"status":       "running",
+					"packet_count": liveCount,
+					"file_size":    liveSize,
+				}); err != nil {
 					return
 				}
-			}
 
-			// If capture is no longer running, send final update and close
-			if capture.Status != "running" {
+				// Send new packet lines
+				lines, _ := h.captureService.GetLivePackets(id, lastLineOffset)
+				if len(lines) > 0 {
+					if err := h.sendWSMessage(conn, map[string]interface{}{
+						"type":  "packets",
+						"lines": lines,
+					}); err != nil {
+						return
+					}
+					lastLineOffset += len(lines)
+				}
+			} else {
+				// Capture is no longer running — get final state from DB
+				capture, err := h.captureService.GetCapture(ctx, id)
+				if err != nil {
+					continue
+				}
+
+				// Send final stats
+				h.sendWSMessage(conn, map[string]interface{}{
+					"type":         "stats",
+					"status":       string(capture.Status),
+					"packet_count": capture.PacketCount,
+					"file_size":    capture.FileSize,
+				})
+
 				h.sendWSMessage(conn, map[string]interface{}{
 					"type":    "finished",
 					"status":  string(capture.Status),

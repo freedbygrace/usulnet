@@ -27,7 +27,7 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected UUID-length AgentID (36 chars), got %d: %q", len(cfg.AgentID), cfg.AgentID)
 	}
 
-	if cfg.GatewayURL != "nats://localhost:4222" {
+	if cfg.GatewayURL != "natss://localhost:4222" {
 		t.Errorf("expected GatewayURL 'nats://localhost:4222', got %q", cfg.GatewayURL)
 	}
 
@@ -169,7 +169,7 @@ func TestNewAgentRequiresToken(t *testing.T) {
 	log := logger.Nop()
 	cfg := Config{
 		AgentID:    "test",
-		GatewayURL: "nats://localhost:4222",
+		GatewayURL: "natss://localhost:4222",
 		// Token intentionally empty
 	}
 
@@ -198,7 +198,7 @@ func TestNewAgentDefaults(t *testing.T) {
 	}
 
 	// GatewayURL defaults to localhost
-	if a.config.GatewayURL != "nats://localhost:4222" {
+	if a.config.GatewayURL != "natss://localhost:4222" {
 		t.Errorf("expected default GatewayURL, got %q", a.config.GatewayURL)
 	}
 

@@ -1373,6 +1373,83 @@ func (h *Handler) TopologyTempl(w http.ResponseWriter, r *http.Request) {
 	h.renderTempl(w, r, pages.Topology(data))
 }
 
+// TopologyAPITempl returns topology data as JSON for D3.js force graph.
+func (h *Handler) TopologyAPITempl(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	type graphNode struct {
+		ID     string `json:"id"`
+		Label  string `json:"label"`
+		Type   string `json:"type"`
+		Driver string `json:"driver,omitempty"`
+		Subnet string `json:"subnet,omitempty"`
+		State  string `json:"state,omitempty"`
+		Image  string `json:"image,omitempty"`
+	}
+	type graphEdge struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+		IP     string `json:"ip,omitempty"`
+	}
+	type graphData struct {
+		Nodes []graphNode `json:"nodes"`
+		Links []graphEdge `json:"links"`
+	}
+
+	result := graphData{
+		Nodes: make([]graphNode, 0),
+		Links: make([]graphEdge, 0),
+	}
+
+	if networks, err := h.services.Networks().List(ctx); err == nil {
+		seenContainers := make(map[string]bool)
+
+		for _, net := range networks {
+			result.Nodes = append(result.Nodes, graphNode{
+				ID:     "net-" + net.ID,
+				Label:  net.Name,
+				Type:   "network",
+				Driver: net.Driver,
+				Subnet: net.Subnet,
+			})
+
+			for _, cName := range net.Containers {
+				if !seenContainers[cName] {
+					seenContainers[cName] = true
+					result.Nodes = append(result.Nodes, graphNode{
+						ID:    "ctr-" + cName,
+						Label: cName,
+						Type:  "container",
+						State: "running",
+					})
+				}
+				result.Links = append(result.Links, graphEdge{
+					Source: "ctr-" + cName,
+					Target: "net-" + net.ID,
+				})
+			}
+		}
+
+		// Add container details if topology adapter provides state info
+		if topo, err := h.services.Networks().GetTopology(ctx); err == nil && topo != nil {
+			for _, node := range topo.Nodes {
+				if node.Type == "container" {
+					key := "ctr-" + node.Label
+					for i := range result.Nodes {
+						if result.Nodes[i].ID == key {
+							result.Nodes[i].State = node.State
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
 // ============================================================================
 // Notifications Handler
 // ============================================================================

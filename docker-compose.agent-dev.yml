@@ -1,0 +1,47 @@
+# =============================================================================
+# usulnet Agent — Development Build (standalone, for remote host testing)
+# =============================================================================
+#
+# Builds the agent locally from Dockerfile.agent and connects to a remote master.
+#
+# Usage:
+#   1. Set USULNET_GATEWAY_URL to your master's NATS address
+#   2. Set USULNET_AGENT_TOKEN to the token generated in the master UI
+#   3. docker compose -f docker-compose.agent-dev.yml up -d --build
+#
+# =============================================================================
+
+services:
+  usulnet-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: usulnet-agent
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_data:/app/data
+    environment:
+      # REQUIRED: Master NATS URL (natss:// = TLS with self-signed CA)
+      - USULNET_GATEWAY_URL=${USULNET_GATEWAY_URL:-natss://master:4222}
+      # REQUIRED: Agent token (generate in master UI → Nodes → Add Node → Agent)
+      - USULNET_AGENT_TOKEN=${USULNET_AGENT_TOKEN}
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/data/agent.pid"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "1"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  agent_data:

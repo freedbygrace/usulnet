@@ -641,7 +641,7 @@ type PortAnalysisView struct {
 	RiskReason    string `json:"risk_reason,omitempty"`
 }
 
-// ProxyHostView for NPM proxy hosts.
+// ProxyHostView for reverse proxy hosts.
 type ProxyHostView struct {
 	ID                    int      `json:"id"`
 	DomainNames           []string `json:"domain_names,omitempty"`
@@ -667,7 +667,7 @@ type ProxyHostView struct {
 	ModifiedOn            string   `json:"modified_on,omitempty"`
 }
 
-// RedirectionHostView for NPM redirections.
+// RedirectionHostView for proxy redirections.
 type RedirectionHostView struct {
 	ID              int      `json:"id"`
 	DomainNames     []string `json:"domain_names"`
@@ -681,7 +681,7 @@ type RedirectionHostView struct {
 	Enabled         bool     `json:"enabled"`
 }
 
-// StreamView for NPM TCP/UDP streams.
+// StreamView for proxy TCP/UDP streams.
 type StreamView struct {
 	ID             int    `json:"id"`
 	IncomingPort   int    `json:"incoming_port"`
@@ -692,7 +692,7 @@ type StreamView struct {
 	Enabled        bool   `json:"enabled"`
 }
 
-// DeadHostView for NPM dead hosts (404).
+// DeadHostView for dead hosts (404).
 type DeadHostView struct {
 	ID          int      `json:"id"`
 	DomainNames []string `json:"domain_names"`
@@ -702,7 +702,7 @@ type DeadHostView struct {
 	Enabled     bool     `json:"enabled"`
 }
 
-// CertificateView for NPM SSL certificates.
+// CertificateView for SSL certificates.
 type CertificateView struct {
 	ID          int      `json:"id"`
 	NiceName    string   `json:"nice_name"`
@@ -711,7 +711,7 @@ type CertificateView struct {
 	ExpiresOn   string   `json:"expires_on"`
 }
 
-// AccessListView for NPM access lists.
+// AccessListView for proxy access lists.
 type AccessListView struct {
 	ID          int    `json:"id"`
 	Name        string `json:"name"`
@@ -743,7 +743,7 @@ type AccessListClientView struct {
 	Directive string `json:"directive"`
 }
 
-// AuditLogView for NPM audit log entries.
+// AuditLogView for proxy audit log entries.
 type AuditLogView struct {
 	ID           string `json:"id"`
 	Operation    string `json:"operation"`

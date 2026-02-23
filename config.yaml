@@ -1,8 +1,8 @@
 # usulnet Configuration
 # Structure must match Go Config struct in internal/app/config.go
 
-# Operation mode: standalone | master | agent
-mode: "standalone"
+# Operation mode: master | agent
+mode: "master"
 
 # Server settings
 server:
@@ -46,21 +46,20 @@ redis:
   # tls_cert_file: ""           # Client certificate (optional, for mTLS)
   # tls_key_file: ""            # Client private key (optional, for mTLS)
 
-# NATS (messaging)
+# NATS (messaging) — TLS encrypted by default (self-signed cert)
 nats:
-  url: "nats://nats:4222"
+  url: "natss://nats:4222"
   name: "usulnet"
   # token: ""              # NATS auth token (if server requires it)
   # username: ""           # NATS username (alternative to token)
   # password: ""           # NATS password
   jetstream:
     enabled: true
-  # tls:                   # TLS encryption for NATS connections
-  #   enabled: false
+  # tls:                   # TLS is auto-enabled by natss:// URL scheme
   #   cert_file: ""        # Client certificate path (for mutual TLS)
   #   key_file: ""         # Client private key path
   #   ca_file: ""          # CA certificate path (for server verification)
-  #   skip_verify: false   # Skip server certificate verification (dev only)
+  #   skip_verify: true    # Default: true (self-signed CA)
 
 # Security (JWT, encryption, passwords)
 # This is the section the app validates - NOT "auth"
@@ -93,17 +92,16 @@ trivy:
   ignore_unfixed: false
   update_db_on_start: true
 
-# Nginx Proxy Manager integration (connect via Settings UI)
-npm:
-  enabled: false
-
-# Caddy reverse proxy integration (connect via Settings UI)
-caddy:
-  enabled: false                    # Enable Caddy reverse proxy integration (or env USULNET_CADDY_ENABLED)
-  admin_url: ""                     # Caddy admin API (or env USULNET_CADDY_ADMIN_URL)
-  acme_email: ""                    # ACME email for Let's Encrypt (or env USULNET_CADDY_ACME_EMAIL)
+# Reverse proxy (nginx backend, always enabled when encryption key is set)
+nginx:
+  acme_email: ""                    # Required for Let's Encrypt certificates (or env USULNET_NGINX_ACME_EMAIL)
+  config_dir: "/etc/nginx/conf.d/usulnet"
+  cert_dir: "/etc/usulnet/certs"
+  acme_web_root: "/var/lib/usulnet/acme"
+  acme_account_dir: "/var/lib/usulnet/acme/account"
   listen_http: ":80"
   listen_https: ":443"
+  container_name: "usulnet-nginx"   # Docker container name for exec (nginx -t, nginx -s reload)
 
 # MinIO/S3 storage (connect via Settings UI)
 minio:

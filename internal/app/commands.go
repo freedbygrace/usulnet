@@ -172,9 +172,6 @@ func countActiveHandlers(h *api.Handlers) int {
 	if h.Proxy != nil {
 		count++
 	}
-	if h.NPM != nil {
-		count++
-	}
 	if h.SSH != nil {
 		count++
 	}

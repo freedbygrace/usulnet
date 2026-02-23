@@ -36,7 +36,7 @@ type AboutData struct {
 	DockerImages     int
 
 	// Instance info
-	Mode       string // standalone, master, agent
+	Mode       string // master, agent
 	Uptime     string
 	ConfigPath string
 }

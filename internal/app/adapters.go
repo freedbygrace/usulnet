@@ -19,9 +19,9 @@ import (
 	"github.com/fr4nsys/usulnet/internal/repository/redis"
 )
 
-// standaloneHostID is the well-known host ID used for the local Docker
-// daemon in standalone (non-agent) mode.
-var standaloneHostID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+// localHostID is the well-known host ID used for the local Docker
+// daemon in master mode (the Docker host running usulnet itself).
+var localHostID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // zapLicenseLogger adapts zap.SugaredLogger to satisfy license.Logger.
 type zapLicenseLogger struct {

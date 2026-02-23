@@ -31,7 +31,23 @@ func (h *Handler) SwarmClusterTempl(w http.ResponseWriter, r *http.Request) {
 		HostID:   hostID.String(),
 	}
 
+	// Detect if the active host is an agent node — Swarm ops require the master
+	masterHostID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	if hostID != masterHostID {
+		host, hostErr := h.services.Hosts().Get(ctx, hostID.String())
+		if hostErr == nil && host.EndpointType == "agent" {
+			data.IsAgentHost = true
+			data.MasterHostID = masterHostID.String()
+		}
+	}
+
 	if h.swarmService == nil {
+		h.renderTempl(w, r, swarmtpl.Cluster(data))
+		return
+	}
+
+	// Skip Swarm API call for agent nodes — it will always fail
+	if data.IsAgentHost {
 		h.renderTempl(w, r, swarmtpl.Cluster(data))
 		return
 	}

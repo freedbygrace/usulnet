@@ -67,6 +67,10 @@ cd usulnet
 mkdir usulnet && cd usulnet
 curl -LO https://raw.githubusercontent.com/fr4nsys/usulnet/main/docker-compose.yml
 curl -LO https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/.env.example
+# IMPORTANT: download config.yaml — without this, Docker creates a directory and the app boot-loops
+curl -LO https://raw.githubusercontent.com/fr4nsys/usulnet/main/config.yaml
+# NATS server configuration (required — the compose file mounts this into the NATS container)
+curl -fsSL https://raw.githubusercontent.com/fr4nsys/usulnet/main/deploy/nats-server.conf -o nats-server.conf
 ```
 
 ### Step 2: Configure Environment Variables
@@ -86,9 +90,9 @@ USULNET_HTTP_PORT=8080
 USULNET_HTTPS_PORT=7443
 
 # Optional: Set operation mode
-# standalone = single host (default)
-# master     = multi-host control plane
-USULNET_MODE=standalone
+# master = full server (default)
+# agent  = remote worker node
+USULNET_MODE=master
 ```
 
 **Environment Variable Reference:**
@@ -101,12 +105,45 @@ USULNET_MODE=standalone
 | `USULNET_VERSION` | `latest` | Docker image tag |
 | `USULNET_HTTP_PORT` | `8080` | HTTP port on host |
 | `USULNET_HTTPS_PORT` | `7443` | HTTPS port on host |
-| `USULNET_MODE` | `standalone` | Operation mode: `standalone` or `master` |
+| `USULNET_MODE` | `master` | Operation mode: `master` or `agent` |
 | `HOST_TERMINAL_ENABLED` | `true` | Allow web terminal to Docker host |
 | `HOST_TERMINAL_USER` | `nobody` | User for host terminal sessions |
 | `AGENT_TOKEN` | `change-me` | Token for agent authentication (multi-host only) |
 
-### Step 3: Start the Stack
+### Step 3: Generate TLS Certificates
+
+> **Note:** If you used `install.sh`, this step was done automatically. For manual deployments, generate self-signed TLS certificates for the internal services (PostgreSQL, Redis, NATS):
+
+```bash
+mkdir -p certs
+
+# PostgreSQL certificate
+openssl req -new -x509 -days 3650 -nodes \
+    -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -subj "/CN=postgres/O=usulnet" \
+    -addext "subjectAltName=DNS:postgres,DNS:localhost,IP:127.0.0.1" \
+    -keyout certs/postgres-server.key -out certs/postgres-server.crt 2>/dev/null
+
+# Redis certificate
+openssl req -new -x509 -days 3650 -nodes \
+    -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -subj "/CN=redis/O=usulnet" \
+    -addext "subjectAltName=DNS:redis,DNS:localhost,IP:127.0.0.1" \
+    -keyout certs/redis-server.key -out certs/redis-server.crt 2>/dev/null
+
+# NATS certificate
+openssl req -new -x509 -days 3650 -nodes \
+    -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -subj "/CN=nats/O=usulnet" \
+    -addext "subjectAltName=DNS:nats,DNS:localhost,IP:127.0.0.1" \
+    -keyout certs/nats-server.key -out certs/nats-server.crt 2>/dev/null
+
+chmod 600 certs/*.key
+```
+
+These certificates encrypt traffic between containers. They are self-signed (valid for 10 years) and only used for internal inter-service communication.
+
+### Step 4: Start the Stack
 
 ```bash
 docker compose up -d
@@ -119,7 +156,7 @@ This starts the following services:
 - **nats** - NATS 2.12 message broker (JetStream)
 - **guacd** - Apache Guacamole daemon (RDP/VNC gateway)
 
-### Step 4: Verify the Installation
+### Step 5: Verify the Installation
 
 Wait for all services to become healthy:
 
@@ -145,7 +182,7 @@ Expected health response:
 }
 ```
 
-### Step 5: Access the Web Interface
+### Step 6: Access the Web Interface
 
 Open your browser and navigate to:
 
@@ -196,7 +233,7 @@ sudo mv usulnet-linux-arm64 /usr/local/bin/usulnet
 Create `config.yaml`:
 
 ```yaml
-mode: "standalone"
+mode: "master"
 
 server:
   host: "0.0.0.0"
@@ -215,7 +252,7 @@ redis:
   url: "redis://localhost:6379"
 
 nats:
-  url: "nats://localhost:4222"
+  url: "natss://localhost:4222"
   jetstream:
     enabled: true
 
@@ -385,7 +422,7 @@ docker run -d \
   --restart unless-stopped \
   -v /var/run/docker.sock:/var/run/docker.sock \
   usulnet/usulnet-agent:latest \
-  --gateway nats://MASTER_IP:4222 \
+  --gateway natss://MASTER_IP:4222 \
   --token your-secure-agent-token
 ```
 

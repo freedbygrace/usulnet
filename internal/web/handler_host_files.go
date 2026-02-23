@@ -178,6 +178,10 @@ func (h *Handler) APIHostBrowse(w http.ResponseWriter, r *http.Request) {
 
 	files := parseHostLS(output, path)
 
+	// Resolve symlink types: check which symlinks point to directories
+	// so the frontend navigates into them instead of trying to read them as files.
+	resolveHostSymlinkTypes(selfID, files, cfg)
+
 	h.jsonResponse(w, map[string]interface{}{
 		"path":  path,
 		"files": files,
@@ -234,6 +238,13 @@ func (h *Handler) APIHostReadFile(w http.ResponseWriter, r *http.Request) {
 	selfID := detectSelfContainerID()
 	if selfID == "" {
 		h.jsonError(w, "Cannot detect container ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check file type — reject directories and symlinks to directories
+	fileType, _ := runNsenterCommand(selfID, []string{"stat", "-L", "-c", "%F", path}, cfg)
+	if strings.TrimSpace(fileType) == "directory" {
+		h.jsonError(w, "Path is a directory, not a file", http.StatusBadRequest)
 		return
 	}
 
@@ -562,12 +573,13 @@ func shellQuote(s string) string {
 // then runs the command as cfg.User.
 func runNsenterCommand(selfContainerID string, cmd []string, cfg HostTerminalConfig) (string, error) {
 
-	// Build nsenter command
-	// We use su to drop to the configured unprivileged user
+	// Build nsenter command.
+	// We use su with -s /bin/sh to force a usable shell even for system users
+	// whose login shell is /usr/sbin/nologin or /bin/false (e.g. www-data, nginx).
 	args := []string{
 		"exec", "-u", "0", selfContainerID,
 		"nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid",
-		"--", "su", "-", cfg.User, "-c",
+		"--", "su", "-s", "/bin/sh", "-", cfg.User, "-c",
 	}
 
 	// Shell-escape each argument to prevent injection via metacharacters.
@@ -603,7 +615,7 @@ func parseHostLS(output, basePath string) []HostFileEntry {
 
 		// Parse ls -l output
 		fields := strings.Fields(line)
-		if len(fields) < 8 {
+		if len(fields) < 7 {
 			continue
 		}
 
@@ -686,6 +698,39 @@ func humanizeHostSize(size int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
+}
+
+// resolveHostSymlinkTypes checks which symlinks point to directories and
+// updates their IsDir field so the frontend navigates into them correctly.
+// Uses stat -L -c '%F %n' (GNU coreutils) for efficient batch checking.
+func resolveHostSymlinkTypes(selfID string, files []HostFileEntry, cfg HostTerminalConfig) {
+	var symlinkPaths []string
+	idxMap := make(map[string]int) // path → index in files
+	for i, f := range files {
+		if f.IsSymlink {
+			symlinkPaths = append(symlinkPaths, f.Path)
+			idxMap[f.Path] = i
+		}
+	}
+	if len(symlinkPaths) == 0 {
+		return
+	}
+
+	// stat -L follows symlinks; %F gives file type ("directory", "regular file", etc.); %n gives path.
+	args := append([]string{"stat", "-L", "-c", "%F %n"}, symlinkPaths...)
+	output, err := runNsenterCommand(selfID, args, cfg)
+	if err != nil {
+		return // stat failed (unlikely on host with GNU coreutils), skip silently
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if strings.HasPrefix(line, "directory ") {
+			symPath := strings.TrimPrefix(line, "directory ")
+			if idx, ok := idxMap[symPath]; ok {
+				files[idx].IsDir = true
+			}
+		}
+	}
 }
 
 func hostTimeAgo(t time.Time) string {

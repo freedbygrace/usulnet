@@ -28,8 +28,6 @@ type Config struct {
 	Agent    AgentConfig    `mapstructure:"agent"`
 	Docker   DockerConfig   `mapstructure:"docker"`
 	Trivy    TrivyConfig    `mapstructure:"trivy"`
-	NPM      NPMConfig      `mapstructure:"npm"`
-	Caddy    CaddyConfig    `mapstructure:"caddy"`
 	Nginx    NginxConfig    `mapstructure:"nginx"`
 	Minio    MinIOConfig    `mapstructure:"minio"`
 	Logging       LoggingConfig       `mapstructure:"logging"`
@@ -37,6 +35,33 @@ type Config struct {
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	Terminal TerminalConfig `mapstructure:"terminal"`
 	Guacd   GuacdConfig    `mapstructure:"guacd"`
+	DNS     DNSConfig      `mapstructure:"dns"`
+}
+
+// DNSConfig holds embedded DNS server configuration.
+type DNSConfig struct {
+	// Enabled activates the embedded DNS server. Default: true.
+	Enabled bool `mapstructure:"enabled"`
+	// ListenAddr is the UDP/TCP address to listen on (default ":53").
+	ListenAddr string `mapstructure:"listen_addr"`
+	// Forwarders are upstream DNS servers for recursive resolution.
+	Forwarders []string `mapstructure:"forwarders"`
+	// ServiceDiscovery configures automatic DNS registration for containers.
+	ServiceDiscovery ServiceDiscoveryConfig `mapstructure:"service_discovery"`
+}
+
+// ServiceDiscoveryConfig holds container DNS service discovery settings.
+type ServiceDiscoveryConfig struct {
+	// Enabled activates automatic container→DNS registration. Default: true.
+	Enabled bool `mapstructure:"enabled"`
+	// Domain is the base zone for discovered containers (default "containers.local").
+	Domain string `mapstructure:"domain"`
+	// TTL is the record TTL in seconds for auto-created records (default 30).
+	TTL int `mapstructure:"ttl"`
+	// CreateSRV generates SRV records for exposed container ports. Default: true.
+	CreateSRV bool `mapstructure:"create_srv"`
+	// IncludeStoppedCleanup removes DNS records when containers stop. Default: true.
+	IncludeStoppedCleanup bool `mapstructure:"include_stopped_cleanup"`
 }
 
 // DockerConfig holds Docker daemon connection configuration.
@@ -223,27 +248,11 @@ type TrivyConfig struct {
 	UpdateDBOnStart bool          `mapstructure:"update_db_on_start"`
 }
 
-// NPMConfig holds Nginx Proxy Manager integration configuration.
-// NPM connections are managed manually via the Settings UI.
-type NPMConfig struct {
-	Enabled bool `mapstructure:"enabled"`
-}
-
-// CaddyConfig holds Caddy reverse proxy configuration.
-// Users connect their existing Caddy instance via the Settings UI.
-type CaddyConfig struct {
-	Enabled     bool   `mapstructure:"enabled"`
-	AdminURL    string `mapstructure:"admin_url"`
-	ACMEEmail   string `mapstructure:"acme_email"`
-	ListenHTTP  string `mapstructure:"listen_http"`
-	ListenHTTPS string `mapstructure:"listen_https"`
-}
-
 // NginxConfig holds nginx reverse proxy configuration.
-// When enabled, usulnet manages nginx configuration files and Let's Encrypt
-// certificates directly. This is the default/recommended proxy backend.
+// Usulnet manages nginx configuration files and Let's Encrypt certificates
+// directly. The nginx backend is always enabled when an encryption key is
+// available (required for certificate private key storage).
 type NginxConfig struct {
-	Enabled        bool   `mapstructure:"enabled"`
 	ConfigDir      string `mapstructure:"config_dir"`
 	CertDir        string `mapstructure:"cert_dir"`
 	ACMEEmail      string `mapstructure:"acme_email"`
@@ -251,6 +260,7 @@ type NginxConfig struct {
 	ACMEAccountDir string `mapstructure:"acme_account_dir"`
 	ListenHTTP     string `mapstructure:"listen_http"`
 	ListenHTTPS    string `mapstructure:"listen_https"`
+	ContainerName  string `mapstructure:"container_name"`
 }
 
 // MinIOConfig holds MinIO/S3 configuration.
@@ -332,8 +342,6 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	_ = v.BindEnv("security.config_encryption_key", "USULNET_ENCRYPTION_KEY", "CONFIG_ENCRYPTION_KEY")
 	_ = v.BindEnv("storage.s3.access_key", "USULNET_S3_ACCESS_KEY", "S3_ACCESS_KEY")
 	_ = v.BindEnv("storage.s3.secret_key", "USULNET_S3_SECRET_KEY", "S3_SECRET_KEY")
-	_ = v.BindEnv("caddy.admin_url", "USULNET_CADDY_ADMIN_URL")
-	_ = v.BindEnv("caddy.acme_email", "USULNET_CADDY_ACME_EMAIL")
 	// Backwards-compatible bindings for legacy HOST_TERMINAL_* env vars
 	_ = v.BindEnv("terminal.enabled", "USULNET_TERMINAL_ENABLED", "HOST_TERMINAL_ENABLED")
 	_ = v.BindEnv("terminal.user", "USULNET_TERMINAL_USER", "HOST_TERMINAL_USER")
@@ -344,6 +352,16 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	_ = v.BindEnv("guacd.port", "USULNET_GUACD_PORT", "GUACD_PORT")
 	// Docker socket path (for rootless Docker or custom socket locations)
 	_ = v.BindEnv("docker.socket", "USULNET_DOCKER_SOCKET", "DOCKER_SOCKET")
+	// Nginx container name (for Docker exec to run nginx -t / nginx -s reload)
+	_ = v.BindEnv("nginx.container_name", "USULNET_NGINX_CONTAINER_NAME", "NGINX_CONTAINER_NAME")
+	// Embedded DNS server
+	_ = v.BindEnv("dns.enabled", "USULNET_DNS_ENABLED", "DNS_ENABLED")
+	_ = v.BindEnv("dns.listen_addr", "USULNET_DNS_LISTEN_ADDR", "DNS_LISTEN_ADDR")
+	// DNS service discovery
+	_ = v.BindEnv("dns.service_discovery.enabled", "USULNET_DNS_SD_ENABLED", "DNS_SD_ENABLED")
+	_ = v.BindEnv("dns.service_discovery.domain", "USULNET_DNS_SD_DOMAIN", "DNS_SD_DOMAIN")
+	_ = v.BindEnv("dns.service_discovery.ttl", "USULNET_DNS_SD_TTL", "DNS_SD_TTL")
+	_ = v.BindEnv("dns.service_discovery.create_srv", "USULNET_DNS_SD_CREATE_SRV", "DNS_SD_CREATE_SRV")
 
 	// Set defaults
 	setDefaults(v)
@@ -367,7 +385,7 @@ func LoadConfig(cfgFile string) (*Config, error) {
 // setDefaults sets default configuration values
 func setDefaults(v *viper.Viper) {
 	// Mode
-	v.SetDefault("mode", "standalone")
+	v.SetDefault("mode", "master")
 
 	// Server
 	v.SetDefault("server.host", "0.0.0.0")
@@ -444,11 +462,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("trivy.ignore_unfixed", false)
 	v.SetDefault("trivy.update_db_on_start", true)
 
-	// Caddy reverse proxy (connect your existing Caddy instance via Settings)
-	v.SetDefault("caddy.admin_url", "")
-	v.SetDefault("caddy.acme_email", "")
-	v.SetDefault("caddy.listen_http", ":80")
-	v.SetDefault("caddy.listen_https", ":443")
+	// Nginx reverse proxy (always enabled when encryption key is available)
+	v.SetDefault("nginx.config_dir", "/etc/nginx/conf.d/usulnet")
+	v.SetDefault("nginx.cert_dir", "/etc/usulnet/certs")
+	v.SetDefault("nginx.acme_email", "")
+	v.SetDefault("nginx.acme_web_root", "/var/lib/usulnet/acme")
+	v.SetDefault("nginx.acme_account_dir", "/var/lib/usulnet/acme/account")
+	v.SetDefault("nginx.listen_http", ":80")
+	v.SetDefault("nginx.listen_https", ":443")
+	v.SetDefault("nginx.container_name", "usulnet-nginx")
 
 	// Logging
 	v.SetDefault("logging.level", "info")
@@ -484,6 +506,18 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("guacd.enabled", true)
 	v.SetDefault("guacd.host", "guacd")
 	v.SetDefault("guacd.port", 4822)
+
+	// Embedded DNS server (miekg/dns)
+	v.SetDefault("dns.enabled", true)
+	v.SetDefault("dns.listen_addr", ":53")
+	v.SetDefault("dns.forwarders", []string{"1.1.1.3", "1.0.0.3"})
+
+	// DNS service discovery (auto-register containers as DNS records)
+	v.SetDefault("dns.service_discovery.enabled", true)
+	v.SetDefault("dns.service_discovery.domain", "containers.local")
+	v.SetDefault("dns.service_discovery.ttl", 30)
+	v.SetDefault("dns.service_discovery.create_srv", true)
+	v.SetDefault("dns.service_discovery.include_stopped_cleanup", true)
 }
 
 // Validate validates the configuration.
@@ -492,23 +526,23 @@ func (c *Config) Validate() error {
 	var errs []error
 
 	// Mode validation
-	validModes := map[string]bool{"standalone": true, "master": true, "agent": true}
+	validModes := map[string]bool{"master": true, "agent": true}
 	if !validModes[c.Mode] {
-		errs = append(errs, fmt.Errorf("invalid mode: %s (must be standalone, master, or agent)", c.Mode))
+		errs = append(errs, fmt.Errorf("invalid mode: %s (must be master or agent)", c.Mode))
 	}
 
-	// Database URL required for master/standalone
+	// Database URL required for master
 	if c.Mode != "agent" && c.Database.URL == "" {
 		errs = append(errs, fmt.Errorf("database.url is required for %s mode", c.Mode))
 	}
 
-	// Redis URL required for master/standalone
+	// Redis URL required for master
 	if c.Mode != "agent" && c.Redis.URL == "" {
 		errs = append(errs, fmt.Errorf("redis.url is required for %s mode", c.Mode))
 	}
 
-	// NATS URL required for master/agent
-	if c.Mode != "standalone" && c.NATS.URL == "" {
+	// NATS URL required for all modes (master and agent both need NATS)
+	if c.NATS.URL == "" {
 		errs = append(errs, fmt.Errorf("nats.url is required for %s mode", c.Mode))
 	}
 
@@ -522,7 +556,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Security validation for master/standalone
+	// Security validation for master
 	if c.Mode != "agent" {
 		if c.Security.JWTSecret == "" {
 			// Auto-generate a JWT secret for first-run convenience.
@@ -757,9 +791,16 @@ func (c *Config) PrintMasked() {
 	fmt.Printf("Log Format: %s\n", c.Logging.Format)
 	fmt.Printf("Metrics Enabled: %v\n", c.Metrics.Enabled)
 	fmt.Printf("Trivy Enabled: %v\n", c.Trivy.Enabled)
-	fmt.Printf("Caddy Enabled: %v\n", c.Caddy.Enabled)
-	if c.Caddy.Enabled {
-		fmt.Printf("Caddy Admin URL: %s\n", c.Caddy.AdminURL)
+	fmt.Printf("Nginx Config Dir: %s\n", c.Nginx.ConfigDir)
+	if c.Nginx.ContainerName != "" {
+		fmt.Printf("Nginx Container: %s\n", c.Nginx.ContainerName)
+	}
+	if c.Nginx.ACMEEmail != "" {
+		fmt.Printf("Nginx ACME Email: %s\n", c.Nginx.ACMEEmail)
+	}
+	fmt.Printf("DNS Server Enabled: %v\n", c.DNS.Enabled)
+	if c.DNS.Enabled {
+		fmt.Printf("DNS Listen: %s\n", c.DNS.ListenAddr)
 	}
 }
 

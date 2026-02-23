@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// validStandaloneConfig returns a Config that passes all validation.
-func validStandaloneConfig() *Config {
+// validMasterConfig returns a Config that passes all validation.
+func validMasterConfig() *Config {
 	return &Config{
-		Mode: "standalone",
+		Mode: "master",
 		Server: ServerConfig{
 			Port:      8080,
 			HTTPSPort: 7443,
@@ -46,15 +46,15 @@ func validStandaloneConfig() *Config {
 	}
 }
 
-func TestConfig_Validate_ValidStandalone(t *testing.T) {
-	cfg := validStandaloneConfig()
+func TestConfig_Validate_ValidMaster(t *testing.T) {
+	cfg := validMasterConfig()
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("expected valid config, got: %v", err)
 	}
 }
 
 func TestConfig_Validate_InvalidMode(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Mode = "invalid"
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "invalid mode") {
@@ -63,7 +63,7 @@ func TestConfig_Validate_InvalidMode(t *testing.T) {
 }
 
 func TestConfig_Validate_MissingDatabaseURL(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Database.URL = ""
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "database.url is required") {
@@ -72,7 +72,7 @@ func TestConfig_Validate_MissingDatabaseURL(t *testing.T) {
 }
 
 func TestConfig_Validate_MissingRedisURL(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Redis.URL = ""
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "redis.url is required") {
@@ -81,7 +81,7 @@ func TestConfig_Validate_MissingRedisURL(t *testing.T) {
 }
 
 func TestConfig_Validate_MissingJWTSecret_AutoGenerates(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Security.JWTSecret = ""
 	err := cfg.Validate()
 	if err != nil {
@@ -93,7 +93,7 @@ func TestConfig_Validate_MissingJWTSecret_AutoGenerates(t *testing.T) {
 }
 
 func TestConfig_Validate_ShortJWTSecret(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Security.JWTSecret = "too-short"
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "at least 32 characters") {
@@ -102,7 +102,7 @@ func TestConfig_Validate_ShortJWTSecret(t *testing.T) {
 }
 
 func TestConfig_Validate_EncryptionKeyWrongLength(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Security.ConfigEncryptionKey = "tooshort"
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "64 hex characters") {
@@ -111,7 +111,7 @@ func TestConfig_Validate_EncryptionKeyWrongLength(t *testing.T) {
 }
 
 func TestConfig_Validate_EncryptionKeyValidLength(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Security.ConfigEncryptionKey = strings.Repeat("ab", 32) // 64 hex chars
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("expected valid config with 64-char encryption key, got: %v", err)
@@ -119,7 +119,7 @@ func TestConfig_Validate_EncryptionKeyValidLength(t *testing.T) {
 }
 
 func TestConfig_Validate_TLS_NoCertWhenAutoTLSDisabled(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Server.TLS.Enabled = true
 	cfg.Server.TLS.AutoTLS = false
 	err := cfg.Validate()
@@ -129,7 +129,7 @@ func TestConfig_Validate_TLS_NoCertWhenAutoTLSDisabled(t *testing.T) {
 }
 
 func TestConfig_Validate_TLS_AutoTLS_NoCertRequired(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Server.TLS.Enabled = true
 	cfg.Server.TLS.AutoTLS = true
 	if err := cfg.Validate(); err != nil {
@@ -138,7 +138,7 @@ func TestConfig_Validate_TLS_AutoTLS_NoCertRequired(t *testing.T) {
 }
 
 func TestConfig_Validate_NATS_TLS_NoCert(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.NATS.TLS.Enabled = true
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "nats.tls.cert_file") {
@@ -181,7 +181,7 @@ func TestConfig_Validate_AgentTLS_NoCert(t *testing.T) {
 }
 
 func TestConfig_Validate_LoggingFile_NoPath(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Logging.Output = "file"
 	cfg.Logging.File.Path = ""
 	err := cfg.Validate()
@@ -191,7 +191,7 @@ func TestConfig_Validate_LoggingFile_NoPath(t *testing.T) {
 }
 
 func TestConfig_Validate_TracingEnabled_NoEndpoint(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Observability.Tracing.Enabled = true
 	cfg.Observability.Tracing.SamplingRate = 0.1
 	err := cfg.Validate()
@@ -201,7 +201,7 @@ func TestConfig_Validate_TracingEnabled_NoEndpoint(t *testing.T) {
 }
 
 func TestConfig_Validate_SamplingRate_OutOfBounds(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Observability.Tracing.Enabled = true
 	cfg.Observability.Tracing.Endpoint = "localhost:4318"
 	cfg.Observability.Tracing.SamplingRate = 1.5
@@ -212,7 +212,7 @@ func TestConfig_Validate_SamplingRate_OutOfBounds(t *testing.T) {
 }
 
 func TestConfig_Validate_PortConflict(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Server.Port = 8080
 	cfg.Server.HTTPSPort = 8080
 	err := cfg.Validate()
@@ -222,7 +222,7 @@ func TestConfig_Validate_PortConflict(t *testing.T) {
 }
 
 func TestConfig_Validate_InvalidPort(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Server.Port = 99999
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "not a valid port") {
@@ -231,7 +231,7 @@ func TestConfig_Validate_InvalidPort(t *testing.T) {
 }
 
 func TestConfig_Validate_NegativeDuration(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Server.ReadTimeout = -1 * time.Second
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "non-negative") {
@@ -240,7 +240,7 @@ func TestConfig_Validate_NegativeDuration(t *testing.T) {
 }
 
 func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Logging.Level = "verbose"
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "logging.level") {
@@ -249,7 +249,7 @@ func TestConfig_Validate_InvalidLogLevel(t *testing.T) {
 }
 
 func TestConfig_Validate_RefreshLessThanJWT(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Security.JWTExpiry = 24 * time.Hour
 	cfg.Security.RefreshExpiry = 1 * time.Hour
 	err := cfg.Validate()
@@ -259,7 +259,7 @@ func TestConfig_Validate_RefreshLessThanJWT(t *testing.T) {
 }
 
 func TestConfig_Validate_IdleExceedsMax(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Database.MaxOpenConns = 10
 	cfg.Database.MaxIdleConns = 20
 	err := cfg.Validate()
@@ -269,7 +269,7 @@ func TestConfig_Validate_IdleExceedsMax(t *testing.T) {
 }
 
 func TestConfig_Validate_S3_MissingBucket(t *testing.T) {
-	cfg := validStandaloneConfig()
+	cfg := validMasterConfig()
 	cfg.Storage.Type = "s3"
 	cfg.Storage.S3.AccessKey = "key"
 	cfg.Storage.S3.SecretKey = "secret"
@@ -281,7 +281,7 @@ func TestConfig_Validate_S3_MissingBucket(t *testing.T) {
 
 func TestConfig_Validate_CollectsMultipleErrors(t *testing.T) {
 	cfg := &Config{
-		Mode: "standalone",
+		Mode: "master",
 		// Missing database.url, redis.url, jwt_secret
 	}
 	err := cfg.Validate()
@@ -300,8 +300,7 @@ func TestConfig_Validate_CollectsMultipleErrors(t *testing.T) {
 }
 
 func TestConfig_Validate_MasterMode_RequiresNATS(t *testing.T) {
-	cfg := validStandaloneConfig()
-	cfg.Mode = "master"
+	cfg := validMasterConfig()
 	cfg.NATS.URL = ""
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "nats.url is required") {

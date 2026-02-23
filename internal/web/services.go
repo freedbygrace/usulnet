@@ -14,7 +14,6 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/docker"
 	giteapkg "github.com/fr4nsys/usulnet/internal/integrations/gitea"
-	"github.com/fr4nsys/usulnet/internal/integrations/npm"
 	"github.com/fr4nsys/usulnet/internal/pkg/crypto"
 	"github.com/fr4nsys/usulnet/internal/repository/postgres"
 	"github.com/fr4nsys/usulnet/internal/scheduler"
@@ -27,8 +26,18 @@ import (
 	imagesvc "github.com/fr4nsys/usulnet/internal/services/image"
 	"github.com/fr4nsys/usulnet/internal/services/monitoring"
 	networksvc "github.com/fr4nsys/usulnet/internal/services/network"
+	dnssvc "github.com/fr4nsys/usulnet/internal/services/dns"
+	dnsdiscovery "github.com/fr4nsys/usulnet/internal/services/dns/discovery"
 	proxysvc "github.com/fr4nsys/usulnet/internal/services/proxy"
 	securitysvc "github.com/fr4nsys/usulnet/internal/services/security"
+	crontabsvc "github.com/fr4nsys/usulnet/internal/services/crontab"
+	backupverifysvc "github.com/fr4nsys/usulnet/internal/services/backupverify"
+	firewallsvc "github.com/fr4nsys/usulnet/internal/services/firewall"
+	imagebuildersvc "github.com/fr4nsys/usulnet/internal/services/imagebuilder"
+	rollbacksvc "github.com/fr4nsys/usulnet/internal/services/rollback"
+	sslobssvc "github.com/fr4nsys/usulnet/internal/services/sslobservatory"
+	wireguardsvc "github.com/fr4nsys/usulnet/internal/services/wireguard"
+	marketplacesvc "github.com/fr4nsys/usulnet/internal/services/marketplace"
 	sshsvc "github.com/fr4nsys/usulnet/internal/services/ssh"
 	stacksvc "github.com/fr4nsys/usulnet/internal/services/stack"
 	storagesvc "github.com/fr4nsys/usulnet/internal/services/storage"
@@ -54,14 +63,23 @@ type ServiceRegistry struct {
 	updateSvc    *updatesvc.Service
 	hostSvc      *hostsvc.Service
 	authSvc      *authsvc.Service
-	npmSvc       *npm.Service
 	proxySvc     *proxysvc.Service
-	storageSvc   *storagesvc.Service
+	dnsSvc          *dnssvc.Service
+	dnsDiscoverySvc *dnsdiscovery.Service
+	storageSvc      *storagesvc.Service
 	teamSvc      *teamsvc.Service
 	giteaSvc     *giteapkg.Service
 	gitSvc       *gitsvc.Service
 	sshSvc       *sshsvc.Service
-	metricsSvc   MetricsServiceFull
+	crontabSvc   *crontabsvc.Service
+	firewallSvc  *firewallsvc.Service
+	sslObsSvc        *sslobssvc.Service
+	backupVerifySvc  *backupverifysvc.Service
+	imageBuilderSvc  *imagebuildersvc.Service
+	rollbackSvc      *rollbacksvc.Service
+	wireguardSvc     *wireguardsvc.Service
+	marketplaceSvc   *marketplacesvc.Service
+	metricsSvc      MetricsServiceFull
 	alertSvc     *monitoring.AlertService
 	schedulerSvc *scheduler.Scheduler
 
@@ -85,7 +103,7 @@ type ServiceRegistry struct {
 	totpMaxAttempts  int
 	totpLockDuration time.Duration
 
-	// Default host ID for standalone mode
+	// Default host ID for the local Docker daemon
 	defaultHostID uuid.UUID
 }
 
@@ -104,14 +122,23 @@ type ServiceRegistryDeps struct {
 	UpdateService    *updatesvc.Service
 	HostService      *hostsvc.Service
 	AuthService      *authsvc.Service
-	NPMService       *npm.Service        // Optional: requires npm.enabled
-	ProxyService     *proxysvc.Service    // Optional: requires nginx.enabled or caddy.enabled
-	StorageService   *storagesvc.Service  // Optional: requires minio.enabled
+	ProxyService     *proxysvc.Service    // Optional: requires encryption key for cert storage
+	DNSService          *dnssvc.Service         // Optional: embedded DNS server
+	DNSDiscoveryService *dnsdiscovery.Service  // Optional: DNS service discovery
+	StorageService      *storagesvc.Service    // Optional: requires minio.enabled
 	TeamService      *teamsvc.Service
 	GiteaService     *giteapkg.Service    // Optional: requires Gitea integration
 	GitService       *gitsvc.Service      // Optional: requires Git integration
 	SSHService       *sshsvc.Service      // Optional: requires SSH service
-	MetricsService   MetricsServiceFull
+	CrontabService   *crontabsvc.Service  // Optional: crontab manager
+	FirewallService  *firewallsvc.Service // Optional: firewall manager
+	SSLObsService       *sslobssvc.Service          // Optional: SSL observatory
+	BackupVerifyService *backupverifysvc.Service   // Optional: backup verification
+	ImageBuilderService *imagebuildersvc.Service   // Optional: image builder
+	RollbackService     *rollbacksvc.Service       // Optional: automated rollback
+	WireGuardService    *wireguardsvc.Service      // Optional: WireGuard VPN
+	MarketplaceService  *marketplacesvc.Service    // Optional: container marketplace
+	MetricsService      MetricsServiceFull
 	AlertService     *monitoring.AlertService
 	SchedulerService *scheduler.Scheduler // Optional: set after scheduler init
 	UserRepository   *postgres.UserRepository
@@ -139,14 +166,23 @@ func NewServiceRegistry(deps ServiceRegistryDeps) *ServiceRegistry {
 		updateSvc:     deps.UpdateService,
 		hostSvc:       deps.HostService,
 		authSvc:       deps.AuthService,
-		npmSvc:        deps.NPMService,
 		proxySvc:      deps.ProxyService,
-		storageSvc:    deps.StorageService,
+		dnsSvc:          deps.DNSService,
+		dnsDiscoverySvc: deps.DNSDiscoveryService,
+		storageSvc:      deps.StorageService,
 		teamSvc:       deps.TeamService,
 		giteaSvc:      deps.GiteaService,
 		gitSvc:        deps.GitService,
 		sshSvc:        deps.SSHService,
-		metricsSvc:    deps.MetricsService,
+		crontabSvc:    deps.CrontabService,
+		firewallSvc:   deps.FirewallService,
+		sslObsSvc:        deps.SSLObsService,
+		backupVerifySvc:  deps.BackupVerifyService,
+		imageBuilderSvc:  deps.ImageBuilderService,
+		rollbackSvc:      deps.RollbackService,
+		wireguardSvc:     deps.WireGuardService,
+		marketplaceSvc:   deps.MarketplaceService,
+		metricsSvc:      deps.MetricsService,
 		alertSvc:      deps.AlertService,
 		schedulerSvc:  deps.SchedulerService,
 		userRepo:      deps.UserRepository,
@@ -221,12 +257,20 @@ func (r *ServiceRegistry) Events() EventService {
 }
 
 func (r *ServiceRegistry) Proxy() ProxyService {
-	// Prefer native proxy (nginx/Caddy backend) if configured
 	if r.proxySvc != nil {
-		return newCaddyProxyAdapter(r.proxySvc)
+		return newProxyServiceAdapter(r.proxySvc)
 	}
-	// Fallback to NPM adapter (external connection)
-	return &proxyAdapter{npmSvc: r.npmSvc, hostID: r.defaultHostID}
+	return nil
+}
+
+// DNS returns the DNS service, or nil if not configured.
+func (r *ServiceRegistry) DNS() *dnssvc.Service {
+	return r.dnsSvc
+}
+
+// DNSDiscovery returns the DNS service discovery service, or nil if not configured.
+func (r *ServiceRegistry) DNSDiscovery() *dnsdiscovery.Service {
+	return r.dnsDiscoverySvc
 }
 
 func (r *ServiceRegistry) Storage() StorageService {
@@ -295,6 +339,46 @@ func (r *ServiceRegistry) Metrics() MetricsServiceFull {
 // SSH returns the SSH service, or nil if not configured.
 func (r *ServiceRegistry) SSH() *sshsvc.Service {
 	return r.sshSvc
+}
+
+// Crontab returns the crontab service, or nil if not configured.
+func (r *ServiceRegistry) Crontab() *crontabsvc.Service {
+	return r.crontabSvc
+}
+
+// Firewall returns the firewall service, or nil if not configured.
+func (r *ServiceRegistry) Firewall() *firewallsvc.Service {
+	return r.firewallSvc
+}
+
+// SSLObservatory returns the SSL observatory service, or nil if not configured.
+func (r *ServiceRegistry) SSLObservatory() *sslobssvc.Service {
+	return r.sslObsSvc
+}
+
+// BackupVerify returns the backup verification service, or nil if not configured.
+func (r *ServiceRegistry) BackupVerify() *backupverifysvc.Service {
+	return r.backupVerifySvc
+}
+
+// ImageBuilder returns the image builder service, or nil if not configured.
+func (r *ServiceRegistry) ImageBuilder() *imagebuildersvc.Service {
+	return r.imageBuilderSvc
+}
+
+// Rollback returns the rollback service, or nil if not configured.
+func (r *ServiceRegistry) Rollback() *rollbacksvc.Service {
+	return r.rollbackSvc
+}
+
+// WireGuard returns the WireGuard VPN service, or nil if not configured.
+func (r *ServiceRegistry) WireGuard() *wireguardsvc.Service {
+	return r.wireguardSvc
+}
+
+// Marketplace returns the marketplace service, or nil if not configured.
+func (r *ServiceRegistry) Marketplace() *marketplacesvc.Service {
+	return r.marketplaceSvc
 }
 
 // Alerts returns the alert monitoring service, or nil if not configured.

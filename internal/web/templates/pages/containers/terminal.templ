@@ -1,6 +1,7 @@
 package containers
 
 import (
+	"github.com/fr4nsys/usulnet/internal/web/templates/components"
 	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
 )
 
@@ -30,7 +31,10 @@ templ ContainerTerminal(data ContainerTerminalData) {
 					<i class="fas fa-terminal text-lg text-primary-400"></i>
 				</div>
 				<div>
-					<h1 class="text-2xl font-bold font-display text-white">Terminal</h1>
+					<div class="flex items-center gap-3">
+						<h1 class="text-2xl font-bold font-display text-white">Terminal</h1>
+						@components.HostBadge(data.PageData.ActiveHostName)
+					</div>
 					<p class="text-gray-400 text-sm">{ data.Name }</p>
 				</div>
 			</div>

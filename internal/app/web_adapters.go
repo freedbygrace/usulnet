@@ -20,6 +20,7 @@ import (
 	metricssvc "github.com/fr4nsys/usulnet/internal/services/metrics"
 	"github.com/fr4nsys/usulnet/internal/services/notification"
 	"github.com/fr4nsys/usulnet/internal/services/notification/channels"
+	nginxbackend "github.com/fr4nsys/usulnet/internal/services/proxy/nginx"
 	"github.com/fr4nsys/usulnet/internal/web"
 	"github.com/fr4nsys/usulnet/internal/web/templates/pages/profile"
 )
@@ -288,7 +289,7 @@ func (a *roleProviderAdapter) GetByID(ctx context.Context, id string) (*models.R
 
 type alertMetricsProviderAdapter struct {
 	metrics *metricssvc.Service
-	hostID  uuid.UUID // standalone mode host
+	hostID  uuid.UUID // local host
 }
 
 func (a *alertMetricsProviderAdapter) GetHostMetric(ctx context.Context, hostID uuid.UUID, metric models.AlertMetric) (float64, error) {
@@ -454,4 +455,26 @@ func (a *complianceDockerAdapter) ListRunningContainers(ctx context.Context) ([]
 
 func (a *complianceDockerAdapter) InspectContainer(ctx context.Context, id string) (dockertypes.ContainerJSON, error) {
 	return a.client.ContainerInspectRaw(ctx, id)
+}
+
+// ============================================================================
+// Nginx Docker exec adapter (docker.Client → nginx.DockerExecer)
+// ============================================================================
+
+type nginxDockerExecAdapter struct {
+	client *dockerpkg.Client
+}
+
+func (a *nginxDockerExecAdapter) ContainerExec(ctx context.Context, containerID string, cmd []string, opts nginxbackend.DockerExecOpts) (*nginxbackend.DockerExecResult, error) {
+	result, err := a.client.ContainerExec(ctx, containerID, cmd, dockerpkg.ExecOptions{
+		User: opts.User,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &nginxbackend.DockerExecResult{
+		ExitCode: result.ExitCode,
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+	}, nil
 }

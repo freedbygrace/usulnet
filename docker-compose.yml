@@ -57,6 +57,10 @@ services:
       - usulnet_data:/app/data
       # Trivy vulnerability scanner cache
       - trivy_cache:/var/lib/usulnet/trivy
+      # Shared volumes for nginx reverse proxy management
+      - nginx_conf:/etc/nginx/conf.d/usulnet
+      - nginx_certs:/etc/usulnet/certs
+      - acme_webroot:/var/lib/usulnet/acme
     # Host terminal support (nsenter into host PID namespace)
     pid: "host"
     cap_add:
@@ -64,16 +68,16 @@ services:
       - SYS_ADMIN      # For nsenter into host namespaces
     environment:
       # --- Operation mode ---
-      # standalone: Single host, all services local
-      # master: Multi-host mode, accepts agent connections
-      - USULNET_MODE=${USULNET_MODE:-standalone}
+      # master: Full usulnet server (default), accepts agent connections
+      # agent: Lightweight node connecting to a master
+      - USULNET_MODE=${USULNET_MODE:-master}
 
       # --- Infrastructure connections ---
       # sslmode=require: encrypted connection, no CA cert verification (self-signed default).
       # Override to verify-full if you mount your own CA cert.
       - USULNET_DATABASE_URL=postgres://${DB_USER:-usulnet}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-usulnet}?sslmode=require
       - USULNET_REDIS_URL=rediss://redis:6379
-      - USULNET_NATS_URL=nats://nats:4222
+      - USULNET_NATS_URL=natss://nats:4222
 
       # --- Security (MUST be changed in production) ---
       - USULNET_JWT_SECRET=${JWT_SECRET}
@@ -131,7 +135,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - agent_data:/app/data
     environment:
-      - USULNET_GATEWAY_URL=nats://nats:4222
+      - USULNET_GATEWAY_URL=natss://nats:4222
       - USULNET_AGENT_TOKEN=${AGENT_TOKEN:-change-me}
     depends_on:
       nats:
@@ -158,10 +162,48 @@ services:
       - usulnet-backend
 
   # ---------------------------------------------------------------------------
+  # Nginx — Reverse Proxy (managed by usulnet)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.28-alpine
+    container_name: usulnet-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - nginx_conf:/etc/nginx/conf.d/usulnet
+      - nginx_certs:/etc/usulnet/certs
+      - acme_webroot:/var/lib/usulnet/acme
+    depends_on:
+      usulnet:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+        reservations:
+          memory: 32M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - usulnet-frontend
+
+  # ---------------------------------------------------------------------------
   # Apache Guacamole Daemon — RDP/VNC Web Gateway
   # ---------------------------------------------------------------------------
   guacd:
-    image: guacamole/guacd:1.5.5
+    image: guacamole/guacd:1.6.0
     container_name: usulnet-guacd
     restart: unless-stopped
     healthcheck:
@@ -209,6 +251,7 @@ services:
           openssl req -new -x509 -days 3650 -nodes \
             -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
             -subj "/CN=postgres/O=usulnet" \
+            -addext "subjectAltName=DNS:postgres,DNS:localhost,IP:127.0.0.1" \
             -keyout /tmp/pg-certs/server.key \
             -out /tmp/pg-certs/server.crt 2>/dev/null
         else
@@ -286,6 +329,7 @@ services:
           openssl req -new -x509 -days 3650 -nodes \
             -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
             -subj "/CN=redis/O=usulnet" \
+            -addext "subjectAltName=DNS:redis,DNS:localhost,IP:127.0.0.1" \
             -keyout /tmp/redis-certs/server.key \
             -out /tmp/redis-certs/server.crt 2>/dev/null
         else
@@ -331,7 +375,7 @@ services:
       - usulnet-backend
 
   # ---------------------------------------------------------------------------
-  # NATS 2.12 — Messaging & Agent Communication (JetStream)
+  # NATS 2.12 — Messaging & Agent Communication (JetStream, TLS)
   # ---------------------------------------------------------------------------
   nats:
     image: nats:2.12-alpine
@@ -347,6 +391,7 @@ services:
     volumes:
       - nats_data:/data
       - ./deploy/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - ${NATS_CERTS_DIR:-./certs}:/certs:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
       interval: 10s
@@ -384,6 +429,12 @@ volumes:
     name: usulnet_nats_data
   agent_data:
     name: usulnet_agent_data
+  nginx_conf:
+    name: usulnet_nginx_conf
+  nginx_certs:
+    name: usulnet_nginx_certs
+  acme_webroot:
+    name: usulnet_acme_webroot
 
 # =============================================================================
 # Networks — Isolated backend and frontend

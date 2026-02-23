@@ -105,7 +105,7 @@ func (app *Application) ensureDatabaseBackupScheduledJob(ctx context.Context, sc
 // worker even after a previous Docker failure marked it offline.
 func (app *Application) bootstrapLocalHost(ctx context.Context, hostID uuid.UUID) error {
 	// The hosts table has UNIQUE(id) as PK and UNIQUE(name). If a previous version of
-	// the app used a different standaloneHostID, a row with name='local' and a different
+	// the app used a different localHostID, a row with name='local' and a different
 	// id may already exist. The CTE removes any such stale row before the insert so that
 	// both unique constraints are always satisfied.
 	_, err := app.DB.Exec(ctx, `

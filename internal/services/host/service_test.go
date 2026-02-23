@@ -21,8 +21,8 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-func newStandaloneService() *Service {
-	return NewStandaloneService(DefaultConfig(), logger.Nop())
+func newLocalService() *Service {
+	return NewLocalService(DefaultConfig(), logger.Nop())
 }
 
 func strPtr(s string) *string { return &s }
@@ -52,11 +52,11 @@ func TestDefaultConfig(t *testing.T) {
 // Tests: Constructor
 // ---------------------------------------------------------------------------
 
-func TestNewStandaloneService(t *testing.T) {
-	svc := newStandaloneService()
+func TestNewLocalService(t *testing.T) {
+	svc := newLocalService()
 
 	if svc.repo != nil {
-		t.Error("expected nil repo in standalone mode")
+		t.Error("expected nil repo in local mode")
 	}
 	if svc.clientPool == nil {
 		t.Error("expected non-nil clientPool")
@@ -67,7 +67,7 @@ func TestNewStandaloneService(t *testing.T) {
 }
 
 func TestNewService_NilLogger(t *testing.T) {
-	svc := NewStandaloneService(DefaultConfig(), nil)
+	svc := NewLocalService(DefaultConfig(), nil)
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
@@ -75,11 +75,11 @@ func TestNewService_NilLogger(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: GetStats (standalone / nil repo path)
+// Tests: GetStats (local / nil repo path)
 // ---------------------------------------------------------------------------
 
-func TestGetStats_StandaloneReturnsEmpty(t *testing.T) {
-	svc := newStandaloneService()
+func TestGetStats_LocalReturnsEmpty(t *testing.T) {
+	svc := newLocalService()
 
 	stats, err := svc.GetStats(context.Background())
 	if err != nil {
@@ -91,11 +91,11 @@ func TestGetStats_StandaloneReturnsEmpty(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: List (standalone / nil repo path)
+// Tests: List (local / nil repo path)
 // ---------------------------------------------------------------------------
 
-func TestList_StandaloneReturnsEmpty(t *testing.T) {
-	svc := newStandaloneService()
+func TestList_LocalReturnsEmpty(t *testing.T) {
+	svc := newLocalService()
 
 	hosts, total, err := svc.List(context.Background(), postgres.HostListOptions{})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestList_StandaloneReturnsEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetOnlineHosts_Empty(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 
 	hosts := svc.GetOnlineHosts()
 	if len(hosts) != 0 {
@@ -127,7 +127,7 @@ func TestGetOnlineHosts_Empty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetClientPool_NotNil(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	pool := svc.GetClientPool()
 	if pool == nil {
 		t.Fatal("expected non-nil client pool")
@@ -139,7 +139,7 @@ func TestGetClientPool_NotNil(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsOnline_EmptyPool(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 
 	online := svc.IsOnline(context.Background(), uuid.New())
 	if online {
@@ -152,7 +152,7 @@ func TestIsOnline_EmptyPool(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestStartStop_StandaloneNoop(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -300,7 +300,7 @@ func TestDockerInfoToModel_EmptySlices(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildClientOptions_Local(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	host := &models.Host{
 		EndpointType: models.EndpointLocal,
 	}
@@ -318,7 +318,7 @@ func TestBuildClientOptions_Local(t *testing.T) {
 }
 
 func TestBuildClientOptions_Socket_Default(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	host := &models.Host{
 		EndpointType: models.EndpointSocket,
 		EndpointURL:  nil,
@@ -334,7 +334,7 @@ func TestBuildClientOptions_Socket_Default(t *testing.T) {
 }
 
 func TestBuildClientOptions_Socket_Custom(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	host := &models.Host{
 		EndpointType: models.EndpointSocket,
 		EndpointURL:  strPtr("unix:///custom/docker.sock"),
@@ -350,7 +350,7 @@ func TestBuildClientOptions_Socket_Custom(t *testing.T) {
 }
 
 func TestBuildClientOptions_TCP_NoURL(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	host := &models.Host{
 		EndpointType: models.EndpointTCP,
 		EndpointURL:  nil,
@@ -363,7 +363,7 @@ func TestBuildClientOptions_TCP_NoURL(t *testing.T) {
 }
 
 func TestBuildClientOptions_TCP_WithURL(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	host := &models.Host{
 		EndpointType: models.EndpointTCP,
 		EndpointURL:  strPtr("tcp://10.0.0.5:2376"),
@@ -379,7 +379,7 @@ func TestBuildClientOptions_TCP_WithURL(t *testing.T) {
 }
 
 func TestBuildClientOptions_Agent_ReturnsError(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	host := &models.Host{
 		Name:         "remote-agent",
 		EndpointType: models.EndpointAgent,
@@ -392,7 +392,7 @@ func TestBuildClientOptions_Agent_ReturnsError(t *testing.T) {
 }
 
 func TestBuildClientOptions_TLS_NoEncryptor(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	host := &models.Host{
 		EndpointType: models.EndpointLocal,
 		TLSEnabled:   true,
@@ -414,17 +414,17 @@ func TestBuildClientOptions_TLS_NoEncryptor(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSetLimitProvider(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	// Should not panic with nil
 	svc.SetLimitProvider(nil)
 }
 
 func TestSetCommandSender(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	svc.SetCommandSender(nil)
 }
 
 func TestSetRepository(t *testing.T) {
-	svc := newStandaloneService()
+	svc := newLocalService()
 	svc.SetRepository(nil)
 }

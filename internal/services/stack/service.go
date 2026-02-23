@@ -21,6 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/fr4nsys/usulnet/internal/docker"
+	"github.com/fr4nsys/usulnet/internal/gateway/protocol"
 	"github.com/fr4nsys/usulnet/internal/models"
 	apperrors "github.com/fr4nsys/usulnet/internal/pkg/errors"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
@@ -57,11 +58,18 @@ type Service struct {
 	repo             StackRepository
 	hostService      HostService
 	containerService ContainerService
+	gatewaySender    GatewayCommandSender
 	config           ServiceConfig
 	logger           *logger.Logger
 
 	// deployMu prevents concurrent deploys of the same stack
 	deployMu sync.Map
+}
+
+// SetGatewayCommandSender sets the gateway command sender for routing stack
+// operations to agent hosts via NATS.
+func (s *Service) SetGatewayCommandSender(sender GatewayCommandSender) {
+	s.gatewaySender = sender
 }
 
 // NewService creates a new stack service.
@@ -293,6 +301,12 @@ func (s *Service) Deploy(ctx context.Context, id uuid.UUID) (*DeployResult, erro
 		return nil, fmt.Errorf("get stack for deploy: %w", err)
 	}
 
+	// Check if host is an agent — route through gateway
+	host, hostErr := s.hostService.Get(ctx, stack.HostID)
+	if hostErr == nil && host.EndpointType == models.EndpointAgent {
+		return s.deployViaGateway(ctx, stack, host)
+	}
+
 	// Update status
 	s.repo.UpdateStatus(ctx, id, models.StackStatusUnknown)
 
@@ -315,7 +329,6 @@ func (s *Service) Deploy(ctx context.Context, id uuid.UUID) (*DeployResult, erro
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
-		// FIX: Removed unused msg variable - error is already captured in result.Error
 		s.repo.UpdateStatus(ctx, id, models.StackStatusError)
 		s.logger.Error("stack deploy failed",
 			"id", id,
@@ -337,6 +350,127 @@ func (s *Service) Deploy(ctx context.Context, id uuid.UUID) (*DeployResult, erro
 	)
 
 	return result, nil
+}
+
+// deployViaGateway deploys a stack on an agent host by sending the compose file
+// through the NATS gateway to the remote agent.
+func (s *Service) deployViaGateway(ctx context.Context, stack *models.Stack, host *models.Host) (*DeployResult, error) {
+	result := &DeployResult{
+		StackID:   stack.ID,
+		StartedAt: time.Now().UTC(),
+	}
+
+	if s.gatewaySender == nil {
+		result.Success = false
+		result.Error = "gateway not available for agent stack deployment"
+		result.FinishedAt = time.Now().UTC()
+		s.repo.UpdateStatus(ctx, stack.ID, models.StackStatusError)
+		return result, nil
+	}
+
+	// Read compose file content
+	composeContent, err := s.readStackComposeFile(stack)
+	if err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("read compose file: %v", err)
+		result.FinishedAt = time.Now().UTC()
+		s.repo.UpdateStatus(ctx, stack.ID, models.StackStatusError)
+		return result, nil
+	}
+
+	// Read env vars
+	envVars := s.readStackEnvVars(stack)
+
+	s.repo.UpdateStatus(ctx, stack.ID, models.StackStatusUnknown)
+
+	// Build and send command to agent
+	cmd := &protocol.Command{
+		ID:   uuid.New().String(),
+		Type: protocol.CmdStackDeploy,
+		Params: protocol.CommandParams{
+			StackName:   stack.Name,
+			ComposeFile: composeContent,
+			EnvVars:     envVars,
+		},
+		Timeout: s.config.DefaultTimeout,
+	}
+
+	cmdResult, err := s.gatewaySender.SendCommand(ctx, stack.HostID, cmd)
+	result.FinishedAt = time.Now().UTC()
+
+	if err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("gateway deploy: %v", err)
+		s.repo.UpdateStatus(ctx, stack.ID, models.StackStatusError)
+		s.logger.Error("stack deploy via gateway failed",
+			"id", stack.ID,
+			"name", stack.Name,
+			"host", host.Name,
+			"error", err,
+		)
+		return result, nil
+	}
+
+	if cmdResult.Status != protocol.CommandStatusCompleted {
+		result.Success = false
+		if cmdResult.Error != nil {
+			result.Error = cmdResult.Error.Message
+		} else {
+			result.Error = "deployment failed on agent"
+		}
+		s.repo.UpdateStatus(ctx, stack.ID, models.StackStatusError)
+		return result, nil
+	}
+
+	result.Success = true
+	s.repo.UpdateStatus(ctx, stack.ID, models.StackStatusActive)
+
+	s.logger.Info("stack deployed via gateway",
+		"id", stack.ID,
+		"name", stack.Name,
+		"host", host.Name,
+	)
+
+	return result, nil
+}
+
+// readStackComposeFile reads the compose file content for a stack.
+func (s *Service) readStackComposeFile(stack *models.Stack) (string, error) {
+	stackDir := s.stackDir(stack.ID)
+	composePath := filepath.Join(stackDir, "docker-compose.yml")
+	data, err := os.ReadFile(composePath)
+	if err != nil {
+		// Try alternative names
+		for _, name := range []string{"docker-compose.yaml", "compose.yml", "compose.yaml"} {
+			data, err = os.ReadFile(filepath.Join(stackDir, name))
+			if err == nil {
+				return string(data), nil
+			}
+		}
+		return "", fmt.Errorf("read compose file: %w", err)
+	}
+	return string(data), nil
+}
+
+// readStackEnvVars reads the .env file for a stack and returns key-value pairs.
+func (s *Service) readStackEnvVars(stack *models.Stack) map[string]string {
+	envPath := filepath.Join(s.stackDir(stack.ID), ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return nil
+	}
+	envVars := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			envVars[parts[0]] = parts[1]
+		}
+	}
+	return envVars
 }
 
 // Stop stops a stack.
